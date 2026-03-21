@@ -1,4 +1,4 @@
-# Spotify Replica
+# Adjacent Music Player
 
 Full-stack Spotify-style music app built with:
 
