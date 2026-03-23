@@ -4,8 +4,8 @@ from app.services.scanner import scan_directory
 
 def main():
     print("Starting scan...")
-    scan_directory(settings.music_library_path, limit=20)
-    print("Done.")
+    result = scan_directory(settings.music_library_path, limit=20)
+    print(f"Done. Added {result['added']} tracks.")
 
 
 if __name__ == "__main__":
