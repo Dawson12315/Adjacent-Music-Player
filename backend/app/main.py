@@ -4,6 +4,7 @@ from app.config import settings
 from app.db import Base, engine
 from app.routes.health import router as health_router
 from app.routes.tracks import router as tracks_router
+from app.routes.scan import router as scan_router
 from app import models
 
 app = FastAPI(
@@ -19,3 +20,4 @@ def on_startup():
 
 app.include_router(health_router, prefix="/api")
 app.include_router(tracks_router, prefix="/api")
+app.include_router(scan_router, prefix="/api")
