@@ -1,4 +1,5 @@
 from pathlib import Path
+import mimetypes
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy import func
@@ -37,8 +38,12 @@ def stream_track(track_id: int, db: Session = Depends(get_db)):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     
+    media_type, _ = mimetypes.guess_type(str(file_path))
+    if media_type is None:
+        media_type = "application/octet-stream"
+
     return FileResponse(
         path=file_path,
-        media_type="audio/mpeg",
+        media_type=media_type,
         filename=file_path.name,
     )
