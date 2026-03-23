@@ -6,7 +6,7 @@ from app.services.metadata import extract_track_metadata
 from app.utils.files import is_supported_audio_file
 
 
-def scan_directory(base_path: str, limit: int = 20):
+def scan_directory(base_path: str, limit: int = 20) -> dict:
     base = Path(base_path)
 
     if not base.exists():
@@ -49,6 +49,7 @@ def scan_directory(base_path: str, limit: int = 20):
                 break
 
         print(f"Scan complete. Added {count} tracks.")
+        return {"added": count}
 
     finally:
         db.close()
