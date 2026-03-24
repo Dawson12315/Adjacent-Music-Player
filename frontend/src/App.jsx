@@ -8,6 +8,7 @@ function App() {
   const [error, setError] = useState("");
   const [selectedTrack, setSelectedTrack] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [activeView, setActiveView] = useState("tracks");
 
   const audioRef = useRef(null);
   
@@ -64,6 +65,7 @@ function App() {
 
   function handleTrackClick(track){
     setSelectedTrack(track);
+    setActiveView("tracks");
   }
 
   function handlePlayPause() {
@@ -79,15 +81,115 @@ function App() {
     }
   }
 
+  function renderMainContent() {
+    if (loading) {
+      return <div className="state-message">Loading tracks...</div>
+    }
+    if (error) {
+      return <div className="state-message">{error}</div>
+    }
+
+    if (activeView === "artists") {
+      return (
+        <div className="simple-list">
+          {artists.map((artist) => (
+            <div key={artist} className="simple-list__row">
+              {artist}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    
+    if (activeView === "albums") {
+      return (
+        <div className="simple-list">
+          {albums.map((album) => (
+            <div key={album} className="simple-list__row">
+              {album}
+            </div>
+          ))}
+        </div>
+      )
+    }
+    if (tracks.length === 0) {
+      return <div className="state-message">No tracks indexed yet.</div>
+    }
+
+    return (
+      <div className="track-list">
+        {tracks.map((track) => (
+          <button
+          key={track.id}
+          className={`track-row ${
+            selectedTrack?.id === track.id ? "track-row--active" : ""
+          }`}
+          onClick={() => handleTrackClick(track)}
+          type="button"
+        >
+          <div className="track-row__title">{track.title}</div>
+          <div className="track-row__meta">
+            {track.artist || "Unknown Artist"} •{" "}
+            {track.album || "Unknown Album"}
+          </div>
+        </button>
+        ))}
+      </div>
+    )
+  }
+
+  function getHeaderTitle() {
+    if (activeView === "artists") {
+      return "Artists";
+    }
+
+    if (activeView === "albums") {
+      return "Albums";
+    }
+
+    return "Your Music";
+  }
+
+  function getHeaderSubtitle() {
+    if (loading || error) {
+      return "";
+    }
+    if (activeView === "artists") {
+      return `${artists.length} artists`;
+    }
+    if (activeView === "albums") {
+      return `${albums.length} albums`
+    }
+
+    return `${tracks.length} tracks`;
+  }
   return (
     <div className="app-layout">
       <aside className="sidebar">
         <div className="sidebar__brand">Adjacent</div>
 
         <nav className="sidebar__nav">
-          <button className="sidebar__link" type="button">Home</button>
-          <button className="sidebar__link" type="button">Search</button>
-          <button className="sidebar__link" type="button">Library</button>
+          <button 
+            className={`sidebar__link ${activeView === "tracks" ? "sidebar__link--active" : ""}`}
+            onClick={() => setActiveView("tracks")}
+            type="button"
+          >
+            Tracks
+          </button>
+          <button 
+            className={`sidebar__link ${activeView === "artists" ? "sidebar__link--active" : ""}`}
+            onClick={() => setActiveView("artists")}
+            type="button"
+          >
+            Artists
+          </button>
+          <button 
+            className={`sidebar__link ${activeView === "albums" ? "sidebar__link--active" : ""}`}
+            onClick={() => setActiveView("albums")}
+            type="button"
+          >
+            Albums
+          </button>
         </nav>
 
         <div className="sidebar__section">
@@ -100,42 +202,13 @@ function App() {
 
       <main className="main-content">
         <header className="main-content__header">
-          <h1>Your Music</h1>
-          {!loading && !error && tracks.length > 0 && (
-            <p className="main-content__subhead">{tracks.length} tracks</p>
+          <h1>{getHeaderTitle()}</h1>
+          {!loading && !error && (
+            <p className="main-content__subhead">{getHeaderSubtitle()}</p>
           )}
         </header>
 
-        <section className="main-content__body">
-          {loading && <div className="state-message">Loading tracks...</div>}
-
-          {!loading && error && <div className="state-message">{error}</div>}
-
-          {!loading && !error && tracks.length === 0 && (
-            <div className="state-message">No tracks indexed yet.</div>
-          )}
-
-          {!loading && !error && tracks.length > 0 && (
-            <div className="track-list">
-              {tracks.map((track) => (
-                <button
-                  key={track.id}
-                  className={`track-row ${
-                    selectedTrack?.id === track.id ? "track-row--active" : ""
-                  }`}
-                  onClick={() => handleTrackClick(track)}
-                  type="button"
-                >
-                  <div className="track-row__title">{track.title}</div>
-                  <div className="track-row__meta">
-                    {track.artist || "Unknown Artist"} •{" "}
-                    {track.album || "Unknown Album"}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
+        <section className="main-content__body">{renderMainContent()}</section>
       </main>
 
       <footer className="player-bar">
