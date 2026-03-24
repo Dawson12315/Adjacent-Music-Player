@@ -10,6 +10,7 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeView, setActiveView] = useState("tracks");
   const [selectedArtist, setSelectedArtist] = useState(null);
+  const [selectedAlbum, setSelectedAlbum] = useState(null);
 
   const audioRef = useRef(null);
   
@@ -72,9 +73,15 @@ function App() {
     setSelectedArtist(artist);
     setActiveView("tracks")
   }
-  function handleShowAllTracks() {
-    setSelectedArtist(null);
+  function handleAlbumClick(album) {
+    setSelectedAlbum(album)
+    setSelectedArtist(null)
     setActiveView("tracks")
+  }
+  function handleClearFilters() {
+    setSelectedArtist(null);
+    setSelectedAlbum(null)
+    setActiveView("tracks");
   }
 
   function handlePlayPause() {
@@ -90,9 +97,15 @@ function App() {
     }
   }
 
-  const visibleTracks = selectedArtist
-    ? tracks.filter((track) => track.artist === selectedArtist)
-    : tracks;
+  const visibleTracks = tracks.filter((track) => {
+    if (selectedArtist) {
+      return track.artist === selectedArtist
+    }
+    if (selectedAlbum) {
+      return track.album === selectedAlbum
+    }
+    return true
+  })
 
   function renderMainContent() {
     if (loading) {
@@ -123,9 +136,14 @@ function App() {
       return (
         <div className="simple-list">
           {albums.map((album) => (
-            <div key={album} className="simple-list__row">
+            <button
+              key = {album}
+              className= "simple-list__row simple-list__row--button"
+              onClick={() => handleAlbumClick(album)}
+              type="button"
+            >
               {album}
-            </div>
+            </button>
           ))}
         </div>
       )
@@ -137,11 +155,15 @@ function App() {
     return (
       <div className="track-list">
         {selectedArtist && (
-          <button className="filter-pill" onClick={handleShowAllTracks} type="button">
+          <button className="filter-pill" onClick={handleClearFilters} type="button">
             Showing: {selectedArtist} ×
           </button>
         )}
-
+        {selectedAlbum && (
+          <button className="filter-pill" onClick={handleClearFilters} type= "button">
+            Showing album: {selectedAlbum}
+          </button>
+        )}
         {visibleTracks.map((track) => (
           <button
             key={track.id}
@@ -171,7 +193,15 @@ function App() {
       return "Albums";
     }
 
-    return selectedArtist ? selectedArtist : "Your Music";
+    if (selectedArtist) {
+      return selectedArtist
+    }
+
+    if (selectedAlbum) {
+      return selectedAlbum
+    }
+
+    return "Your Music"
   }
 
   function getHeaderSubtitle() {
@@ -195,10 +225,7 @@ function App() {
         <nav className="sidebar__nav">
           <button 
             className={`sidebar__link ${activeView === "tracks" ? "sidebar__link--active" : ""}`}
-            onClick={() => {
-              setActiveView("tracks")
-              setSelectedArtist(null)
-            }}
+            onClick={() => handleClearFilters()}
             type="button"
           >
             Tracks
