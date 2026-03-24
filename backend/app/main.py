@@ -7,6 +7,7 @@ from app.routes.health import router as health_router
 from app.routes.tracks import router as tracks_router
 from app.routes.scan import router as scan_router
 from app.routes.artists import router as artists_router
+from app.routes.albums import router as albums_router
 from app import models
 
 app = FastAPI(
@@ -32,3 +33,4 @@ app.include_router(health_router, prefix="/api")
 app.include_router(tracks_router, prefix="/api")
 app.include_router(scan_router, prefix="/api")
 app.include_router(artists_router, prefix="/api")
+app.include_router(albums_router, prefix="/api")
