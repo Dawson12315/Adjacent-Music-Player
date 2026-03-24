@@ -82,6 +82,9 @@ function App() {
       <main className="main-content">
         <header className="main-content__header">
           <h1>Your Music</h1>
+          {!loading && !error && tracks.length > 0 && (
+            <p className="main-content__subhead">{tracks.length} tracks</p>
+          )}
         </header>
 
         <section className="main-content__body">
