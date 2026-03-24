@@ -85,6 +85,13 @@ button {
   font-size: 2rem;
 }
 
+.main-content__subhead {
+  margin: 0;
+  color: #b3b3b3;
+  font-size: 0.95rem;
+  padding-bottom: 10px
+}
+
 .player-bar {
   grid-row: 2 / 3;
   grid-column: 1 / 3;
