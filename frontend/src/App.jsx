@@ -85,10 +85,15 @@ function App() {
         </header>
 
         <section className="main-content__body">
-          {loading && <p>Loading tracks...</p>}
-          {error && <p>{error}</p>}
+          {loading && <div className="state-message">Loading tracks...</div>}
 
-          {!loading && !error && (
+          {!loading && error && <div className="state-message">{error}</div>}
+
+          {!loading && !error && tracks.length === 0 && (
+            <div className="state-message">No tracks indexed yet.</div>
+          )}
+
+          {!loading && !error && tracks.length > 0 && (
             <div className="track-list">
               {tracks.map((track) => (
                 <button
@@ -132,9 +137,7 @@ function App() {
         </div>
 
         <audio
-        ref={audioRef}
-        onEnded={() => setIsPlaying(false)}
-        />
+        ref={audioRef} onEnded={() => setIsPlaying(false)} />
       </footer>
     </div>
   );
