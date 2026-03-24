@@ -15,4 +15,9 @@ Full-stack Spotify-style music app built with:
 - MUSIC_LIBRARY_PATH
 
 ## Current Development Status:
-Phase 1 – Basic Player (in progress)
+Phase 2 – Library (in progress)
+
+Introduce:
+- Artists
+- Albums
+- Grouped Browsing
