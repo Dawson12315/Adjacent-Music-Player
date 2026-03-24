@@ -9,6 +9,7 @@ function App() {
   const [selectedTrack, setSelectedTrack] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeView, setActiveView] = useState("tracks");
+  const [selectedArtist, setSelectedArtist] = useState(null);
 
   const audioRef = useRef(null);
   
@@ -67,6 +68,14 @@ function App() {
     setSelectedTrack(track);
     setActiveView("tracks");
   }
+  function handleArtistClick(artist) {
+    setSelectedArtist(artist);
+    setActiveView("tracks")
+  }
+  function handleShowAllTracks() {
+    setSelectedArtist(null);
+    setActiveView("tracks")
+  }
 
   function handlePlayPause() {
     if (!audioRef.current || !selectedTrack) {
@@ -81,6 +90,10 @@ function App() {
     }
   }
 
+  const visibleTracks = selectedArtist
+    ? tracks.filter((track) => track.artist === selectedArtist)
+    : tracks;
+
   function renderMainContent() {
     if (loading) {
       return <div className="state-message">Loading tracks...</div>
@@ -93,9 +106,14 @@ function App() {
       return (
         <div className="simple-list">
           {artists.map((artist) => (
-            <div key={artist} className="simple-list__row">
+            <button
+              key={artist}
+              className="simple-list__row simple-list__row--button"
+              onClick={() => handleArtistClick(artist)}
+              type="button"
+            >
               {artist}
-            </div>
+            </button>
           ))}
         </div>
       );
@@ -112,27 +130,33 @@ function App() {
         </div>
       )
     }
-    if (tracks.length === 0) {
+    if (visibleTracks.length === 0) {
       return <div className="state-message">No tracks indexed yet.</div>
     }
 
     return (
       <div className="track-list">
-        {tracks.map((track) => (
+        {selectedArtist && (
+          <button className="filter-pill" onClick={handleShowAllTracks} type="button">
+            Showing: {selectedArtist} ×
+          </button>
+        )}
+
+        {visibleTracks.map((track) => (
           <button
-          key={track.id}
-          className={`track-row ${
-            selectedTrack?.id === track.id ? "track-row--active" : ""
-          }`}
-          onClick={() => handleTrackClick(track)}
-          type="button"
-        >
-          <div className="track-row__title">{track.title}</div>
-          <div className="track-row__meta">
-            {track.artist || "Unknown Artist"} •{" "}
-            {track.album || "Unknown Album"}
-          </div>
-        </button>
+            key={track.id}
+            className={`track-row ${
+              selectedTrack?.id === track.id ? "track-row--active" : ""
+            }`}
+            onClick={() => handleTrackClick(track)}
+            type="button"
+          >
+            <div className="track-row__title">{track.title}</div>
+            <div className="track-row__meta">
+              {track.artist || "Unknown Artist"} •{" "}
+              {track.album || "Unknown Album"}
+            </div>
+          </button>
         ))}
       </div>
     )
@@ -147,7 +171,7 @@ function App() {
       return "Albums";
     }
 
-    return "Your Music";
+    return selectedArtist ? selectedArtist : "Your Music";
   }
 
   function getHeaderSubtitle() {
@@ -161,7 +185,7 @@ function App() {
       return `${albums.length} albums`
     }
 
-    return `${tracks.length} tracks`;
+    return `${visibleTracks.length} tracks`;
   }
   return (
     <div className="app-layout">
@@ -171,7 +195,10 @@ function App() {
         <nav className="sidebar__nav">
           <button 
             className={`sidebar__link ${activeView === "tracks" ? "sidebar__link--active" : ""}`}
-            onClick={() => setActiveView("tracks")}
+            onClick={() => {
+              setActiveView("tracks")
+              setSelectedArtist(null)
+            }}
             type="button"
           >
             Tracks
