@@ -177,6 +177,10 @@ button {
 }
 
 .track-row {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  align-items: center;
+  gap: 12px;
   padding: 14px 16px;
   background: #181818;
   border-radius: 8px;
@@ -195,7 +199,14 @@ button {
 .track-row--active {
   background: #2a2a2a;
 }
-
+.track-row__index {
+  color: #b3b3b3;
+  font-size: 0.95rem;
+  text-align: center;
+}
+.track-row__content{
+  min-width: 0
+}
 .track-row__title {
   font-weight: 600;
   margin-bottom: 4px;

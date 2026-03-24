@@ -164,7 +164,7 @@ function App() {
             Showing album: {selectedAlbum}
           </button>
         )}
-        {visibleTracks.map((track) => (
+        {visibleTracks.map((track, index) => (
           <button
             key={track.id}
             className={`track-row ${
@@ -173,10 +173,14 @@ function App() {
             onClick={() => handleTrackClick(track)}
             type="button"
           >
-            <div className="track-row__title">{track.title}</div>
-            <div className="track-row__meta">
-              {track.artist || "Unknown Artist"} •{" "}
-              {track.album || "Unknown Album"}
+            <div className="track-row__index">{index + 1}</div>
+            
+            <div className="track-row__content">
+              <div className="track-row__title">{track.title}</div>
+              <div className="track-row__meta">
+                {track.artist || "Unknown Artist"} •{" "}
+                {track.album || "Unknown Album"}
+              </div>
             </div>
           </button>
         ))}
