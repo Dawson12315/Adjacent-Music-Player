@@ -20,6 +20,10 @@ function App() {
 
         const data = await response.json();
         setTracks(data);
+
+        if (data.length > 0) {
+          setSelectedTrack(data[0]);
+        }
       } catch (err) {
         setError("Could not load tracks.");
       } finally {
