@@ -11,6 +11,7 @@ function App() {
   const [activeView, setActiveView] = useState("tracks");
   const [selectedArtist, setSelectedArtist] = useState(null);
   const [selectedAlbum, setSelectedAlbum] = useState(null);
+  const [searchQuery, setSearchQuery]= useState("")
 
   const audioRef = useRef(null);
   
@@ -71,16 +72,20 @@ function App() {
   }
   function handleArtistClick(artist) {
     setSelectedArtist(artist);
+    setSelectedAlbum(null)
+    setSearchQuery("")
     setActiveView("tracks")
   }
   function handleAlbumClick(album) {
     setSelectedAlbum(album)
     setSelectedArtist(null)
+    setSearchQuery("")
     setActiveView("tracks")
   }
   function handleClearFilters() {
     setSelectedArtist(null);
     setSelectedAlbum(null)
+    setSearchQuery("")
     setActiveView("tracks");
   }
 
@@ -98,15 +103,25 @@ function App() {
   }
 
   const visibleTracks = tracks.filter((track) => {
-    if (selectedArtist) {
-      return track.artist === selectedArtist
-    }
-    if (selectedAlbum) {
-      return track.album === selectedAlbum
-    }
-    return true
+    const matchesArtist = selectedArtist ? track.artist === selectedArtist : true
+    const matchesAlbum = selectedAlbum ? track.album === selectedAlbum : true
+
+    const query = searchQuery.trim().toLowerCase()
+    const matchesSearch =
+      query === "" ||
+      track.title?.toLowerCase().includes(query) ||
+      track.artist?.toLowerCase().includes(query) ||
+      track.album?.toLowerCase().includes(query)
+
+    return matchesArtist && matchesAlbum && matchesSearch
   })
 
+  const visibleArtists = artists.filter((artist) => 
+    artist.toLowerCase().includes(searchQuery.trim().toLowerCase())
+  )
+  const visibleAlbums = albums.filter((album) =>
+    album.toLowerCase().includes(searchQuery.trim().toLowerCase())
+  )
   function renderMainContent() {
     if (loading) {
       return <div className="state-message">Loading tracks...</div>
@@ -118,7 +133,7 @@ function App() {
     if (activeView === "artists") {
       return (
         <div className="simple-list">
-          {artists.map((artist) => (
+          {visibleArtists.map((artist) => (
             <button
               key={artist}
               className="simple-list__row simple-list__row--button"
@@ -135,7 +150,7 @@ function App() {
     if (activeView === "albums") {
       return (
         <div className="simple-list">
-          {albums.map((album) => (
+          {visibleAlbums.map((album) => (
             <button
               key = {album}
               className= "simple-list__row simple-list__row--button"
@@ -149,14 +164,14 @@ function App() {
       )
     }
     if (visibleTracks.length === 0) {
-      return <div className="state-message">No tracks indexed yet.</div>
+      return <div className="state-message">No matching tracks found.</div>
     }
 
     return (
       <div className="track-list">
         {selectedArtist && (
           <button className="filter-pill" onClick={handleClearFilters} type="button">
-            Showing: {selectedArtist} ×
+            Showing artist: {selectedArtist} ×
           </button>
         )}
         {selectedAlbum && (
@@ -213,10 +228,10 @@ function App() {
       return "";
     }
     if (activeView === "artists") {
-      return `${artists.length} artists`;
+      return `${visibleArtists.length} artists`;
     }
     if (activeView === "albums") {
-      return `${albums.length} albums`
+      return `${visibleAlbums.length} albums`
     }
 
     return `${visibleTracks.length} tracks`;
@@ -236,14 +251,20 @@ function App() {
           </button>
           <button 
             className={`sidebar__link ${activeView === "artists" ? "sidebar__link--active" : ""}`}
-            onClick={() => setActiveView("artists")}
+            onClick={() => {
+              setActiveView("artists")
+              setSearchQuery("")
+            }}
             type="button"
           >
             Artists
           </button>
           <button 
             className={`sidebar__link ${activeView === "albums" ? "sidebar__link--active" : ""}`}
-            onClick={() => setActiveView("albums")}
+            onClick={() => {
+              setActiveView("albums")
+              setSearchQuery("")
+            }}
             type="button"
           >
             Albums
@@ -265,6 +286,16 @@ function App() {
             <p className="main-content__subhead">{getHeaderSubtitle()}</p>
           )}
         </header>
+        
+        <div className="search-bar">
+          <input
+            className="search-input"
+            placeholder={`Search ${activeView}...`}
+            type="text"
+            value={searchQuery}
+            onChange={(event)=> setSearchQuery(event.target.value)}
+          />
+        </div>
 
         <section className="main-content__body">{renderMainContent()}</section>
       </main>

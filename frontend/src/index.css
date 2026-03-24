@@ -125,7 +125,27 @@ button {
   padding: 8px 14px;
   cursor: pointer;
 }
+.search-bar {
+  margin-bottom:20px;
+}
+.search-input{
+  width:100%;
+  max-width: 360px;
+  background: #181818;
+  border: 1px solid #2a2a2a;
+  border-radius: 999px;
+  color:#ffffff;
+  font: inherit;
+  padding: 12px 16px;
+  outline: none;
+}
 
+.search-input::placeholder {
+  color: #8a8a8a
+}
+.search-input:focus{
+  border-color: #535353
+}
 .main-content {
   grid-row: 1 / 2;
   grid-column: 2 / 3;
