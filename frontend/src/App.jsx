@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 function App() {
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedTrack, setSelectedTrack] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  const audioRef = useRef(null);
   
   useEffect(() =>{
     async function fetchTracks() {
@@ -25,14 +28,50 @@ function App() {
     }
     fetchTracks();
   }, []);
+
+  useEffect(() => {
+    async function playSelectedTrack() {
+      if (!selectedTrack || !audioRef.current) {
+        return;
+      }
+      audioRef.current.src = `http://127.0.0.1:8000/api/tracks/${selectedTrack.id}/stream`;
+
+      try {
+        await audioRef.current.play();
+        setIsPlaying(true);
+      } catch (err) {
+        setIsPlaying(false);
+      }
+    }
+
+    playSelectedTrack();
+  }, [selectedTrack]);
+
+  function handleTrackClick(track){
+    setSelectedTrack(track);
+  }
+
+  function handlePlayPause() {
+    if (!audioRef.current || !selectedTrack) {
+      return;
+    }
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioRef.current.play();
+      setIsPlaying(true);
+    }
+  }
+
   return (
     <div className="app-layout">
       <aside className="sidebar">
         <div className="sidebar__brand">Adjacent</div>
         <nav className="sidebar__nav">
-          <button className="sidebar__link">Home</button>
-          <button className="sidebar__link">Search</button>
-          <button className="sidebar__link">Library</button>
+          <button className="sidebar__link" type="button">Home</button>
+          <button className="sidebar__link" type="button">Search</button>
+          <button className="sidebar__link" type="button">Library</button>
         </nav>
       </aside>
 
@@ -53,7 +92,7 @@ function App() {
                   className={`track-row ${
                     selectedTrack?.id === track.id ? "track-row--active" : ""
                   }`}
-                  onClick={() => setSelectedTrack(track)}
+                  onClick={() => handleTrackClick(track)}
                   type="button"
                 >
                   <div className="track-row__title">{track.title}</div>
@@ -83,8 +122,15 @@ function App() {
         </div>
 
         <div className="player-bar__controls">
-          <button type="button">Play</button>
+          <button onClick={handlePlayPause} type="button">
+            {isPlaying ? "Pause" : "Play"}
+          </button>
         </div>
+
+        <audio
+        ref={audioRef}
+        onEnded={() => setIsPlaying(false)}
+        />
       </footer>
     </div>
   );
