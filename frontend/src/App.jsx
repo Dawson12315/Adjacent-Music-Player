@@ -4,6 +4,7 @@ function App() {
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [selectedTrack, setSelectedTrack] = useState(null);
   
   useEffect(() =>{
     async function fetchTracks() {
@@ -47,12 +48,20 @@ function App() {
           {!loading && !error && (
             <div className="track-list">
               {tracks.map((track) => (
-                <div key={track.id} className="track-row">
+                <button
+                  key={track.id}
+                  className={`track-row ${
+                    selectedTrack?.id === track.id ? "track-row--active" : ""
+                  }`}
+                  onClick={() => setSelectedTrack(track)}
+                  type="button"
+                >
                   <div className="track-row__title">{track.title}</div>
                   <div className="track-row__meta">
-                    {track.artist || "Unknown Artist"} • {track.album || "Unknown Album"}
+                    {track.artist || "Unknown Artist"} •{" "}
+                    {track.album || "Unknown Album"}
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -60,9 +69,21 @@ function App() {
       </main>
 
       <footer className="player-bar">
-        <div className="player-bar__track">Nothing playing</div>
+        <div className="player-bar__track">
+          {selectedTrack ? (
+            <>
+              <div className="player-bar__title">{selectedTrack.title}</div>
+              <div className="player-bar__meta">
+                {selectedTrack.artist || "Unknown Artist"}
+              </div>
+            </>
+          ) : (
+            "Nothing playing"
+          )}
+        </div>
+
         <div className="player-bar__controls">
-          <button>Play</button>
+          <button type="button">Play</button>
         </div>
       </footer>
     </div>
