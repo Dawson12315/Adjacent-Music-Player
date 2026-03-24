@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 
 function App() {
   const [tracks, setTracks] = useState([]);
+  const [artists, setArtists] = useState([]);
+  const [albums, setAlbums] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedTrack, setSelectedTrack] = useState(null);
@@ -10,19 +12,28 @@ function App() {
   const audioRef = useRef(null);
   
   useEffect(() =>{
-    async function fetchTracks() {
+    async function fetchLibraryData() {
       try {
-        const response = await fetch("http://127.0.0.1:8000/api/tracks")
+        const [tracksResponse, artistsResponse, albumsResponse] = await Promise.all([
+          fetch("http://127.0.0.1:8000/api/tracks"),
+          fetch("http://127.0.0.1:8000/api/artists"),
+          fetch("http://127.0.0.1:8000/api/albums"),
+        ])
 
-        if (!response.ok) {
-          throw new Error("Failed to fetch tracks");
+        if (!tracksResponse.ok || !artistsResponse.ok || !albumsResponse.ok){
+          throw new Error("Failed to fetch library data");
         }
 
-        const data = await response.json();
-        setTracks(data);
+        const tracksData = await tracksResponse.json();
+        const artistsData = await artistsResponse.json();
+        const albumsData = await albumsResponse.json();
 
-        if (data.length > 0) {
-          setSelectedTrack(data[0]);
+        setTracks(tracksData);
+        setArtists(artistsData);
+        setAlbums(albumsData);
+
+        if (tracksData.length > 0) {
+          setSelectedTrack(tracksData[0]);
         }
       } catch (err) {
         setError("Could not load tracks.");
@@ -30,7 +41,7 @@ function App() {
         setLoading(false);
       }
     }
-    fetchTracks();
+    fetchLibraryData();
   }, []);
 
   useEffect(() => {
@@ -72,11 +83,19 @@ function App() {
     <div className="app-layout">
       <aside className="sidebar">
         <div className="sidebar__brand">Adjacent</div>
+
         <nav className="sidebar__nav">
           <button className="sidebar__link" type="button">Home</button>
           <button className="sidebar__link" type="button">Search</button>
           <button className="sidebar__link" type="button">Library</button>
         </nav>
+
+        <div className="sidebar__section">
+          <div className="sidebar__section-title">Library</div>
+          <div className="sidebar__stat">Tracks: {tracks.length}</div>
+          <div className="sidebar__stat">Artists: {artists.length}</div>
+          <div className="sidebar__stat">Albums: {albums.length}</div>
+        </div>
       </aside>
 
       <main className="main-content">
@@ -139,8 +158,7 @@ function App() {
           </button>
         </div>
 
-        <audio
-        ref={audioRef} onEnded={() => setIsPlaying(false)} />
+        <audio ref={audioRef} onEnded={() => setIsPlaying(false)} />
       </footer>
     </div>
   );

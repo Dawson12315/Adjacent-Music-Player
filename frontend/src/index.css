@@ -72,6 +72,27 @@ button {
   color: #ffffff;
 }
 
+.sidebar__section{
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid #1f1f1f;
+}
+
+.sidebar__section-titile {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #b3b3b3;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 12px;
+}
+
+.sidebar__stat {
+  color: #d1d1d1;
+  font-size: 0.95rem;
+  margin-bottom: 8px;
+}
+
 .main-content {
   grid-row: 1 / 2;
   grid-column: 2 / 3;
