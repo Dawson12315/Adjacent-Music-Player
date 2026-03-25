@@ -17,6 +17,8 @@ function App() {
   const [isShuffle, setIsShuffle] = useState(false);
   const [isLoop, setIsLoop] = useState(false);
   const [shuffleHistory, setShuffleHistory] = useState([]);
+  const [volume, setVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
@@ -71,6 +73,14 @@ function App() {
 
     playSelectedTrack();
   }, [selectedTrack]);
+
+  useEffect(() => {
+    if (!audioRef.current) {
+      return
+    }
+    audioRef.current.volume = volume
+    audioRef.current.muted = isMuted
+  }, [volume, isMuted])
 
   function handleTrackClick(track){
     setSelectedTrack(track);

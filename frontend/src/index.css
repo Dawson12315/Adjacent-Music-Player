@@ -316,7 +316,10 @@ button {
 
 .player-bar__icon-button:hover {
   color: #ffffff;
-  transform: scale(1.05);
+  transform: scale(1.1);
+}
+.player-bar__icon-button--active:hover {
+  color: #1ed760;
 }
 
 .player-bar__play-button {
