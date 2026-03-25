@@ -104,7 +104,7 @@ function App() {
       setIsPlaying(true);
     }
   }
-  
+
   function handlePreviousTrack() {
     if (!selectedTrack || visibleTracks.length === 0) {
       return;
@@ -136,7 +136,23 @@ function App() {
 
     setSelectedTrack(visibleTracks[currentIndex + 1]);
   }
+  function playNextAvailableTrack() {
+    if (!selectedTrack || visibleTracks.length === 0) {
+      setIsPlaying(false);
+      return;
+    }
 
+    const currentIndex = visibleTracks.findIndex(
+      (track) => track.id === selectedTrack.id
+    );
+
+    if (currentIndex === -1 || currentIndex >= visibleTracks.length - 1) {
+      setIsPlaying(false);
+      return;
+    }
+
+    setSelectedTrack(visibleTracks[currentIndex + 1]);
+  }
   function handleSeek(event) {
     if (!audioRef.current || !progressBarRef.current || duration <= 0) {
      return;
@@ -437,8 +453,9 @@ function App() {
         <audio
           ref={audioRef}
           onEnded={() => {
-            setIsPlaying(false)
-            setCurrentTime(0)
+            setCurrentTime(0);
+            playNextAvailableTrack();
+
           }}
           onTimeUpdate={() =>{
             if (audioRef.current) {
