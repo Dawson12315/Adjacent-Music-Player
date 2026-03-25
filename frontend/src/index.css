@@ -267,6 +267,7 @@ button {
   background: #4d4d4d;
   border-radius: 999px;
   overflow: hidden;
+  cursor: pointer;
 }
 
 .player-bar__progress-fill {
