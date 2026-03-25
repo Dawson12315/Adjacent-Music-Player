@@ -135,6 +135,20 @@ function App() {
       return;
     }
 
+    if (isShuffle) {
+      if (visibleTracks.length === 1) {
+        return
+      }
+
+      let nextTrack;
+      do {
+        const randomIndex = Math.floor(Math.random() * visibleTracks.length)
+        nextTrack = visibleTracks[randomIndex]
+      } while (nextTrack.id === selectedTrack.id)
+
+      setSelectedTrack(nextTrack)
+      return
+    }
     const currentIndex = visibleTracks.findIndex(
       (track) => track.id === selectedTrack.id
     );
