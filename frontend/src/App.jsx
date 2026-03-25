@@ -16,6 +16,7 @@ function App() {
   const [duration, setDuration] = useState(0);
   const [isShuffle, setIsShuffle] = useState(false);
   const [isLoop, setIsLoop] = useState(false);
+  const [shuffleHistory, setShuffleHistory] = useState([]);
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
@@ -117,6 +118,17 @@ function App() {
       setCurrentTime(0)
       return
     }
+
+    if (isShuffle && shuffleHistory.length > 0) {
+      const previousTrackId = shuffleHistory[shuffleHistory.length - 1]
+      const previousTrack = visibleTracks.find((track) => track.id === previousTrackId)
+
+      setShuffleHistory((prev) => prev.slice(0, -1))
+      if (previousTrack) {
+        setSelectedTrack(previousTrack)
+      }
+      return
+    }
     const currentIndex = visibleTracks.findIndex(
       (track) => track.id === selectedTrack.id
     );
@@ -146,6 +158,7 @@ function App() {
         nextTrack = visibleTracks[randomIndex]
       } while (nextTrack.id === selectedTrack.id)
 
+      setShuffleHistory((prev) => [...prev,selectedTrack.id])
       setSelectedTrack(nextTrack)
       return
     }
@@ -185,6 +198,7 @@ function App() {
         nextTrack = visibleTracks[randomIndex]
       } while (nextTrack.id === selectedTrack.id)
 
+      setShuffleHistory((prev) => [...prev, selectedTrack.id])
       setSelectedTrack(nextTrack)
       return
     }
