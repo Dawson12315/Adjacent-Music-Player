@@ -14,6 +14,8 @@ function App() {
   const [searchQuery, setSearchQuery]= useState("")
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [isShuffle, setIsShuffle] = useState(false);
+  const [isLoop, setIsLoop] = useState(false);
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
@@ -142,6 +144,13 @@ function App() {
     }
 
     setSelectedTrack(visibleTracks[currentIndex + 1]);
+  }
+  function handleToggleShuffle() {
+    setIsShuffle((prev) => !prev);
+  }
+
+  function handleToggleLoop() {
+    setIsLoop((prev) => !prev);
   }
   function playNextAvailableTrack() {
     if (!selectedTrack || visibleTracks.length === 0) {
@@ -401,8 +410,15 @@ function App() {
 
         <div className="player-bar__center">
           <div className="player-bar__transport-row">
-            <button className="player-bar__icon-button" type="button" aria-label="Shuffle">
-              ↻
+            <button 
+              className={`player-bar__icon-button ${
+                isShuffle ? "player-bar__icon-button--active" : ""
+              }`}
+              type="button" 
+              aria-label="Shuffle"
+              onClick={handleToggleShuffle}
+            >
+              ⇄
             </button>
 
             <button 
@@ -432,7 +448,14 @@ function App() {
               ⏭
             </button>
 
-            <button className="player-bar__icon-button" type="button" aria-label="Loop">
+            <button 
+              className={`player-bar__icon-button ${
+                isLoop ? "player-bar__icon-button--active" : ""
+              }`}
+              type="button" 
+              aria-label="Loop"
+              onClick={handleToggleLoop}
+            >
               ↺
             </button>
           </div>
