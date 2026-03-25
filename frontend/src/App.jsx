@@ -484,6 +484,12 @@ function App() {
           ref={audioRef}
           onEnded={() => {
             setCurrentTime(0);
+            if (isLoop && audioRef.current) {
+              audioRef.current.currentTime = 0
+              audioRef.current.play()
+              setIsPlaying(true)
+              return
+            }
             playNextAvailableTrack();
 
           }}
