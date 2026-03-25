@@ -342,10 +342,18 @@ function App() {
               ↺
             </button>
           </div>
-        </div>
 
-        <div className="player-bar__right" />
+          <div className="player-bar__progress-row">
+            <span className="player-bar__time">0:00</span>
+            <div className="player-bar__progress-track">
+              <div className="player-bar__progress-fill" />
+            </div>
+            <span className="player-bar__time">0:00</span>
+          </div>
+        </div>
         
+        <div className="player-bar__right" />
+
         <audio ref={audioRef} onEnded={() => setIsPlaying(false)} />
       </footer>
     </div>
