@@ -248,6 +248,8 @@ function App() {
 
     return `${minutes}:${seconds.toString().padStart(2, "0")}`;
   }
+  const progressPercent =
+    duration > 0 ? Math.min((currentTime / duration) * 100, 100) : 0;
   return (
     <div className="app-layout">
       <aside className="sidebar">
@@ -358,7 +360,10 @@ function App() {
           <div className="player-bar__progress-row">
             <span className="player-bar__time">{formatTime(currentTime)}</span>
             <div className="player-bar__progress-track">
-              <div className="player-bar__progress-fill" />
+              <div 
+                className="player-bar__progress-fill" 
+                style={{ width: `${progressPercent}%`}}
+              />
             </div>
             <span className="player-bar__time">{formatTime(duration)}</span>
           </div>
