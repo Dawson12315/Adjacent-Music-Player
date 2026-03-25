@@ -12,6 +12,8 @@ function App() {
   const [selectedArtist, setSelectedArtist] = useState(null);
   const [selectedAlbum, setSelectedAlbum] = useState(null);
   const [searchQuery, setSearchQuery]= useState("")
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
 
   const audioRef = useRef(null);
   
@@ -236,6 +238,16 @@ function App() {
 
     return `${visibleTracks.length} tracks`;
   }
+  function formatTime(timeInSeconds) {
+    if (!Number.isFinite(timeInSeconds)) {
+      return "0:00";
+    }
+
+    const minutes = Math.floor(timeInSeconds / 60);
+    const seconds = Math.floor(timeInSeconds % 60);
+
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  }
   return (
     <div className="app-layout">
       <aside className="sidebar">
@@ -344,17 +356,33 @@ function App() {
           </div>
 
           <div className="player-bar__progress-row">
-            <span className="player-bar__time">0:00</span>
+            <span className="player-bar__time">{formatTime(currentTime)}</span>
             <div className="player-bar__progress-track">
               <div className="player-bar__progress-fill" />
             </div>
-            <span className="player-bar__time">0:00</span>
+            <span className="player-bar__time">{formatTime(duration)}</span>
           </div>
         </div>
-        
+
         <div className="player-bar__right" />
 
-        <audio ref={audioRef} onEnded={() => setIsPlaying(false)} />
+        <audio
+          ref={audioRef}
+          onEnded={() => {
+            setIsPlaying(false)
+            setCurrentTime(0)
+          }}
+          onTimeUpdate={() =>{
+            if (audioRef.current) {
+              setCurrentTime(audioRef.current.currentTime)
+            }
+          }}
+          onLoadedMetadata={() => {
+            if (audioRef.current) {
+              setDuration(audioRef.current.duration)
+            }
+          }}
+        />
       </footer>
     </div>
   );
