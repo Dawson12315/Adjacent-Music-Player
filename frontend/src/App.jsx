@@ -176,7 +176,7 @@ function App() {
         )}
         {selectedAlbum && (
           <button className="filter-pill" onClick={handleClearFilters} type= "button">
-            Showing album: {selectedAlbum}
+            Showing album: {selectedAlbum} ×
           </button>
         )}
         {visibleTracks.map((track, index) => (
@@ -286,7 +286,7 @@ function App() {
             <p className="main-content__subhead">{getHeaderSubtitle()}</p>
           )}
         </header>
-        
+
         <div className="search-bar">
           <input
             className="search-input"
@@ -301,25 +301,51 @@ function App() {
       </main>
 
       <footer className="player-bar">
-        <div className="player-bar__track">
+        <div className="player-bar__left">
           {selectedTrack ? (
             <>
               <div className="player-bar__title">{selectedTrack.title}</div>
               <div className="player-bar__meta">
-                {selectedTrack.artist || "Unknown Artist"}
+                {selectedTrack.artist || "Unknown Artist"} •{" "}
+                {selectedTrack.album || "Unknown Album"}
               </div>
             </>
           ) : (
-            "Nothing playing"
+            <div className="player-bar__meta">Nothing playing</div>
           )}
         </div>
 
-        <div className="player-bar__controls">
-          <button onClick={handlePlayPause} type="button">
-            {isPlaying ? "Pause" : "Play"}
-          </button>
+        <div className="player-bar__center">
+          <div className="player-bar__transport-row">
+            <button className="player-bar__icon-button" type="button" aria-label="Shuffle">
+              ↻
+            </button>
+
+            <button className="player-bar__icon-button" type="button" aria-label="Previous track">
+              ⏮
+            </button>
+
+            <button
+              className="player-bar__play-button"
+              onClick={handlePlayPause}
+              type="button"
+              aria-label={isPlaying ? "Pause" : "Play"}
+            >
+              {isPlaying ? "❚❚" : "▶"}
+            </button>
+
+            <button className="player-bar__icon-button" type="button" aria-label="Next track">
+              ⏭
+            </button>
+
+            <button className="player-bar__icon-button" type="button" aria-label="Loop">
+              ↺
+            </button>
+          </div>
         </div>
 
+        <div className="player-bar__right" />
+        
         <audio ref={audioRef} onEnded={() => setIsPlaying(false)} />
       </footer>
     </div>
