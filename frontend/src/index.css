@@ -341,7 +341,18 @@ button {
 .player-bar__play-button:hover {
   transform: scale(1.04);
 }
+.player-bar__right {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
 
+.player-bar__volume-slider {
+  width: 120px;
+  accent-color: #ffffff;
+  cursor: pointer;
+}
 .state-message {
   padding: 24px;
   border-radius: 12px;
