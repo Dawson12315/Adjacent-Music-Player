@@ -106,16 +106,23 @@ function App() {
   }
 
   function handlePreviousTrack() {
-    if (!selectedTrack || visibleTracks.length === 0) {
+    if (!selectedTrack || !audioRef.current || visibleTracks.length === 0) {
       return;
     }
 
+    if (audioRef.current.currentTime > 5) {
+      audioRef.current.currentTime = 0
+      setCurrentTime(0)
+      return
+    }
     const currentIndex = visibleTracks.findIndex(
       (track) => track.id === selectedTrack.id
     );
 
     if (currentIndex <= 0) {
-      return;
+      audioRef.current.currentTime = 0
+      setCurrentTime(0)
+      return
     }
 
     setSelectedTrack(visibleTracks[currentIndex - 1]);
