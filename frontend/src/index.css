@@ -276,6 +276,13 @@ button {
   background: #ffffff;
   border-radius: 999px;
 }
+.player-bar__progress-track:hover {
+  background: #5c5c5c;
+}
+
+.player-bar__progress-track:hover .player-bar__progress-fill {
+  background: #1db954;
+}
 
 .player-bar__title {
   font-weight: 600;
