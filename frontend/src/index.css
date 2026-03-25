@@ -310,6 +310,9 @@ button {
   padding: 6px 8px;
   transition: color 0.2s ease, transform 0.2s ease;
 }
+.player-bar__icon-button--active {
+  color: #1db954;
+}
 
 .player-bar__icon-button:hover {
   color: #ffffff;
