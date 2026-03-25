@@ -16,6 +16,7 @@ function App() {
   const [duration, setDuration] = useState(0);
 
   const audioRef = useRef(null);
+  const progressBarRef = useRef(null)
   
   useEffect(() =>{
     async function fetchLibraryData() {
@@ -102,6 +103,20 @@ function App() {
       audioRef.current.play();
       setIsPlaying(true);
     }
+  }
+
+  function handleSeek(event) {
+    if (!audioRef.current || !progressBarRef.current || duration <= 0) {
+     return;
+    }
+
+    const rect = progressBarRef.current.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const ratio = Math.min(Math.max(clickX / rect.width, 0), 1);
+    const newTime = ratio * duration;
+
+    audioRef.current.currentTime = newTime;
+    setCurrentTime(newTime);
   }
 
   const visibleTracks = tracks.filter((track) => {
@@ -359,12 +374,18 @@ function App() {
 
           <div className="player-bar__progress-row">
             <span className="player-bar__time">{formatTime(currentTime)}</span>
-            <div className="player-bar__progress-track">
-              <div 
-                className="player-bar__progress-fill" 
-                style={{ width: `${progressPercent}%`}}
-              />
-            </div>
+            <div 
+              className="player-bar__progress-track"
+              onClick={handleSeek}
+              ref={progressBarRef}
+              role="button"
+              tabIndex={0}
+            >
+            <div 
+              className="player-bar__progress-fill" 
+              style={{ width: `${progressPercent}%`}}
+            />
+          </div>
             <span className="player-bar__time">{formatTime(duration)}</span>
           </div>
         </div>
