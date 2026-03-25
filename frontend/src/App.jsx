@@ -104,6 +104,38 @@ function App() {
       setIsPlaying(true);
     }
   }
+  
+  function handlePreviousTrack() {
+    if (!selectedTrack || visibleTracks.length === 0) {
+      return;
+    }
+
+    const currentIndex = visibleTracks.findIndex(
+      (track) => track.id === selectedTrack.id
+    );
+
+    if (currentIndex <= 0) {
+      return;
+    }
+
+    setSelectedTrack(visibleTracks[currentIndex - 1]);
+  }
+
+  function handleNextTrack() {
+    if (!selectedTrack || visibleTracks.length === 0) {
+      return;
+    }
+
+    const currentIndex = visibleTracks.findIndex(
+      (track) => track.id === selectedTrack.id
+    );
+
+    if (currentIndex === -1 || currentIndex >= visibleTracks.length - 1) {
+      return;
+    }
+
+    setSelectedTrack(visibleTracks[currentIndex + 1]);
+  }
 
   function handleSeek(event) {
     if (!audioRef.current || !progressBarRef.current || duration <= 0) {
@@ -350,7 +382,12 @@ function App() {
               ↻
             </button>
 
-            <button className="player-bar__icon-button" type="button" aria-label="Previous track">
+            <button 
+              className="player-bar__icon-button" 
+              type="button" 
+              aria-label="Previous track"
+              onClick={handlePreviousTrack}
+            >
               ⏮
             </button>
 
@@ -363,7 +400,12 @@ function App() {
               {isPlaying ? "❚❚" : "▶"}
             </button>
 
-            <button className="player-bar__icon-button" type="button" aria-label="Next track">
+            <button 
+              className="player-bar__icon-button" 
+              type="button" 
+              aria-label="Next track"
+              onClick={handleNextTrack}
+            >
               ⏭
             </button>
 
