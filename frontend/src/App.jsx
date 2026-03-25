@@ -104,7 +104,20 @@ function App() {
     setSearchQuery("")
     setActiveView("tracks");
   }
+  function handleToggleMute() {
+    setIsMuted((prev) => !prev)
+  }
+  function handleVolumeChange(event) {
+    const newVolume = Number(event.target.value)
+    setVolume(newVolume)
 
+    if (newVolume > 0 && isMuted) {
+      setIsMuted(false)
+    }
+    if (newVolume === 0){
+      setIsMuted(true)
+    }
+  }
   function handlePlayPause() {
     if (!audioRef.current || !selectedTrack) {
       return;
@@ -534,7 +547,26 @@ function App() {
           </div>
         </div>
 
-        <div className="player-bar__right" />
+        <div className="player-bar__right">
+          <button
+            className="player-bar__icon-button"
+            type="button"
+            aria-label={isMuted ? "Unmute" : "Mute"}
+            onClick={handleToggleMute}
+          >
+            {isMuted || volume === 0 ? "🔇" : "🔊"}
+          </button>
+          <input
+            className="player-bar__volume-slider"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={isMuted ? 0 : volume}
+            onChange={handleVolumeChange}
+            aria-label="Volume"
+          />
+        </div>
 
         <audio
           ref={audioRef}
