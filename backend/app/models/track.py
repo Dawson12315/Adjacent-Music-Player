@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String
+from sqlalchemy.orm import relationship
 
 from app.db import Base
 
@@ -11,3 +12,5 @@ class Track(Base):
     artist = Column(String, nullable=True)
     album = Column(String, nullable=True)
     file_path = Column(String, nullable=False, unique=True)
+
+    playlist_track = relationship("PlaylistTrack", back_populates="track")
