@@ -6,6 +6,7 @@ from app.models.playlist import Playlist
 from app.models.playlist_track import PlaylistTrack
 from app.models.track import Track
 from app.schemas.playlist import PlaylistCreate, PlaylistResponse, PlaylistTrackCreate
+from app.schemas.track import TrackResponse
 
 router = APIRouter()
 
@@ -69,3 +70,22 @@ def add_track_to_playlist(
         "track_id": payload.track_id,
         "position": next_position,
     }
+
+@router.get(
+    "/playlists/{playlist_id}/tracks",
+    response_model=list[TrackResponse],
+    tags=["playlists"],
+)
+def get_playlist_tracks(playlist_id: int, db: Session = Depends(get_db)):
+    playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+
+    playlist_tracks = (
+        db.query(PlaylistTrack)
+        .filter(PlaylistTrack.playlist_id == playlist_id)
+        .order_by(PlaylistTrack.position.asc())
+        .all()
+    )
+
+    return [playlist_track.track for playlist_track in playlist_tracks]
