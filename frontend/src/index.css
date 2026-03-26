@@ -413,6 +413,20 @@ button {
 .track-row__menu-button:hover {
   color: #ffffff;
 }
+.track-row__menu-divider {
+  height: 1px;
+  background: #3a3a3a;
+  margin: 6px 0;
+}
+
+.track-row__menu-label {
+  padding: 6px 12px 4px;
+  color: #b3b3b3;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
 .player-bar {
   grid-row: 2 / 3;
   grid-column: 1 / 3;

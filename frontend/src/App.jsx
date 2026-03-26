@@ -364,6 +364,30 @@ function App() {
     }
   }
 
+  async function handleAddTrackToPlaylist(trackId, playlistId) {
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/playlists/${playlistId}/tracks`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ track_id: trackId }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to add track to playlist");
+      }
+
+      setOpenMenuTrackId(null);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+
   const visibleTracks = tracks.filter((track) => {
     const matchesArtist = selectedArtist ? track.artist === selectedArtist : true
     const matchesAlbum = selectedAlbum ? track.album === selectedAlbum : true
@@ -488,6 +512,24 @@ function App() {
                 >
                   Add to Queue
                 </button>
+
+                {playlists.length > 0 && (
+                  <>
+                    <div className="track-row__menu-divider" />
+                    <div className="track-row__menu-label">Add to Playlist</div>
+
+                    {playlists.map((playlist) => (
+                      <button
+                        key={playlist.id}
+                        className="track-row__menu-item"
+                        onClick={() => handleAddTrackToPlaylist(track.id, playlist.id)}
+                        type="button"
+                      >
+                        {playlist.name}
+                      </button>
+                    ))}
+                  </>
+                )}
               </div>
             )}
             </div>
