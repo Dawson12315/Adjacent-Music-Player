@@ -150,3 +150,18 @@ def remove_track_from_playlist(
         "playlist_id": playlist_id,
         "track_id": track_id,
     }
+
+@router.delete("/playlists/{playlist_id}", tags=["playlists"])
+def delete_playlist(playlist_id: int, db: Session = Depends(get_db)):
+    playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
+
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+
+    db.delete(playlist)
+    db.commit()
+
+    return {
+        "message": "Playlist deleted",
+        "playlist_id": playlist_id,
+    }
