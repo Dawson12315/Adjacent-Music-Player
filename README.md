@@ -4,7 +4,7 @@ Full-stack Spotify-style music app built with:
 
 - FastAPI (backend)
 - React (frontend)
-- Local music library (Synology)
+- Local music library via file share
 
 ## Environment Variables:
 
@@ -15,9 +15,13 @@ Full-stack Spotify-style music app built with:
 - MUSIC_LIBRARY_PATH
 
 ## Current Development Status:
-Phase 2 – Library (in progress)
+Phase 3: Improved Library Navigation and Music Management
 
 Introduce:
-- Artists
-- Albums
-- Grouped Browsing
+- Playlists tab: Create, Delete, Rename, and persistent Liked Songs Playlist(unchangable name, but editable from play bar via later introduced heart button)
+
+Improvements:
+- Queue: persistent in DB
+- Currently Playing: persistent in DB
+- Artist page: list Albums, then singles
+- Albums page: allow reassociation to a new artist and renaming

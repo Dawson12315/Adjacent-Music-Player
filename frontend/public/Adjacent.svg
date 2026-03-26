@@ -1,0 +1,13 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="256" height="256" rx="56" fill="#0D0D0D"></rect>
+
+  <!-- Back adjacent layer -->
+  <path d="M72 188L116 72C120 60 136 60 140 72L184 188H160L148 152H108L96 188H72Z" fill="#1ED760" opacity="0.35"></path>
+
+  <!-- Main A -->
+  <path d="M80 192L124 72C128 60 144 60 148 72L192 192H168L156 156H116L104 192H80Z" fill="#1ED760"></path>
+
+  <!-- Play triangle -->
+  <path d="M130 120L168 144L130 168V120Z" fill="white"></path>
+</svg>
