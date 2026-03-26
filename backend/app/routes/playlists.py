@@ -45,6 +45,18 @@ def add_track_to_playlist(
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
+    existing_playlist_track = (
+        db.query(PlaylistTrack)
+        .filter(
+            PlaylistTrack.playlist_id == playlist_id,
+            PlaylistTrack.track_id == payload.track_id
+        )
+        .first()
+    )
+
+    if existing_playlist_track:
+        raise HTTPException(status_code=400, detail="Track already exists in playlist")
+
     last_item = (
         db.query(PlaylistTrack)
         .filter(PlaylistTrack.playlist_id == playlist_id)
@@ -89,3 +101,52 @@ def get_playlist_tracks(playlist_id: int, db: Session = Depends(get_db)):
     )
 
     return [playlist_track.track for playlist_track in playlist_tracks]
+
+@router.delete("/playlists/{playlist_id}/tracks/{track_id}", tags=["playlists"])
+def remove_track_from_playlist(
+    playlist_id: int,
+    track_id: int,
+    db: Session = Depends(get_db),
+):
+    playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+
+    playlist_track = (
+        db.query(PlaylistTrack)
+        .filter(
+            PlaylistTrack.playlist_id == playlist_id,
+            PlaylistTrack.track_id == track_id,
+        )
+        .order_by(PlaylistTrack.position.asc())
+        .first()
+    )
+
+    if not playlist_track:
+        raise HTTPException(status_code=404, detail="Track not found in playlist")
+
+    removed_position = playlist_track.position
+
+    db.delete(playlist_track)
+    db.commit()
+
+    remaining_items = (
+        db.query(PlaylistTrack)
+        .filter(
+            PlaylistTrack.playlist_id == playlist_id,
+            PlaylistTrack.position > removed_position,
+        )
+        .order_by(PlaylistTrack.position.asc())
+        .all()
+    )
+
+    for item in remaining_items:
+        item.position -= 1
+
+    db.commit()
+
+    return {
+        "message": "Track removed from playlist",
+        "playlist_id": playlist_id,
+        "track_id": track_id,
+    }
