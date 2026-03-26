@@ -26,6 +26,8 @@ function App() {
   const [originalQueue, setOriginalQueue] = useState([]);
   const [playlists, setPlaylists] = useState([]);
   const [newPlaylistName, setNewPlaylistName] = useState("");
+  const [selectedPlaylist, setSelectedPlaylist] = useState(null);
+  const [playlistTracks, setPlaylistTracks] = useState([]);
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
@@ -94,14 +96,23 @@ function App() {
     audioRef.current.muted = isMuted
   }, [volume, isMuted])
 
+  function getPlaybackSourceTracks() {
+    if (activeView === "playlist" && selectedPlaylist) {
+      return playlistTracks;
+    }
+
+    return visibleTracks;
+  }
+
   function handleTrackClick(track){
     setOpenMenuTrackId(null)
     setSelectedTrack(track);
     setActiveView("tracks");
 
-    const clickedIndex = visibleTracks.findIndex((item) => item.id === track.id)
+    const sourceTracks = getPlaybackSourceTracks()
+    const clickedIndex = sourceTracks.findIndex((item) => item.id === track.id)
 
-    const nextOriginalQueue = [...visibleTracks]
+    const nextOriginalQueue = [...sourceTracks]
     const beforeCurrent = nextOriginalQueue.slice(0, clickedIndex + 1)
     const upcoming = nextOriginalQueue.slice(clickedIndex + 1)
 
@@ -386,7 +397,28 @@ function App() {
       console.error(error);
     }
   }
+  async function handlePlaylistClick(playlist) {
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/playlists/${playlist.id}/tracks`
+      );
 
+      if (!response.ok) {
+        throw new Error("Failed to fetch playlist tracks");
+      }
+
+      const tracksData = await response.json();
+
+      setSelectedPlaylist(playlist);
+      setPlaylistTracks(tracksData);
+      setSelectedArtist(null);
+      setSelectedAlbum(null);
+      setSearchQuery("");
+      setActiveView("playlist");
+    } catch (error) {
+      console.error(error);
+    }
+  }
 
   const visibleTracks = tracks.filter((track) => {
     const matchesArtist = selectedArtist ? track.artist === selectedArtist : true
@@ -415,7 +447,35 @@ function App() {
     if (error) {
       return <div className="state-message">{error}</div>
     }
+    if (activeView === "playlist") {
+      if (playlistTracks.length === 0) {
+        return <div className="state-message">This Playlist is empty.</div>
+      }
+      return (
+        <div className="track-list">
+          {playlistTracks.map((track, index) => (
+            <button
+              key={track.id}
+              className={`track-row ${
+                selectedTrack?.id === track.id ? "track-row--active" : ""
+              }`}
+              onClick={() => handleTrackClick(track)}
+              type="button"
+            >
+              <div className="track-row__index">{index + 1}</div>
 
+              <div className="track-row__content">
+                <div className="track-row__title">{track.title}</div>
+                <div className="track-row__meta">
+                  {track.artist || "Unknown Artist"} •{" "}
+                  {track.album || "Unknown Album"}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )
+    }
     if (activeView === "artists") {
       return (
         <div className="simple-list">
@@ -547,6 +607,9 @@ function App() {
     if (activeView === "albums") {
       return "Albums";
     }
+    if (activeView === "playlist" && selectedPlaylist) {
+      return selectedPlaylist.name
+    }
 
     if (selectedArtist) {
       return selectedArtist
@@ -568,6 +631,9 @@ function App() {
     }
     if (activeView === "albums") {
       return `${visibleAlbums.length} albums`
+    }
+    if (activeView === "playlist" && selectedPlaylist) {
+      return `${playlistTracks.length} tracks`
     }
 
     return `${visibleTracks.length} tracks`;
@@ -628,9 +694,18 @@ function App() {
               <div className="sidebar__stat">No playlists yet</div>
             ) : (
               playlists.map((playlist) => (
-                <div key={playlist.id} className="sidebar__link">
+                <button
+                  key={playlist.id}
+                  className={`sidebar__link ${
+                    activeView === "playlist" && selectedPlaylist?.id === playlist.id
+                      ? "sidebar__link--active"
+                      : ""
+                  }`}
+                    onClick={() => handlePlaylistClick(playlist)}
+                    type="button"
+                >
                   {playlist.name}
-                </div>
+                </button>
               ))
             )}
           </div>
