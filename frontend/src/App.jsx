@@ -24,6 +24,8 @@ function App() {
   const [openMenuTrackId, setOpenMenuTrackId] = useState(null);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [originalQueue, setOriginalQueue] = useState([]);
+  const [playlists, setPlaylists] = useState([]);
+  const [newPlaylistName, setNewPlaylistName] = useState("");
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
@@ -31,10 +33,11 @@ function App() {
   useEffect(() =>{
     async function fetchLibraryData() {
       try {
-        const [tracksResponse, artistsResponse, albumsResponse] = await Promise.all([
+        const [tracksResponse, artistsResponse, albumsResponse, playlistsResponse] = await Promise.all([
           fetch("http://127.0.0.1:8000/api/tracks"),
           fetch("http://127.0.0.1:8000/api/artists"),
           fetch("http://127.0.0.1:8000/api/albums"),
+          fetch("http://127.0.0.1:8000/api/playlists"),
         ])
 
         if (!tracksResponse.ok || !artistsResponse.ok || !albumsResponse.ok){
@@ -44,10 +47,12 @@ function App() {
         const tracksData = await tracksResponse.json();
         const artistsData = await artistsResponse.json();
         const albumsData = await albumsResponse.json();
+        const playlistsData = await playlistsResponse.json();
 
         setTracks(tracksData);
         setArtists(artistsData);
         setAlbums(albumsData);
+        setPlaylists(playlistsData);
 
         setQueue([]);
         setOriginalQueue([]);
@@ -330,6 +335,34 @@ function App() {
     audioRef.current.currentTime = newTime;
     setCurrentTime(newTime);
   }
+  async function handleCreatePlaylist() {
+    const trimmedName = newPlaylistName.trim();
+
+    if (!trimmedName) {
+      return;
+    }
+
+    try {
+      const response = await fetch("http://127.0.0.1:8000/api/playlists", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: trimmedName }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to create playlist");
+      }
+
+      const createdPlaylist = await response.json();
+
+      setPlaylists((prev) => [...prev, createdPlaylist].sort((a, b) => a.name.localeCompare(b.name)));
+      setNewPlaylistName("");
+    } catch (error) {
+      console.error(error);
+    }
+  }
 
   const visibleTracks = tracks.filter((track) => {
     const matchesArtist = selectedArtist ? track.artist === selectedArtist : true
@@ -547,6 +580,35 @@ function App() {
           </button>
         </nav>
 
+        <div className="sidebar__section">
+          <div className="sidebar__section-title">Playlists</div>
+            {playlists.length === 0 ? (
+              <div className="sidebar__stat">No playlists yet</div>
+            ) : (
+              playlists.map((playlist) => (
+                <div key={playlist.id} className="sidebar__link">
+                  {playlist.name}
+                </div>
+              ))
+            )}
+          </div>
+          <div className="playlist-create">
+            <input
+              className="playlist-create__input"
+              type="text"
+              placeholder="New playlist"
+              value={newPlaylistName}
+              onChange={(event) => setNewPlaylistName(event.target.value)}
+            />
+
+            <button
+              className="playlist-create__button"
+              type="button"
+              onClick={handleCreatePlaylist}
+            >
+              Create
+            </button>
+          </div>
         <div className="sidebar__section">
           <div className="sidebar__section-title">Library</div>
           <div className="sidebar__stat">Tracks: {tracks.length}</div>
