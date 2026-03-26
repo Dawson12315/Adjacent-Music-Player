@@ -13,4 +13,4 @@ class Track(Base):
     album = Column(String, nullable=True)
     file_path = Column(String, nullable=False, unique=True)
 
-    playlist_track = relationship("PlaylistTrack", back_populates="track")
+    playlist_tracks = relationship("PlaylistTrack", back_populates="track")
