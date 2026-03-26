@@ -397,6 +397,29 @@ function App() {
       console.error(error);
     }
   }
+  async function handleRemoveTrackFromPlaylist(trackId) {
+    if (!selectedPlaylist) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/playlists/${selectedPlaylist.id}/tracks/${trackId}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to remove track from playlist");
+      }
+
+      setPlaylistTracks((prev) => prev.filter((track) => track.id !== trackId));
+      setOpenMenuTrackId(null);
+    } catch (error) {
+      console.error(error);
+    }
+  }
   async function handlePlaylistClick(playlist) {
     try {
       const response = await fetch(
@@ -470,6 +493,63 @@ function App() {
                   {track.artist || "Unknown Artist"} •{" "}
                   {track.album || "Unknown Album"}
                 </div>
+              </div>
+
+              <div className="track-row__actions">
+                <button
+                  className="track-row__menu-button"
+                  type="button"
+                  aria-label="Track actions"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setOpenMenuTrackId((prev) => (prev === track.id ? null : track.id))
+                  }}
+                >
+                  ⋯
+                </button>
+
+                {openMenuTrackId === track.id && (
+                  <div
+                    className="track-row__menu"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <button
+                      className="track-row__menu-item"
+                      onClick={() => {
+                        handleAddToQueue(track)
+                        setOpenMenuTrackId(null)
+                      }}
+                      type="button"
+                    >
+                      Add to Queue
+                    </button>
+                    {playlists.length > 0 && (
+                      <>
+                        <div className="track-row__menu-divider" />
+                        <div className="track-row__menu-label">Add to Playlist</div>
+
+                        {playlists.map((playlist) => (
+                          <button
+                            key={playlist.id}
+                            className="track-row__menu-item"
+                            onClick={() => handleAddTrackToPlaylist(track.id, playlist.id)}
+                            type="button"
+                          >
+                            {playlist.name}
+                          </button>
+                        ))}
+                      </>
+                    )}
+                    <div className="track-row__menu-divider" />
+                    <button
+                      className="track-row__menu-item"
+                      onClick={() => handleRemoveTrackFromPlaylist(track.id)}
+                      type="button"
+                    >
+                      Remove from Playlist
+                    </button>
+                  </div>
+                )}
               </div>
             </button>
           ))}
