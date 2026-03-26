@@ -19,6 +19,11 @@ function App() {
   const [shuffleHistory, setShuffleHistory] = useState([]);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
+  const [queue, setQueue] = useState([]);
+  const [queueIndex, setQueueIndex] = useState(-1);
+  const [openMenuTrackId, setOpenMenuTrackId] = useState(null);
+  const [isQueueOpen, setIsQueueOpen] = useState(false);
+  const [originalQueue, setOriginalQueue] = useState([]);
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
@@ -44,9 +49,11 @@ function App() {
         setArtists(artistsData);
         setAlbums(albumsData);
 
-        if (tracksData.length > 0) {
-          setSelectedTrack(tracksData[0]);
-        }
+        setQueue([]);
+        setOriginalQueue([]);
+        setQueueIndex(-1);
+        setSelectedTrack(null);
+
       } catch (err) {
         setError("Could not load tracks.");
       } finally {
@@ -83,8 +90,23 @@ function App() {
   }, [volume, isMuted])
 
   function handleTrackClick(track){
+    setOpenMenuTrackId(null)
     setSelectedTrack(track);
     setActiveView("tracks");
+
+    const clickedIndex = visibleTracks.findIndex((item) => item.id === track.id)
+
+    const nextOriginalQueue = [...visibleTracks]
+    const beforeCurrent = nextOriginalQueue.slice(0, clickedIndex + 1)
+    const upcoming = nextOriginalQueue.slice(clickedIndex + 1)
+
+    const nextQueue = isShuffle
+      ? [...beforeCurrent, ...shuffleItems(upcoming)]
+      : nextOriginalQueue;
+
+    setOriginalQueue(nextOriginalQueue)
+    setQueue(nextQueue)
+    setQueueIndex(clickedIndex)
   }
   function handleArtistClick(artist) {
     setSelectedArtist(artist);
@@ -103,6 +125,14 @@ function App() {
     setSelectedAlbum(null)
     setSearchQuery("")
     setActiveView("tracks");
+  }
+  function handleAddToQueue(track) {
+  setQueue((prev) => [...prev, track]);
+  setOriginalQueue((prev) => [...prev,track])
+  setOpenMenuTrackId(null)
+  }
+  function handleToggleQueue() {
+  setIsQueueOpen((prev) => !prev);
   }
   function handleToggleMute() {
     setIsMuted((prev) => !prev)
@@ -132,7 +162,7 @@ function App() {
   }
 
   function handlePreviousTrack() {
-    if (!selectedTrack || !audioRef.current || visibleTracks.length === 0) {
+    if (!selectedTrack || !audioRef.current || queue.length === 0) {
       return;
     }
 
@@ -143,100 +173,149 @@ function App() {
     }
 
     if (isShuffle && shuffleHistory.length > 0) {
-      const previousTrackId = shuffleHistory[shuffleHistory.length - 1]
-      const previousTrack = visibleTracks.find((track) => track.id === previousTrackId)
+      const previousIndex = shuffleHistory[shuffleHistory.length - 1]
 
       setShuffleHistory((prev) => prev.slice(0, -1))
-      if (previousTrack) {
-        setSelectedTrack(previousTrack)
-      }
+      setQueueIndex(previousIndex)
+      setSelectedTrack(queue[previousIndex])
       return
     }
-    const currentIndex = visibleTracks.findIndex(
-      (track) => track.id === selectedTrack.id
-    );
 
-    if (currentIndex <= 0) {
+    if (queueIndex <= 0) {
       audioRef.current.currentTime = 0
       setCurrentTime(0)
       return
     }
-
-    setSelectedTrack(visibleTracks[currentIndex - 1]);
+    const prevIndex = queueIndex -1
+    setQueueIndex(prevIndex)
+    setSelectedTrack(queue[prevIndex]);
   }
 
   function handleNextTrack() {
-    if (!selectedTrack || visibleTracks.length === 0) {
+    if (!queue.length || queueIndex === -1) {
       return;
     }
-
-    if (isShuffle) {
-      if (visibleTracks.length === 1) {
-        return
-      }
-
-      let nextTrack;
-      do {
-        const randomIndex = Math.floor(Math.random() * visibleTracks.length)
-        nextTrack = visibleTracks[randomIndex]
-      } while (nextTrack.id === selectedTrack.id)
-
-      setShuffleHistory((prev) => [...prev,selectedTrack.id])
-      setSelectedTrack(nextTrack)
+    if (queueIndex >= queue.length -1) {
       return
     }
-    const currentIndex = visibleTracks.findIndex(
-      (track) => track.id === selectedTrack.id
-    );
-
-    if (currentIndex === -1 || currentIndex >= visibleTracks.length - 1) {
-      return;
+      const nextIndex = queueIndex + 1
+      setQueueIndex(nextIndex)
+      setSelectedTrack(queue[nextIndex])
+      return
+  }
+  
+  function handleToggleShuffle() {
+    setIsShuffle((prevIsShuffle) => {
+        const nextIsShuffle = !prevIsShuffle;
+    
+        if (queue.length === 0 || queueIndex < 0) {
+          return nextIsShuffle;
+        }
+      
+        if (nextIsShuffle) {
+          setQueue((prevQueue) => {
+            const beforeCurrent = prevQueue.slice(0, queueIndex + 1);
+            const upcoming = prevQueue.slice(queueIndex + 1);
+          
+            return [...beforeCurrent, ...shuffleItems(upcoming)];
+          });
+        } else {
+          setQueue(() => {
+            const currentTrack = queue[queueIndex];
+          
+            if (!currentTrack) {
+              return originalQueue;
+            }
+          
+            const restoredIndex = originalQueue.findIndex(
+              (track) => track.id === currentTrack.id
+            );
+          
+            if (restoredIndex === -1) {
+              return originalQueue;
+            }
+          
+            setQueueIndex(restoredIndex);
+            return originalQueue;
+          });
+        }
+      
+        return nextIsShuffle;
+    })
+  }
+  function shuffleItems(items) {
+    const shuffled = [...items];
+    
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const randomIndex = Math.floor(Math.random() * (index + 1));
+      [shuffled[index], shuffled[randomIndex]] = [
+        shuffled[randomIndex],
+        shuffled[index],
+      ];
     }
 
-    setSelectedTrack(visibleTracks[currentIndex + 1]);
-  }
-  function handleToggleShuffle() {
-    setIsShuffle((prev) => !prev);
+    return shuffled;
   }
 
   function handleToggleLoop() {
     setIsLoop((prev) => !prev);
   }
-  function playNextAvailableTrack() {
-    if (!selectedTrack || visibleTracks.length === 0) {
-      setIsPlaying(false);
-      return;
-    }
-
-    // Shuffle mode
-    if (isShuffle) {
-      if (visibleTracks.length === 1) {
-        return
-      }
-
-      let nextTrack 
-
-      do {
-        const randomIndex = Math.floor(Math.random() * visibleTracks.length)
-        nextTrack = visibleTracks[randomIndex]
-      } while (nextTrack.id === selectedTrack.id)
-
-      setShuffleHistory((prev) => [...prev, selectedTrack.id])
-      setSelectedTrack(nextTrack)
+  function handleRemoveFromQueue(indexToRemove) {
+    const trackToRemove = queue[indexToRemove]
+    if (!trackToRemove) {
       return
     }
 
-    // Normal mode
-    const currentIndex = visibleTracks.findIndex(
-      (track) => track.id === selectedTrack.id
-    );
+    setQueue((prevQueue) => prevQueue.filter((_, index) => index !== indexToRemove));
 
-    if (currentIndex === -1 || currentIndex >= visibleTracks.length - 1) {
+    setOriginalQueue((prevOriginalQueue) => {
+      const originalIndex = prevOriginalQueue.findIndex(
+        (track, index) =>
+          index >= queueIndex &&
+          track.id === trackToRemove.id
+    )
+    if (originalIndex === -1) {
+      return prevOriginalQueue
+    }
+    return prevOriginalQueue.filter((_, index) => index !== originalIndex)
+    })
+    if (indexToRemove < queueIndex) {
+      setQueueIndex((prevIndex) => prevIndex - 1);
+      return;
+    }
+
+    if (indexToRemove === queueIndex) {
+      const nextQueueLength = queue.length - 1;
+
+      if (nextQueueLength <= 0) {
+        setQueueIndex(-1);
+        setSelectedTrack(null);
+        setIsPlaying(false);
+
+        if (audioRef.current) {
+          audioRef.current.pause();
+        }
+        return;
+      }
+
+      const nextIndex = Math.min(queueIndex, nextQueueLength - 1);
+      setQueueIndex(nextIndex);
+      setSelectedTrack(queue[nextIndex === indexToRemove ? nextIndex + 1 : nextIndex] || null);
+    }
+  }
+  function playNextAvailableTrack() {
+    if (!queue.length || queueIndex === -1) {
       setIsPlaying(false);
       return;
     }
 
-    setSelectedTrack(visibleTracks[currentIndex + 1]);
+    if(queueIndex >= queue.length -1) {
+      setIsPlaying(false)
+      return
+    }
+    const nextIndex = queueIndex + 1
+    setQueueIndex(nextIndex)
+    setSelectedTrack(queue[nextIndex])
   }
   function handleSeek(event) {
     if (!audioRef.current || !progressBarRef.current || duration <= 0) {
@@ -347,6 +426,38 @@ function App() {
                 {track.album || "Unknown Album"}
               </div>
             </div>
+            <div className="track-row__actions">
+              <button
+                className="track-row__menu-button"
+                type="button"
+                aria-label="Track actions"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setOpenMenuTrackId((prev) =>
+                    prev === track.id ? null : track.id
+                  )
+                }}
+              >
+                ⋯
+              </button>
+            {openMenuTrackId === track.id && (
+              <div
+                className="track-row__menu"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  className="track-row__menu-item"
+                  onClick={() => {
+                    handleAddToQueue(track);
+                    setOpenMenuTrackId(null);
+                  }}
+                  type="button"
+                >
+                  Add to Queue
+                </button>
+              </div>
+            )}
+            </div>
           </button>
         ))}
       </div>
@@ -401,7 +512,10 @@ function App() {
   return (
     <div className="app-layout">
       <aside className="sidebar">
-        <div className="sidebar__brand">Adjacent</div>
+        <div className="sidebar__header">
+          <img className="logo" src="../public/Adjacent.svg"></img>
+          <div className="sidebar__brand">Adjacent</div>
+        </div>
 
         <nav className="sidebar__nav">
           <button 
@@ -442,24 +556,98 @@ function App() {
       </aside>
 
       <main className="main-content">
-        <header className="main-content__header">
-          <h1>{getHeaderTitle()}</h1>
-          {!loading && !error && (
-            <p className="main-content__subhead">{getHeaderSubtitle()}</p>
+        <div className={`content-layout ${isQueueOpen ? "content-layout--queue-open" : ""}`}>
+          <div className="content-layout__main">
+            <header className="main-content__header">
+              <h1>{getHeaderTitle()}</h1>
+              {!loading && !error && (
+                <p className="main-content__subhead">{getHeaderSubtitle()}</p>
+              )}
+            </header>
+
+            <div className="search-bar">
+              <input
+                className="search-input"
+                placeholder={`Search ${activeView}...`}
+                type="text"
+                value={searchQuery}
+                onChange={(event)=> setSearchQuery(event.target.value)}
+              />
+            </div>
+
+            <section className="main-content__body">{renderMainContent()}</section>
+          </div>
+          {isQueueOpen && (
+            <aside className="queue-panel">
+              <div className="queue-panel__header">
+                <h2>Queue</h2>
+                <p>{queue.length} tracks</p>
+              </div>
+          
+              {queueIndex >= 0 && queue[queueIndex] && (
+                <div className="queue-panel__section">
+                  <div className="queue-panel__section-title">Now Playing</div>
+              
+                  <button
+                    className="queue-panel__item queue-panel__item--active"
+                    onClick={() => {
+                      setSelectedTrack(queue[queueIndex]);
+                      setQueueIndex(queueIndex);
+                    }}
+                    type="button"
+                  >
+                    <div className="queue-panel__item-title">{queue[queueIndex].title}</div>
+                    <div className="queue-panel__item-meta">
+                      {queue[queueIndex].artist || "Unknown Artist"}
+                    </div>
+                  </button>
+                </div>
+              )}
+
+              <div className="queue-panel__section">
+                <div className="queue-panel__section-title">Next Up</div>
+            
+                <div className="queue-panel__list">
+                  {queue
+                    .slice(queueIndex + 1)
+                    .map((track, index) => {
+                      const actualIndex = queueIndex + 1 + index;
+                    
+                      return (
+                        <div
+                          key={`${track.id}-${actualIndex}`}
+                          className="queue-panel__item queue-panel__item--row"
+                        >
+                          <button
+                            className="queue-panel__item-main"
+                            onClick={() => {
+                              setSelectedTrack(track);
+                              setQueueIndex(actualIndex);
+                            }}
+                            type="button"
+                          >
+                            <div className="queue-panel__item-title">{track.title}</div>
+                            <div className="queue-panel__item-meta">
+                              {track.artist || "Unknown Artist"}
+                            </div>
+                          </button>
+                          
+                          <button
+                            className="queue-panel__remove-button"
+                            onClick={() => handleRemoveFromQueue(actualIndex)}
+                            type="button"
+                            aria-label="Remove from queue"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </aside>
           )}
-        </header>
-
-        <div className="search-bar">
-          <input
-            className="search-input"
-            placeholder={`Search ${activeView}...`}
-            type="text"
-            value={searchQuery}
-            onChange={(event)=> setSearchQuery(event.target.value)}
-          />
         </div>
-
-        <section className="main-content__body">{renderMainContent()}</section>
       </main>
 
       <footer className="player-bar">
@@ -548,6 +736,16 @@ function App() {
         </div>
 
         <div className="player-bar__right">
+          <button
+            className={`player-bar__icon-button ${
+              isQueueOpen ? "player-bar__icon-button--active" : ""
+            }`}
+            type="button"
+            aria-label="Queue"
+            onClick={handleToggleQueue}
+          >
+            ☰
+          </button>
           <button
             className="player-bar__icon-button"
             type="button"
