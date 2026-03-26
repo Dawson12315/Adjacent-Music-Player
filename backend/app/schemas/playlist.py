@@ -7,3 +7,6 @@ class PlaylistResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class PlaylistCreate(BaseModel):
+    name: str
