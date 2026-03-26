@@ -10,3 +10,6 @@ class PlaylistResponse(BaseModel):
 
 class PlaylistCreate(BaseModel):
     name: str
+
+class PlaylistTrackCreate(BaseModel):
+    track_id: int
