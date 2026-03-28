@@ -103,7 +103,33 @@ button {
   font-size: 0.95rem;
   margin-bottom: 8px;
 }
+.sidebar__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
 
+.sidebar__section-action {
+  opacity: 0;
+  pointer-events: none;
+  background: transparent;
+  border: none;
+  color: #b3b3b3;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  transition: opacity 0.2s ease, color 0.2s ease;
+}
+
+.sidebar__section--playlists:hover .sidebar__section-action,
+.sidebar__section-action:focus {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar__section-action:hover {
+  color: #ffffff;
+}
 .sidebar__link--active {
   color: #ffffff;
   font-weight: 600;

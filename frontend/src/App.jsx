@@ -31,6 +31,7 @@ function App() {
   const [openPlaylistMenuId, setOpenPlaylistMenuId] = useState(null);
   const [editingPlaylistId, setEditingPlaylistId] = useState(null);
   const [editingPlaylistName, setEditingPlaylistName] = useState("");
+  const [isCreatingPlaylist, setIsCreatingPlaylist] = useState(false);
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
@@ -388,6 +389,7 @@ function App() {
         })
       )
       setNewPlaylistName("");
+      setIsCreatingPlaylist(false)
     } catch (error) {
       console.error(error);
     }
@@ -871,14 +873,52 @@ function App() {
           </button>
         </nav>
 
-        <div className="sidebar__section">
-          <div className="sidebar__section-title">Playlists</div>
-            {playlists.length === 0 ? (
-              <div className="sidebar__stat">No playlists yet</div>
-            ) : (
-              playlists.map((playlist) => (
-                <div key={playlist.id} className="playlist-sidebar-item">
-                  {editingPlaylistId === playlist.id ? (
+        <div className="sidebar__section sidebar__section--playlists">
+          <div className="sidebar__section-header">
+            <div className="sidebar__section-title">Playlists</div>
+            <button
+              className="sidebar__section-action"
+              type="button"
+              aria-label="Create playlist"
+              onClick={() => setIsCreatingPlaylist((prev) => !prev)}
+            >
+              +
+            </button>
+          </div>
+          {isCreatingPlaylist && (
+            <div className="playlist-create">
+              <input
+                className="playlist-create__input"
+                type="text"
+                placeholder="New Playlist"
+                value={newPlaylistName}
+                onChange={(event) => setNewPlaylistName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    handleCreatePlaylist()
+                  }
+                  if (event.key === "Escape") {
+                    setIsCreatingPlaylist(false)
+                    setNewPlaylistName("")
+                  }
+                }}
+                autoFocus
+              />
+              <button
+                className="playlist-create__button"
+                type="button"
+                onClick={handleCreatePlaylist}
+              >
+                Create
+              </button>
+            </div>
+          )}
+          {playlists.length === 0 ? (
+            <div className="sidebar__stat">No playlists yet</div>
+          ) : (
+            playlists.map((playlist) => (
+              <div key={playlist.id} className="playlist-sidebar-item">
+                {editingPlaylistId === playlist.id ? (
                     <input
                       className="playlist-sidebar-item__input"
                       type="text"
@@ -953,23 +993,6 @@ function App() {
                 </div>
               ))
             )}
-          </div>
-          <div className="playlist-create">
-            <input
-              className="playlist-create__input"
-              type="text"
-              placeholder="New playlist"
-              value={newPlaylistName}
-              onChange={(event) => setNewPlaylistName(event.target.value)}
-            />
-
-            <button
-              className="playlist-create__button"
-              type="button"
-              onClick={handleCreatePlaylist}
-            >
-              Create
-            </button>
           </div>
         <div className="sidebar__section">
           <div className="sidebar__section-title">Library</div>

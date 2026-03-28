@@ -23,7 +23,6 @@ Introduce:
 - Heart icon: toggle switch in playbar, reflecting if a song is in liked songs or not(if yes, light up, if no stay empty), toggle on also can place currently playing in liked songs.
 
 Current Phase Improvements:
-- Hide the create playlist behind a toggle plus symbol, next to playlists section titile
 - Queue: persistent in DB
 - Currently Playing: persistent in DB
 - Currently Playing: scrolls song title, if text is too long
