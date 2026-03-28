@@ -13,6 +13,7 @@ from app.routes.playlists import router as playlists_router
 from app.db import Base, engine, SessionLocal
 from app.services.playlists import ensure_liked_songs_playlist
 from app.services.playback import get_or_create_playback_session
+from app.routes.playback import router as playback_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -49,3 +50,4 @@ app.include_router(scan_router, prefix="/api")
 app.include_router(artists_router, prefix="/api")
 app.include_router(albums_router, prefix="/api")
 app.include_router(playlists_router, prefix="/api")
+app.include_router(playback_router, prefix="/api")
