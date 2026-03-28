@@ -796,6 +796,18 @@ function App() {
         </div>
       )
     }
+    if (activeView === "settings") {
+      return (
+        <div className="settings-page">
+          <div className="settings-card">
+            <div className="settings-card__title">Settings</div>
+            <div className="settings-card__text">
+              Settings options will live here.
+            </div>
+          </div>
+        </div>
+      );
+    }
     if (activeView === "artists") {
       return (
         <div className="simple-list">
@@ -930,6 +942,9 @@ function App() {
     if (activeView === "playlist" && selectedPlaylist) {
       return selectedPlaylist.name
     }
+    if (activeView === "settings") {
+      return "Settings";
+    }
 
     if (selectedArtist) {
       return selectedArtist
@@ -954,6 +969,9 @@ function App() {
     }
     if (activeView === "playlist" && selectedPlaylist) {
       return `${playlistTracks.length} tracks`
+    }
+    if (activeView === "settings") {
+      return "App preferences and playback options";
     }
 
     return `${visibleTracks.length} tracks`;
@@ -1129,6 +1147,21 @@ function App() {
               ))
             )}
           </div>
+          <div className="sidebar__section">
+            <button
+              className={`sidebar__link ${activeView === "settings" ? "sidebar__link--active"             : ""}`}
+              onClick={() => {
+                setActiveView("settings");
+                setSearchQuery("");
+                setSelectedArtist(null);
+                setSelectedAlbum(null);
+                setSelectedPlaylist(null);
+              }}
+              type="button"
+            >
+              Settings
+            </button>
+          </div>
         <div className="sidebar__section">
           <div className="sidebar__section-title">Library</div>
           <div className="sidebar__stat">Tracks: {tracks.length}</div>
@@ -1146,17 +1179,17 @@ function App() {
                 <p className="main-content__subhead">{getHeaderSubtitle()}</p>
               )}
             </header>
-
-            <div className="search-bar">
-              <input
-                className="search-input"
-                placeholder={`Search ${activeView}...`}
-                type="text"
-                value={searchQuery}
-                onChange={(event)=> setSearchQuery(event.target.value)}
-              />
-            </div>
-
+            {activeView !== "settings" && (
+              <div className="search-bar">
+                <input
+                  className="search-input"
+                  placeholder={`Search ${activeView}...`}
+                  type="text"
+                  value={searchQuery}
+                  onChange={(event)=> setSearchQuery(event.target.value)}
+                />
+              </div>
+            )}
             <section className="main-content__body">{renderMainContent()}</section>
           </div>
           {isQueueOpen && (
