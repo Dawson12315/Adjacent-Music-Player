@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Boolean, Column, Integer, String
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -9,6 +9,8 @@ class Playlist(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, unique=True)
+    is_system = Column(Boolean, nullable=False, default=False)
+    system_key = Column(String, nullable=True, unique=True)
 
     playlist_tracks = relationship(
         "PlaylistTrack",
