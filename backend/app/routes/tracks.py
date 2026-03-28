@@ -47,3 +47,14 @@ def stream_track(track_id: int, db: Session = Depends(get_db)):
         media_type=media_type,
         filename=file_path.name,
     )
+    
+@router.delete("/tracks/purge", tags=["tracks"])
+def purge_tracks(db: Session = Depends(get_db)):
+    deleted_count = db.query(Track).count()
+    db.query(Track).delete()
+    db.commit()
+
+    return {
+        "message": "All stored tracks purged",
+        "deleted_count": deleted_count,
+    }
