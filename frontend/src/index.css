@@ -531,6 +531,29 @@ button {
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-card {
+  background: #181818;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.settings-card__title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.settings-card__text {
+  color: #b3b3b3;
+  font-size: 0.95rem;
+}
 .player-bar {
   grid-row: 2 / 3;
   grid-column: 1 / 3;
