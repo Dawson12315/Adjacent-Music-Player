@@ -32,9 +32,11 @@ function App() {
   const [editingPlaylistId, setEditingPlaylistId] = useState(null);
   const [editingPlaylistName, setEditingPlaylistName] = useState("");
   const [isCreatingPlaylist, setIsCreatingPlaylist] = useState(false);
+  const [hasRestoredPlayback, setHasRestoredPlayback] = useState(false);
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
+  const pendingSeekRef = useRef(null)
   
   useEffect(() =>{
     async function fetchLibraryData() {
@@ -46,7 +48,12 @@ function App() {
           fetch("http://127.0.0.1:8000/api/playlists"),
         ])
 
-        if (!tracksResponse.ok || !artistsResponse.ok || !albumsResponse.ok){
+        if (
+          !tracksResponse.ok ||
+          !artistsResponse.ok ||
+          !albumsResponse.ok ||
+          !playlistsResponse.ok
+        ){
           throw new Error("Failed to fetch library data");
         }
 
@@ -65,15 +72,55 @@ function App() {
             return a.name.localeCompare(b.name)
           })
         );
+        // Restore playback state
+        const playbackResponse = await fetch("http://127.0.0.1:8000/api/playback");
 
-        setQueue([]);
-        setOriginalQueue([]);
-        setQueueIndex(-1);
-        setSelectedTrack(null);
+        if (playbackResponse.ok) {
+          const playbackData = await playbackResponse.json();
+        
+          const {
+            current_track_id,
+            queue_index,
+            current_time_seconds,
+            is_playing,
+            is_shuffle,
+            is_loop,
+            queue_track_ids,
+          } = playbackData;
+        
+          // rebuild queue from track IDs
+          const trackMap = new Map(tracksData.map((track) => [track.id, track]));
+        
+          const restoredQueue = queue_track_ids
+            .map((id) => trackMap.get(id))
+            .filter(Boolean);
+        
+          setQueue(restoredQueue);
+          setOriginalQueue(restoredQueue);
+          setQueueIndex(queue_index);
+          setIsShuffle(is_shuffle);
+          setIsLoop(is_loop)
+        
+          let restoredTrack = null;
 
+          if (restoredQueue.length > 0 && queue_index >= 0 && restoredQueue[queue_index]) {
+            restoredTrack = restoredQueue[queue_index];
+          } else if (current_track_id) {
+            restoredTrack = trackMap.get(current_track_id) || null;
+          }
+
+          setSelectedTrack(restoredTrack);
+        
+          if (Number.isFinite(current_time_seconds)) {
+            setCurrentTime(current_time_seconds);
+            pendingSeekRef.current = current_time_seconds
+          }
+          setIsPlaying(is_playing);
+        }
       } catch (err) {
         setError("Could not load tracks.");
       } finally {
+        setHasRestoredPlayback(true);
         setLoading(false);
       }
     }
@@ -81,22 +128,27 @@ function App() {
   }, []);
 
   useEffect(() => {
-    async function playSelectedTrack() {
-      if (!selectedTrack || !audioRef.current) {
-        return;
-      }
-      audioRef.current.src = `http://127.0.0.1:8000/api/tracks/${selectedTrack.id}/stream`;
+    if (!selectedTrack || !audioRef.current) {
+      return;
+    }
+  
+    audioRef.current.src = `http://127.0.0.1:8000/api/tracks/${selectedTrack.id}/stream`;
+    audioRef.current.load();
+  }, [selectedTrack]);
 
-      try {
-        await audioRef.current.play();
-        setIsPlaying(true);
-      } catch (err) {
-        setIsPlaying(false);
-      }
+  useEffect(() => {
+    if (!audioRef.current || !selectedTrack) {
+      return;
     }
 
-    playSelectedTrack();
-  }, [selectedTrack]);
+    if (isPlaying) {
+      audioRef.current.play().catch(() => {
+        setIsPlaying(false);
+      });
+    } else {
+      audioRef.current.pause();
+    }
+  }, [isPlaying, selectedTrack]);
 
   useEffect(() => {
     if (!audioRef.current) {
@@ -113,6 +165,89 @@ function App() {
 
     return visibleTracks;
   }
+
+  useEffect(() => {
+    if (!hasRestoredPlayback) {
+      return;
+    }
+
+    async function savePlaybackState() {
+      const queueTrackIds = queue.map((track) => track.id);
+
+      try {
+        await fetch("http://127.0.0.1:8000/api/playback", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            current_track_id: selectedTrack ? selectedTrack.id : null,
+            queue_index: queueIndex,
+            current_time_seconds: Math.floor(currentTime),
+            is_playing: isPlaying,
+            is_shuffle: isShuffle,
+            is_loop: isLoop,
+            queue_track_ids: queueTrackIds,
+          }),
+        });
+      } catch (error) {
+        console.error("Failed to save playback state", error);
+      }
+    }
+
+    savePlaybackState();
+  }, [
+    hasRestoredPlayback,
+    selectedTrack,
+    queue,
+    queueIndex,
+    isPlaying,
+    isShuffle,
+    isLoop,
+  ]);
+
+  useEffect(() => {
+    if (!hasRestoredPlayback) {
+      return;
+    }
+
+    if (isPlaying) {
+      return;
+    }
+
+    async function savePlaybackTime() {
+      try {
+        await fetch("http://127.0.0.1:8000/api/playback", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            current_track_id: selectedTrack ? selectedTrack.id : null,
+            queue_index: queueIndex,
+            current_time_seconds: Math.floor(currentTime),
+            is_playing: isPlaying,
+            is_shuffle: isShuffle,
+            is_loop: isLoop,
+            queue_track_ids: queue.map((track) => track.id),
+          }),
+        });
+      } catch (error) {
+        console.error("Failed to save playback time", error);
+      }
+    }
+
+    savePlaybackTime();
+  }, [
+    hasRestoredPlayback,
+    currentTime,
+    isPlaying,
+    selectedTrack,
+    queue,
+    queueIndex,
+    isShuffle,
+    isLoop,
+  ]);
 
   function handleTrackClick(track){
     setOpenMenuTrackId(null)
@@ -1234,6 +1369,10 @@ function App() {
           onLoadedMetadata={() => {
             if (audioRef.current) {
               setDuration(audioRef.current.duration)
+              if(Number.isFinite(pendingSeekRef.current)) {
+                audioRef.current.currentTime = pendingSeekRef.current
+                pendingSeekRef.current = null
+              }
             }
           }}
         />
