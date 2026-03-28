@@ -28,6 +28,9 @@ function App() {
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [selectedPlaylist, setSelectedPlaylist] = useState(null);
   const [playlistTracks, setPlaylistTracks] = useState([]);
+  const [openPlaylistMenuId, setOpenPlaylistMenuId] = useState(null);
+  const [editingPlaylistId, setEditingPlaylistId] = useState(null);
+  const [editingPlaylistName, setEditingPlaylistName] = useState("");
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
@@ -54,7 +57,13 @@ function App() {
         setTracks(tracksData);
         setArtists(artistsData);
         setAlbums(albumsData);
-        setPlaylists(playlistsData);
+        setPlaylists(
+          [...playlistsData].sort((a, b) => {
+            if (a.system_key === "liked_songs") return -1
+            if (b.system_key === "liked_songs") return 1
+            return a.name.localeCompare(b.name)
+          })
+        );
 
         setQueue([]);
         setOriginalQueue([]);
@@ -107,7 +116,6 @@ function App() {
   function handleTrackClick(track){
     setOpenMenuTrackId(null)
     setSelectedTrack(track);
-    setActiveView("tracks");
 
     const sourceTracks = getPlaybackSourceTracks()
     const clickedIndex = sourceTracks.findIndex((item) => item.id === track.id)
@@ -123,6 +131,10 @@ function App() {
     setOriginalQueue(nextOriginalQueue)
     setQueue(nextQueue)
     setQueueIndex(clickedIndex)
+
+    if (activeView !== "playlist") {
+      setActiveView("tracks")
+    }
   }
   function handleArtistClick(artist) {
     setSelectedArtist(artist);
@@ -368,7 +380,13 @@ function App() {
 
       const createdPlaylist = await response.json();
 
-      setPlaylists((prev) => [...prev, createdPlaylist].sort((a, b) => a.name.localeCompare(b.name)));
+      setPlaylists((prev) => 
+        [...prev, createdPlaylist].sort((a, b) => {
+          if (a.system_key === "liked_songs") return -1
+          if (b.system_key === "liked_songs") return 1
+          return a.name.localeCompare(b.name)
+        })
+      )
       setNewPlaylistName("");
     } catch (error) {
       console.error(error);
@@ -441,6 +459,91 @@ function App() {
     } catch (error) {
       console.error(error);
     }
+  }
+  async function handleDeletePlaylist(playlistId) {
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/playlists/${playlistId}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to delete playlist");
+      }
+
+      setPlaylists((prev) => prev.filter((playlist) => playlist.id !== playlistId));
+
+      if (selectedPlaylist?.id === playlistId) {
+        setSelectedPlaylist(null);
+        setPlaylistTracks([]);
+        setActiveView("tracks");
+      }
+
+      setOpenPlaylistMenuId(null);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  function handleStartRenamePlaylist(playlist) {
+    setEditingPlaylistId(playlist.id)
+    setEditingPlaylistName(playlist.name)
+    setOpenPlaylistMenuId(null)
+  }
+
+  async function handleSubmitRenamePlaylist(playlistId) {
+    const trimmedName = editingPlaylistName.trim()
+
+    if (!trimmedName) {
+      setEditingPlaylistId(null)
+      setEditingPlaylistName("")
+      return
+    }
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/playlists/${playlistId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ name: trimmedName }),
+        }
+      )
+      if (!response.ok) {
+        throw new Error("Failed to rename playlist")
+      }
+      const updatedPlaylist = await response.json()
+
+      setPlaylists((prev) =>
+        prev
+          .map((item) =>
+            item.id === updatedPlaylist.id ? updatedPlaylist: item
+          )
+          .sort((a,b) => {
+            if (a.system_key === "liked_songs") return -1
+            if (b.system_key === "liked_songs") return 1
+            return a.name.localeCompare(b.name)
+          })
+      )
+
+      if (selectedPlaylist?.id === updatedPlaylist.id) {
+        setSelectedPlaylist(updatedPlaylist)
+      }
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setEditingPlaylistId(null)
+      setEditingPlaylistName("")
+    }
+  }
+
+  function handleCancelRenamePlaylist() {
+    setEditingPlaylistId(null)
+    setEditingPlaylistName("")
   }
 
   const visibleTracks = tracks.filter((track) => {
@@ -774,18 +877,80 @@ function App() {
               <div className="sidebar__stat">No playlists yet</div>
             ) : (
               playlists.map((playlist) => (
-                <button
-                  key={playlist.id}
-                  className={`sidebar__link ${
-                    activeView === "playlist" && selectedPlaylist?.id === playlist.id
-                      ? "sidebar__link--active"
-                      : ""
-                  }`}
-                    onClick={() => handlePlaylistClick(playlist)}
-                    type="button"
-                >
-                  {playlist.name}
-                </button>
+                <div key={playlist.id} className="playlist-sidebar-item">
+                  {editingPlaylistId === playlist.id ? (
+                    <input
+                      className="playlist-sidebar-item__input"
+                      type="text"
+                      value={editingPlaylistName}
+                      autoFocus
+                      onChange={(event) => setEditingPlaylistName(event.target.value)}
+                      onClick={(event) => event.stopPropagation()}
+                      onBlur={handleCancelRenamePlaylist}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          handleSubmitRenamePlaylist(playlist.id);
+                        }
+                      
+                        if (event.key === "Escape") {
+                          handleCancelRenamePlaylist();
+                        }
+                      }}
+                    />
+                  ) : (
+                    <button
+                      className={`sidebar__link playlist-sidebar-item__main ${
+                        activeView === "playlist" && selectedPlaylist?.id === playlist.id
+                          ? "sidebar__link--active"
+                          : ""
+                      }`}
+                      onClick={() => handlePlaylistClick(playlist)}
+                      type="button"
+                    >
+                      {playlist.name}
+                    </button>
+                  )}
+                  {!playlist.is_system && (
+                    <div className="playlist-sidebar-item__actions">
+                      <button
+                        className="playlist-sidebar-item__menu-button"
+                        type="button"
+                        aria-label="Playlist actions"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          setOpenPlaylistMenuId((prev) =>
+                            prev === playlist.id ? null : playlist.id
+                          )
+                        }}
+                      >
+                        ⋯
+                      </button>
+
+                      {openPlaylistMenuId === playlist.id && (
+                        <div
+                          className="playlist-sidebar-item__menu"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <button
+                            className="playlist-sidebar-item__menu-item"
+                            type="button"
+                            onClick={() => handleStartRenamePlaylist(playlist)}
+                          >
+                            Rename Playlist
+                          </button>
+
+                          <button
+                            className="playlist-sidebar-item__menu-item"
+                            type="button"
+                            onClick={() => handleDeletePlaylist(playlist.id)}
+                          >
+                            Delete Playlist
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               ))
             )}
           </div>

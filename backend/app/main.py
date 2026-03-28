@@ -10,6 +10,8 @@ from app.routes.scan import router as scan_router
 from app.routes.artists import router as artists_router
 from app.routes.albums import router as albums_router
 from app.routes.playlists import router as playlists_router
+from app.db import Base, engine, SessionLocal
+from app.services.playlists import ensure_liked_songs_playlist
 
 app = FastAPI(
     title=settings.app_name,
@@ -31,6 +33,12 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
+
+    db = SessionLocal()
+    try:
+        ensure_liked_songs_playlist(db)
+    finally:
+        db.close()
 
 
 app.include_router(health_router, prefix="/api")

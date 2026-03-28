@@ -5,7 +5,12 @@ from app.db import get_db
 from app.models.playlist import Playlist
 from app.models.playlist_track import PlaylistTrack
 from app.models.track import Track
-from app.schemas.playlist import PlaylistCreate, PlaylistResponse, PlaylistTrackCreate
+from app.schemas.playlist import (
+    PlaylistCreate,
+    PlaylistResponse,
+    PlaylistRename,
+    PlaylistTrackCreate
+)
 from app.schemas.track import TrackResponse
 
 router = APIRouter()
@@ -157,6 +162,9 @@ def delete_playlist(playlist_id: int, db: Session = Depends(get_db)):
 
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
+    
+    if playlist.is_system:
+        raise HTTPException(status_code=400, detail="System playlists cannot be deleted")
 
     db.delete(playlist)
     db.commit()
@@ -165,3 +173,32 @@ def delete_playlist(playlist_id: int, db: Session = Depends(get_db)):
         "message": "Playlist deleted",
         "playlist_id": playlist_id,
     }
+
+@router.patch("/playlists/{playlist_id}", response_model=PlaylistResponse, tags=["playlists"])
+def rename_playlist(
+    playlist_id: int,
+    payload: PlaylistRename,
+    db: Session = Depends(get_db),
+):
+    playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
+
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+
+    if playlist.is_system:
+        raise HTTPException(status_code=400, detail="System playlists cannot be renamed")
+
+    existing = (
+        db.query(Playlist)
+        .filter(Playlist.name == payload.name, Playlist.id != playlist_id)
+        .first()
+    )
+
+    if existing:
+        raise HTTPException(status_code=400, detail="Playlist already exists")
+
+    playlist.name = payload.name
+    db.commit()
+    db.refresh(playlist)
+
+    return playlist

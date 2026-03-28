@@ -115,7 +115,83 @@ button {
   gap: 8px;
   margin-bottom: 14px;
 }
+.playlist-sidebar-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
 
+.playlist-sidebar-item__main {
+  min-width: 0;
+}
+
+.playlist-sidebar-item__actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.playlist-sidebar-item__menu-button {
+  opacity: 0;
+  pointer-events: none;
+  background: transparent;
+  border: none;
+  color: #b3b3b3;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: opacity 0.2s ease, color 0.2s ease;
+}
+
+.playlist-sidebar-item:hover .playlist-sidebar-item__menu-button,
+.playlist-sidebar-item__menu-button:focus {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.playlist-sidebar-item__menu-button:hover {
+  color: #ffffff;
+}
+
+.playlist-sidebar-item__menu {
+  position: absolute;
+  right: 0;
+  top: 28px;
+  background: #282828;
+  border-radius: 6px;
+  padding: 6px 0;
+  min-width: 150px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+  z-index: 20;
+}
+
+.playlist-sidebar-item__menu-item {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  text-align: left;
+  padding: 8px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.playlist-sidebar-item__menu-item:hover {
+  background: #3e3e3e;
+}
+.playlist-sidebar-item__input {
+  width: 100%;
+  background: #181818;
+  border: 1px solid #535353;
+  border-radius: 6px;
+  color: #ffffff;
+  font: inherit;
+  padding: 8px 10px;
+  outline: none;
+}
 .playlist-create__input {
   width: 100%;
   background: #181818;
