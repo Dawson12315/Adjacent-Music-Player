@@ -14,6 +14,9 @@ from app.db import Base, engine, SessionLocal
 from app.services.playlists import ensure_liked_songs_playlist
 from app.services.playback import get_or_create_playback_session
 from app.routes.playback import router as playback_router
+from app.routes.settings import router as settings_router
+from app.routes.maintenance import router as maintenance_router
+from app.services.scheduler import start_scheduler
 
 app = FastAPI(
     title=settings.app_name,
@@ -43,6 +46,8 @@ def on_startup():
     finally:
         db.close()
 
+    start_scheduler()
+
 
 app.include_router(health_router, prefix="/api")
 app.include_router(tracks_router, prefix="/api")
@@ -51,3 +56,5 @@ app.include_router(artists_router, prefix="/api")
 app.include_router(albums_router, prefix="/api")
 app.include_router(playlists_router, prefix="/api")
 app.include_router(playback_router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
+app.include_router(maintenance_router, prefix="/api")
