@@ -33,6 +33,8 @@ function App() {
   const [editingPlaylistName, setEditingPlaylistName] = useState("");
   const [isCreatingPlaylist, setIsCreatingPlaylist] = useState(false);
   const [hasRestoredPlayback, setHasRestoredPlayback] = useState(false);
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [settingsNotice, setSettingsNotice] = useState("");
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
@@ -165,6 +167,18 @@ function App() {
 
     return visibleTracks;
   }
+
+  useEffect(() => {
+    if (!settingsNotice) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setSettingsNotice("");
+    }, 5000);
+
+    return () => clearTimeout(timeout);
+  }, [settingsNotice]);
 
   useEffect(() => {
     if (!hasRestoredPlayback) {
@@ -683,6 +697,91 @@ function App() {
     setEditingPlaylistName("")
   }
 
+  async function handlePurgeTracks() {
+    try {
+      const response = await fetch("http://127.0.0.1:8000/api/tracks/purge", {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to purge tracks");
+      }
+
+      setTracks([]);
+      setPlaylistTracks([]);
+      setQueue([]);
+      setOriginalQueue([]);
+      setQueueIndex(-1);
+      setSelectedTrack(null);
+      setCurrentTime(0);
+      setDuration(0);
+      setIsPlaying(false);
+      setSelectedArtist(null);
+      setSelectedAlbum(null);
+
+      setConfirmAction(null);
+      setSettingsNotice("Stored tracks were purged successfully.");
+    } catch (error) {
+      console.error(error);
+      setConfirmAction(null);
+      setSettingsNotice("Failed to purge stored tracks.");
+    }
+  }
+
+  async function handleScanLibrary() {
+    try {
+      const response = await fetch("http://127.0.0.1:8000/api/scan?limit=100000", {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to scan library");
+      }
+
+      await response.json();
+
+      const [tracksResponse, artistsResponse, albumsResponse, playlistsResponse] =
+        await Promise.all([
+          fetch("http://127.0.0.1:8000/api/tracks"),
+          fetch("http://127.0.0.1:8000/api/artists"),
+          fetch("http://127.0.0.1:8000/api/albums"),
+          fetch("http://127.0.0.1:8000/api/playlists"),
+        ]);
+
+      if (
+        !tracksResponse.ok ||
+        !artistsResponse.ok ||
+        !albumsResponse.ok ||
+        !playlistsResponse.ok
+      ) {
+        throw new Error("Failed to refresh library after scan");
+      }
+
+      const tracksData = await tracksResponse.json();
+      const artistsData = await artistsResponse.json();
+      const albumsData = await albumsResponse.json();
+      const playlistsData = await playlistsResponse.json();
+
+      setTracks(tracksData);
+      setArtists(artistsData);
+      setAlbums(albumsData);
+      setPlaylists(
+        [...playlistsData].sort((a, b) => {
+          if (a.system_key === "liked_songs") return -1;
+          if (b.system_key === "liked_songs") return 1;
+          return a.name.localeCompare(b.name);
+        })
+      );
+
+      setConfirmAction(null);
+      setSettingsNotice("Library scan completed successfully.");
+    } catch (error) {
+      console.error(error);
+      setConfirmAction(null);
+      setSettingsNotice("Failed to scan the music library.");
+    }
+  }
+
   const visibleTracks = tracks.filter((track) => {
     const matchesArtist = selectedArtist ? track.artist === selectedArtist : true
     const matchesAlbum = selectedAlbum ? track.album === selectedAlbum : true
@@ -799,11 +898,81 @@ function App() {
     if (activeView === "settings") {
       return (
         <div className="settings-page">
-          <div className="settings-card">
-            <div className="settings-card__title">Settings</div>
-            <div className="settings-card__text">
-              Settings options will live here.
+          {settingsNotice && (
+            <div className="settings-notice">
+              {settingsNotice}
             </div>
+          )}
+          <div className="settings-card settings-card--danger">
+            <div className="settings-card__title">Purge stored tracks</div>
+            <div className="settings-card__text">
+              Warning: Removes all indexed tracks from the database and clears playlist track entries plus playback state. Music files on the volume, will not be deleted.
+            </div>
+            {confirmAction === "purge_tracks" ? (
+              <div className="settings-card__actions">
+                <button
+                  className="settings-button settings-button--secondary"
+                  type="button"
+                  onClick={() => setConfirmAction(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="settings-button settings-button--danger"
+                  type="button"
+                  onClick={handlePurgeTracks}
+                >
+                  Go Ahead
+                </button>
+              </div>
+            ) : (
+              <div className="settings-card__actions">
+                <button
+                  className="settings-button settings-button--danger"
+                  type="button"
+                  onClick={() => setConfirmAction("purge_tracks")}
+                >
+                  Purge Database Tracks
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="settings-card">
+            <div className="settings-card__title">Scan entire music library</div>
+            <div className="settings-card__text">
+              Scans your full music library for new files and adds any newly found tracks
+              to the database.
+            </div>
+
+            {confirmAction === "scan_library" ? (
+              <div className="settings-card__actions">
+                <button
+                  className="settings-button settings-button--secondary"
+                  type="button"
+                  onClick={() => setConfirmAction(null)}
+                >
+                  Cancel
+                </button>
+            
+                <button
+                  className="settings-button"
+                  type="button"
+                  onClick={handleScanLibrary}
+                >
+                  Go ahead
+                </button>
+              </div>
+            ) : (
+              <div className="settings-card__actions">
+                <button
+                  className="settings-button"
+                  type="button"
+                  onClick={() => setConfirmAction("scan_library")}
+                >
+                  Scan library now
+                </button>
+              </div>
+            )}
           </div>
         </div>
       );

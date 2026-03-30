@@ -8,6 +8,6 @@ router = APIRouter()
 
 
 @router.post("/scan", response_model=ScanResponse, tags=["scan"])
-def run_scan(limit: int = Query(20, ge=1, le=1000)):
+def run_scan(limit: int = Query(20, ge=1)):
     result = scan_directory(settings.music_library_path, limit=limit)
     return result
