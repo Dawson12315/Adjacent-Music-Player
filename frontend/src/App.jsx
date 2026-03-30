@@ -35,6 +35,12 @@ function App() {
   const [hasRestoredPlayback, setHasRestoredPlayback] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
   const [settingsNotice, setSettingsNotice] = useState("");
+  const [appSettings, setAppSettings] = useState({
+    cleanup_enabled: false,
+    cleanup_time: "",
+    scan_enabled: false,
+    scan_time: "",
+  });
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
@@ -43,18 +49,26 @@ function App() {
   useEffect(() =>{
     async function fetchLibraryData() {
       try {
-        const [tracksResponse, artistsResponse, albumsResponse, playlistsResponse] = await Promise.all([
+        const [
+          tracksResponse,
+          artistsResponse,
+          albumsResponse,
+          playlistsResponse,
+          settingsResponse
+        ] = await Promise.all([
           fetch("http://127.0.0.1:8000/api/tracks"),
           fetch("http://127.0.0.1:8000/api/artists"),
           fetch("http://127.0.0.1:8000/api/albums"),
           fetch("http://127.0.0.1:8000/api/playlists"),
+          fetch("http://127.0.0.1:8000/api/settings")
         ])
 
         if (
           !tracksResponse.ok ||
           !artistsResponse.ok ||
           !albumsResponse.ok ||
-          !playlistsResponse.ok
+          !playlistsResponse.ok ||
+          !settingsResponse.ok
         ){
           throw new Error("Failed to fetch library data");
         }
@@ -63,6 +77,7 @@ function App() {
         const artistsData = await artistsResponse.json();
         const albumsData = await albumsResponse.json();
         const playlistsData = await playlistsResponse.json();
+        const settingsData = await settingsResponse.json()
 
         setTracks(tracksData);
         setArtists(artistsData);
@@ -73,7 +88,13 @@ function App() {
             if (b.system_key === "liked_songs") return 1
             return a.name.localeCompare(b.name)
           })
-        );
+        )
+        setAppSettings({
+          cleanup_enabled: settingsData.cleanup_enabled,
+          cleanup_time: settingsData.cleanup_time || "",
+          scan_enabled: settingsData.scan_enabled,
+          scan_time: settingsData.scan_time || "",
+        })
         // Restore playback state
         const playbackResponse = await fetch("http://127.0.0.1:8000/api/playback");
 
@@ -782,6 +803,55 @@ function App() {
     }
   }
 
+  function handleSettingsToggle(key) {
+    setAppSettings((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  }
+
+  function handleSettingsTimeChange(key, value) {
+    setAppSettings((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  }
+
+  async function handleSaveAppSettings() {
+    try {
+      const response = await fetch("http://127.0.0.1:8000/api/settings", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          cleanup_enabled: appSettings.cleanup_enabled,
+          cleanup_time: appSettings.cleanup_time || null,
+          scan_enabled: appSettings.scan_enabled,
+          scan_time: appSettings.scan_time || null,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to save settings");
+      }
+
+      const savedSettings = await response.json();
+
+      setAppSettings({
+        cleanup_enabled: savedSettings.cleanup_enabled,
+        cleanup_time: savedSettings.cleanup_time || "",
+        scan_enabled: savedSettings.scan_enabled,
+        scan_time: savedSettings.scan_time || "",
+      });
+
+      setSettingsNotice("Settings saved successfully.");
+    } catch (error) {
+      console.error(error);
+      setSettingsNotice("Failed to save settings.");
+    }
+  }
+
   const visibleTracks = tracks.filter((track) => {
     const matchesArtist = selectedArtist ? track.artist === selectedArtist : true
     const matchesAlbum = selectedAlbum ? track.album === selectedAlbum : true
@@ -973,6 +1043,73 @@ function App() {
                 </button>
               </div>
             )}
+          </div>
+          <div className="settings-card">
+            <div className="settings-card__title">Cleanup missing files</div>
+            <div className="settings-card__text">
+              Check whether indexed music files still exist on disk and remove missing
+              files from the database and track lists.
+            </div>
+
+            <label className="settings-field settings-field--inline">
+              <input
+                type="checkbox"
+                checked={appSettings.cleanup_enabled}
+                onChange={() => handleSettingsToggle("cleanup_enabled")}
+              />
+              <span>Enable daily cleanup</span>
+            </label>
+
+            <label className="settings-field">
+              <span className="settings-field__label">Run time</span>
+              <input
+                className="settings-time-input"
+                type="time"
+                value={appSettings.cleanup_time}
+                onChange={(event) =>
+                  handleSettingsTimeChange("cleanup_time", event.target.value)
+                }
+              />
+            </label>
+          </div>
+              
+          <div className="settings-card">
+            <div className="settings-card__title">Scan library for new files</div>
+            <div className="settings-card__text">
+              Scan the music library on a schedule and add newly discovered tracks to the
+              database.
+            </div>
+              
+            <label className="settings-field settings-field--inline">
+              <input
+                type="checkbox"
+                checked={appSettings.scan_enabled}
+                onChange={() => handleSettingsToggle("scan_enabled")}
+              />
+              <span>Enable daily scan</span>
+            </label>
+              
+            <label className="settings-field">
+              <span className="settings-field__label">Run time</span>
+              <input
+                className="settings-time-input"
+                type="time"
+                value={appSettings.scan_time}
+                onChange={(event) =>
+                  handleSettingsTimeChange("scan_time", event.target.value)
+                }
+              />
+            </label>
+          </div>
+              
+          <div className="settings-card__actions">
+            <button
+              className="settings-button"
+              type="button"
+              onClick={handleSaveAppSettings}
+            >
+              Save schedule settings
+            </button>
           </div>
         </div>
       );
