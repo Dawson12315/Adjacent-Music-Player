@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models.app_setting import AppSetting
 from app.schemas.settings import AppSettingsResponse, AppSettingsUpdate
+from app.services.scheduler import refresh_scheduler_jobs
 
 router = APIRouter()
 
@@ -51,6 +52,7 @@ def update_settings(payload: AppSettingsUpdate, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(settings)
+    refresh_scheduler_jobs()
 
     return {
         "cleanup_enabled": settings.cleanup_enabled,

@@ -36,6 +36,128 @@ def create_playlist(payload: PlaylistCreate, db: Session = Depends(get_db)):
 
     return playlist
 
+
+def _get_liked_songs_playlist(db: Session) -> Playlist:
+    playlist = (
+        db.query(Playlist)
+        .filter(Playlist.system_key == "liked_songs")
+        .first()
+    )
+
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Liked Songs playlist not found")
+
+    return playlist
+
+@router.get("/playlists/liked-songs", response_model=PlaylistResponse, tags=["playlists"])
+def get_liked_songs_playlist(db: Session = Depends(get_db)):
+    playlist = (
+        db.query(Playlist)
+        .filter(Playlist.system_key == "liked_songs")
+        .first()
+    )
+
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Liked Songs playlist not found")
+
+    return playlist
+
+@router.get("/playlists/liked-songs/tracks/{track_id}", tags=["playlists"])
+def is_track_in_liked_songs(track_id: int, db: Session = Depends(get_db)):
+    playlist = _get_liked_songs_playlist(db)
+
+    playlist_track = (
+        db.query(PlaylistTrack)
+        .filter(
+            PlaylistTrack.playlist_id == playlist.id,
+            PlaylistTrack.track_id == track_id,
+        )
+        .first()
+    )
+
+    return {"liked": playlist_track is not None}
+
+
+@router.post("/playlists/liked-songs/tracks", tags=["playlists"])
+def add_track_to_liked_songs(payload: PlaylistTrackCreate, db: Session = Depends(get_db)):
+    playlist = _get_liked_songs_playlist(db)
+
+    track = db.query(Track).filter(Track.id == payload.track_id).first()
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    existing_playlist_track = (
+        db.query(PlaylistTrack)
+        .filter(
+            PlaylistTrack.playlist_id == playlist.id,
+            PlaylistTrack.track_id == payload.track_id,
+        )
+        .first()
+    )
+
+    if existing_playlist_track:
+        return {"liked": True}
+
+    last_item = (
+        db.query(PlaylistTrack)
+        .filter(PlaylistTrack.playlist_id == playlist.id)
+        .order_by(PlaylistTrack.position.desc())
+        .first()
+    )
+
+    next_position = 0 if last_item is None else last_item.position + 1
+
+    playlist_track = PlaylistTrack(
+        playlist_id=playlist.id,
+        track_id=payload.track_id,
+        position=next_position,
+    )
+
+    db.add(playlist_track)
+    db.commit()
+
+    return {"liked": True}
+
+
+@router.delete("/playlists/liked-songs/tracks/{track_id}", tags=["playlists"])
+def remove_track_from_liked_songs(track_id: int, db: Session = Depends(get_db)):
+    playlist = _get_liked_songs_playlist(db)
+
+    playlist_track = (
+        db.query(PlaylistTrack)
+        .filter(
+            PlaylistTrack.playlist_id == playlist.id,
+            PlaylistTrack.track_id == track_id,
+        )
+        .order_by(PlaylistTrack.position.asc())
+        .first()
+    )
+
+    if not playlist_track:
+        return {"liked": False}
+
+    removed_position = playlist_track.position
+
+    db.delete(playlist_track)
+    db.commit()
+
+    remaining_items = (
+        db.query(PlaylistTrack)
+        .filter(
+            PlaylistTrack.playlist_id == playlist.id,
+            PlaylistTrack.position > removed_position,
+        )
+        .order_by(PlaylistTrack.position.asc())
+        .all()
+    )
+
+    for item in remaining_items:
+        item.position -= 1
+
+    db.commit()
+
+    return {"liked": False}
+
 @router.post("/playlists/{playlist_id}/tracks", tags=["playlists"])
 def add_track_to_playlist(
     playlist_id: int,
@@ -173,6 +295,7 @@ def delete_playlist(playlist_id: int, db: Session = Depends(get_db)):
         "message": "Playlist deleted",
         "playlist_id": playlist_id,
     }
+
 
 @router.patch("/playlists/{playlist_id}", response_model=PlaylistResponse, tags=["playlists"])
 def rename_playlist(

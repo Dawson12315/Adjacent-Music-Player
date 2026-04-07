@@ -531,6 +531,33 @@ button {
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.pagination__button {
+  background: #2a2a2a;
+  color: #ffffff;
+  border: none;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.pagination__button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pagination__label {
+  color: #b3b3b3;
+  font-size: 0.95rem;
+}
 .settings-page {
   display: flex;
   flex-direction: column;
@@ -589,6 +616,10 @@ button {
 .settings-button--danger {
   background: #c74646;
   color: #ffffff;
+}
+.settings-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .settings-field {
   display: flex;
@@ -655,6 +686,7 @@ button {
   display: flex;
   align-items: center;
   gap: 12px;
+  padding-right: 40px
 }
 .player-bar__progress-row {
   width: 100%;
@@ -709,7 +741,53 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.player-bar__left {
+  min-width: 0;
+}
 
+.player-bar__text-line {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.player-bar__marquee {
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.player-bar__marquee-track {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  white-space: nowrap;
+  width: max-content;
+  animation: player-bar-marquee 14s linear infinite;
+}
+
+.player-bar__marquee-track--meta {
+  animation-duration: 18s;
+}
+
+.player-bar__marquee-gap {
+  color: #6f6f6f;
+  flex: 0 0 auto;
+}
+
+.player-bar__title,
+.player-bar__meta {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+@keyframes player-bar-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(-50% - 8px));
+  }
+}
 .player-bar__icon-button {
   background: transparent;
   color: #b3b3b3;
@@ -768,4 +846,30 @@ button {
   border-radius: 12px;
   background: #181818;
   color: #b3b3b3;
+}
+/* ===== Scrollbar Styling ===== */
+
+/* Chrome, Edge, Safari */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #121212; /* match app background */
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #2a2a2a; /* subtle gray */
+  border-radius: 6px;
+  border: 2px solid #121212; /* gives spacing effect */
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #3e3e3e;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a2a #121212;
 }
