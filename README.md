@@ -19,9 +19,6 @@ Full-stack Spotify-style music app built with:
 ## Current Development Status:
 Phase 4: Refining Main App function
 
-Introduce:
-- Heart icon: toggle switch in playbar, reflecting if a song is in liked songs or not(if yes, light up, if no stay empty), toggle on also can place currently playing in liked songs.
-
 Current Phase Improvements:
 - Currently Playing: scrolls song title, if text is too long
 

@@ -41,6 +41,14 @@ function App() {
     scan_enabled: false,
     scan_time: "",
   });
+  const [tracksPage, setTracksPage] = useState(1);
+  const [artistsPage, setArtistsPage] = useState(1);
+  const [isScanningLibrary, setIsScanningLibrary] = useState(false);
+  const [likedSongsPlaylist, setLikedSongsPlaylist] = useState(null);
+  const [isCurrentTrackLiked, setIsCurrentTrackLiked] = useState(false);
+
+  const TRACKS_PAGE_SIZE = 50;
+  const ARTISTS_PAGE_SIZE = 50;
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
@@ -54,13 +62,15 @@ function App() {
           artistsResponse,
           albumsResponse,
           playlistsResponse,
-          settingsResponse
+          settingsResponse,
+          likedSongsPlaylistResponse
         ] = await Promise.all([
           fetch("http://127.0.0.1:8000/api/tracks"),
           fetch("http://127.0.0.1:8000/api/artists"),
           fetch("http://127.0.0.1:8000/api/albums"),
           fetch("http://127.0.0.1:8000/api/playlists"),
-          fetch("http://127.0.0.1:8000/api/settings")
+          fetch("http://127.0.0.1:8000/api/settings"),
+          fetch("http://127.0.0.1:8000/api/playlists/liked-songs")
         ])
 
         if (
@@ -68,7 +78,8 @@ function App() {
           !artistsResponse.ok ||
           !albumsResponse.ok ||
           !playlistsResponse.ok ||
-          !settingsResponse.ok
+          !settingsResponse.ok ||
+          !likedSongsPlaylistResponse.ok
         ){
           throw new Error("Failed to fetch library data");
         }
@@ -78,6 +89,7 @@ function App() {
         const albumsData = await albumsResponse.json();
         const playlistsData = await playlistsResponse.json();
         const settingsData = await settingsResponse.json()
+        const likedSongsPlaylistData = await likedSongsPlaylistResponse.json();
 
         setTracks(tracksData);
         setArtists(artistsData);
@@ -95,6 +107,8 @@ function App() {
           scan_enabled: settingsData.scan_enabled,
           scan_time: settingsData.scan_time || "",
         })
+        setLikedSongsPlaylist(likedSongsPlaylistData);
+
         // Restore playback state
         const playbackResponse = await fetch("http://127.0.0.1:8000/api/playback");
 
@@ -283,6 +297,41 @@ function App() {
     isShuffle,
     isLoop,
   ]);
+
+  useEffect(() => {
+    setTracksPage(1);
+  }, [searchQuery, selectedArtist, selectedAlbum, activeView]);
+  
+  useEffect(() => {
+    setArtistsPage(1);
+  }, [searchQuery, activeView]);
+
+  useEffect(() => {
+    async function fetchLikedState() {
+      if (!selectedTrack) {
+        setIsCurrentTrackLiked(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `http://127.0.0.1:8000/api/playlists/liked-songs/tracks/${selectedTrack.id}`
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to check liked state");
+        }
+
+        const data = await response.json();
+        setIsCurrentTrackLiked(data.liked);
+      } catch (error) {
+        console.error(error);
+        setIsCurrentTrackLiked(false);
+      }
+    }
+
+    fetchLikedState();
+  }, [selectedTrack]);
 
   function handleTrackClick(track){
     setOpenMenuTrackId(null)
@@ -750,6 +799,11 @@ function App() {
   }
 
   async function handleScanLibrary() {
+    if (isScanningLibrary) return
+
+    setIsScanningLibrary(true)
+    setConfirmAction(null)
+    setSettingsNotice("Scanning Library...")
     try {
       const response = await fetch("http://127.0.0.1:8000/api/scan?limit=100000", {
         method: "POST",
@@ -759,7 +813,7 @@ function App() {
         throw new Error("Failed to scan library");
       }
 
-      await response.json();
+      const scanResult = await response.json();
 
       const [tracksResponse, artistsResponse, albumsResponse, playlistsResponse] =
         await Promise.all([
@@ -794,12 +848,15 @@ function App() {
         })
       );
 
-      setConfirmAction(null);
-      setSettingsNotice("Library scan completed successfully.");
+      setSettingsNotice(
+        `Library scan completed. Added ${scanResult.added} new tracks${scanResult.added === 1 ? "" : "s"}.`
+      )
+
     } catch (error) {
       console.error(error);
-      setConfirmAction(null);
       setSettingsNotice("Failed to scan the music library.");
+    } finally {
+      setIsScanningLibrary(false)
     }
   }
 
@@ -852,6 +909,112 @@ function App() {
     }
   }
 
+  async function handleRunCleanupNow() {
+    console.log("clicked")
+    try {
+      console.log("about to call cleanup api")
+      const cleanupResponse = await fetch(
+        "http://127.0.0.1:8000/api/maintenance/cleanup",
+        {
+          method: "POST",
+        }
+      );
+
+      if (!cleanupResponse.ok) {
+        throw new Error("Failed to run cleanup");
+      }
+
+      const cleanupResult = await cleanupResponse.json();
+
+      const [tracksResponse, artistsResponse, albumsResponse, playlistsResponse] =
+        await Promise.all([
+          fetch("http://127.0.0.1:8000/api/tracks"),
+          fetch("http://127.0.0.1:8000/api/artists"),
+          fetch("http://127.0.0.1:8000/api/albums"),
+          fetch("http://127.0.0.1:8000/api/playlists"),
+        ]);
+
+      if (
+        !tracksResponse.ok ||
+        !artistsResponse.ok ||
+        !albumsResponse.ok ||
+        !playlistsResponse.ok
+      ) {
+        throw new Error("Failed to refresh library after cleanup");
+      }
+
+      const tracksData = await tracksResponse.json();
+      const artistsData = await artistsResponse.json();
+      const albumsData = await albumsResponse.json();
+      const playlistsData = await playlistsResponse.json();
+
+      setTracks(tracksData);
+      setArtists(artistsData);
+      setAlbums(albumsData);
+      setPlaylists(
+        [...playlistsData].sort((a, b) => {
+          if (a.system_key === "liked_songs") return -1;
+          if (b.system_key === "liked_songs") return 1;
+          return a.name.localeCompare(b.name);
+        })
+      );
+
+      setSettingsNotice(
+        `Cleanup completed. Removed ${cleanupResult.removed} missing track${
+          cleanupResult.removed === 1 ? "" : "s"
+        }.`
+      );
+    } catch (error) {
+      console.error(error);
+      setSettingsNotice("Failed to run cleanup.");
+    }
+  }
+
+  async function handleToggleLikedTrack() {
+    if (!selectedTrack) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        isCurrentTrackLiked
+          ? `http://127.0.0.1:8000/api/playlists/liked-songs/tracks/${selectedTrack.id}`
+          : "http://127.0.0.1:8000/api/playlists/liked-songs/tracks",
+        isCurrentTrackLiked
+          ? {
+              method: "DELETE",
+            }
+          : {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ track_id: selectedTrack.id }),
+            }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to toggle liked track");
+      }
+
+      const data = await response.json();
+      setIsCurrentTrackLiked(data.liked);
+
+      if (selectedPlaylist?.system_key === "liked_songs") {
+        const likedSongsResponse = await fetch(
+          `http://127.0.0.1:8000/api/playlists/${selectedPlaylist.id}/tracks`
+        );
+
+        if (likedSongsResponse.ok) {
+          const likedSongsTracks = await likedSongsResponse.json();
+          setPlaylistTracks(likedSongsTracks);
+        }
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   const visibleTracks = tracks.filter((track) => {
     const matchesArtist = selectedArtist ? track.artist === selectedArtist : true
     const matchesAlbum = selectedAlbum ? track.album === selectedAlbum : true
@@ -872,6 +1035,27 @@ function App() {
   const visibleAlbums = albums.filter((album) =>
     album.toLowerCase().includes(searchQuery.trim().toLowerCase())
   )
+  const paginatedTracks = visibleTracks.slice(
+    (tracksPage - 1) * TRACKS_PAGE_SIZE,
+    tracksPage * TRACKS_PAGE_SIZE
+  );
+
+  const totalTrackPages = Math.max(
+    1,
+    Math.ceil(visibleTracks.length / TRACKS_PAGE_SIZE)
+  );
+
+  const paginatedArtists = visibleArtists.slice(
+    (artistsPage - 1) * ARTISTS_PAGE_SIZE,
+    artistsPage * ARTISTS_PAGE_SIZE
+  );
+
+  const totalArtistPages = Math.max(
+    1,
+    Math.ceil(visibleArtists.length / ARTISTS_PAGE_SIZE)
+  );
+
+
   function renderMainContent() {
     if (loading) {
       return <div className="state-message">Loading tracks...</div>
@@ -1028,8 +1212,9 @@ function App() {
                   className="settings-button"
                   type="button"
                   onClick={handleScanLibrary}
+                  disabled={isScanningLibrary}
                 >
-                  Go ahead
+                  {isScanningLibrary ? "Scanning..." : "Go ahead"}
                 </button>
               </div>
             ) : (
@@ -1038,11 +1223,29 @@ function App() {
                   className="settings-button"
                   type="button"
                   onClick={() => setConfirmAction("scan_library")}
+                  disabled={isScanningLibrary}
                 >
-                  Scan library now
+                  {isScanningLibrary ? "Scanning..." : "Scan library now"}
                 </button>
               </div>
             )}
+          </div>
+          <div className="settings-card">
+            <div className="settings-card__title">Run cleanup now</div>
+            <div className="settings-card__text">
+              Immediately remove tracks from the database if their music files no longer
+              exist on disk.
+            </div>
+
+            <div className="settings-card__actions">
+              <button
+                className="settings-button"
+                type="button"
+                onClick={handleRunCleanupNow}
+              >
+                Run cleanup now
+              </button>
+            </div>
           </div>
           <div className="settings-card">
             <div className="settings-card__title">Cleanup missing files</div>
@@ -1117,7 +1320,7 @@ function App() {
     if (activeView === "artists") {
       return (
         <div className="simple-list">
-          {visibleArtists.map((artist) => (
+          {paginatedArtists.map((artist) => (
             <button
               key={artist}
               className="simple-list__row simple-list__row--button"
@@ -1127,7 +1330,36 @@ function App() {
               {artist}
             </button>
           ))}
-        </div>
+
+          {totalArtistPages > 1 && (
+              <div className="pagination">
+                <button
+                  className="pagination__button"
+                  type="button"
+                  onClick={() => setArtistsPage((prev) => Math.max(1, prev - 1))}
+                  disabled={artistsPage === 1}
+                >
+                  Previous
+                </button>
+          
+                <span className="pagination__label">
+                  Page {artistsPage} of {totalArtistPages}
+                </span>
+          
+                <button
+                  className="pagination__button"
+                  type="button"
+                  onClick={() =>
+                    setArtistsPage((prev) => Math.min(totalArtistPages, prev + 1))
+                  }
+                  disabled={artistsPage === totalArtistPages}
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </div>
+
       );
     }
     
@@ -1163,7 +1395,7 @@ function App() {
             Showing album: {selectedAlbum} ×
           </button>
         )}
-        {visibleTracks.map((track, index) => (
+        {paginatedTracks.map((track, index) => (
           <button
             key={track.id}
             className={`track-row ${
@@ -1172,7 +1404,9 @@ function App() {
             onClick={() => handleTrackClick(track)}
             type="button"
           >
-            <div className="track-row__index">{index + 1}</div>
+            <div className="track-row__index">
+              {(tracksPage - 1) * TRACKS_PAGE_SIZE + index + 1}
+            </div>
             
             <div className="track-row__content">
               <div className="track-row__title">{track.title}</div>
@@ -1233,6 +1467,35 @@ function App() {
             </div>
           </button>
         ))}
+
+        {totalTrackPages > 1 && (
+          <div className="pagination">
+            <button
+              className="pagination__button"
+              type="button"
+              onClick={() => setTracksPage((prev) => Math.max(1, prev - 1))}
+              disabled={tracksPage === 1}
+            >
+              Previous
+            </button>
+        
+            <span className="pagination__label">
+              Page {tracksPage} of {totalTrackPages}
+            </span>
+        
+            <button
+              className="pagination__button"
+              type="button"
+              onClick={() =>
+                setTracksPage((prev) => Math.min(totalTrackPages, prev + 1))
+              }
+              disabled={tracksPage === totalTrackPages}
+            >
+              Next
+            </button>
+          </div>
+        )}
+
       </div>
     )
   }
@@ -1585,9 +1848,19 @@ function App() {
             <div className="player-bar__meta">Nothing playing</div>
           )}
         </div>
-
         <div className="player-bar__center">
           <div className="player-bar__transport-row">
+          <button
+            className={`player-bar__icon-button player-bar__like-button ${
+              isCurrentTrackLiked ? "player-bar__icon-button--active" : ""
+            }`}
+            type="button"
+            aria-label={isCurrentTrackLiked ? "Remove from liked songs" : "Add to likedsongs"}
+            onClick={handleToggleLikedTrack}
+            disabled={!selectedTrack}
+          >
+            {isCurrentTrackLiked ? "♥" : "♡"}
+          </button>
             <button 
               className={`player-bar__icon-button ${
                 isShuffle ? "player-bar__icon-button--active" : ""
@@ -1655,7 +1928,6 @@ function App() {
             <span className="player-bar__time">{formatTime(duration)}</span>
           </div>
         </div>
-
         <div className="player-bar__right">
           <button
             className={`player-bar__icon-button ${
