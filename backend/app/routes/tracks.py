@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models.track import Track
 from app.schemas.track import TrackResponse
+from app.schemas.track_edit import TrackUpdate
 
 from app.models.playlist_track import PlaylistTrack
 from app.models.playback_queue_item import PlaybackQueueItem
@@ -78,3 +79,19 @@ def purge_tracks(db: Session = Depends(get_db)):
         "message": "All stored tracks purged",
         "deleted_count": deleted_tracks,
     }
+
+@router.patch("/tracks/{track_id}", response_model=TrackResponse, tags=["tracks"])
+def update_track(track_id: int, payload: TrackUpdate, db: Session = Depends(get_db)):
+    track = db.query(Track).filter(Track.id == track_id).first()
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    track.title = payload.title
+    track.artist = payload.artist
+    track.album = payload.album
+
+    db.commit()
+    db.refresh(track)
+
+    return track
