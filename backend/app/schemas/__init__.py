@@ -7,6 +7,7 @@ from app.schemas.playlist import (
     PlaylistTrackCreate
 )
 from app.schemas.playback import PlaybackStateResponse, PlaybackStateUpdate
+from app.schemas.track_edit import TrackUpdate
 
 __all__ = [
     "TrackResponse",
@@ -16,5 +17,6 @@ __all__ = [
     "PlaylistRename",
     "PlaylistTrackCreate",
     "PlaybackStateResponse",
-    "PlaybackStateUpdate"
+    "PlaybackStateUpdate",
+    "TrackUpdate"
 ]
