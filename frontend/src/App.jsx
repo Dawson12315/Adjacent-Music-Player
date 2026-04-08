@@ -56,6 +56,12 @@ function App() {
   const [isAlbumMenuOpen, setIsAlbumMenuOpen] = useState(false);
   const [isCreatingAlbum, setIsCreatingAlbum] = useState(false);
   const [newAlbumName, setNewAlbumName] = useState("");
+  const [isArtistActionsOpen, setIsArtistActionsOpen] = useState(false);
+  const [editingArtistName, setEditingArtistName] = useState("");
+  const [transferArtistTarget, setTransferArtistTarget] = useState("");
+  const [isEditArtistModalOpen, setIsEditArtistModalOpen] = useState(false);
+  const [isTransferArtistMenuOpen, setIsTransferArtistMenuOpen] = useState(false);
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
   const TRACKS_PAGE_SIZE = 50;
   const ARTISTS_PAGE_SIZE = 50;
@@ -75,12 +81,12 @@ function App() {
           settingsResponse,
           likedSongsPlaylistResponse
         ] = await Promise.all([
-          fetch("http://127.0.0.1:8000/api/tracks"),
-          fetch("http://127.0.0.1:8000/api/artists"),
-          fetch("http://127.0.0.1:8000/api/albums"),
-          fetch("http://127.0.0.1:8000/api/playlists"),
-          fetch("http://127.0.0.1:8000/api/settings"),
-          fetch("http://127.0.0.1:8000/api/playlists/liked-songs")
+          fetch(`${API_BASE_URL}/api/tracks`),
+          fetch(`${API_BASE_URL}/api/artists`),
+          fetch(`${API_BASE_URL}/api/albums`),
+          fetch(`${API_BASE_URL}/api/playlists`),
+          fetch(`${API_BASE_URL}/api/settings`),
+          fetch(`${API_BASE_URL}/api/playlists/liked-songs`)
         ])
 
         if (
@@ -120,7 +126,7 @@ function App() {
         setLikedSongsPlaylist(likedSongsPlaylistData);
 
         // Restore playback state
-        const playbackResponse = await fetch("http://127.0.0.1:8000/api/playback");
+        const playbackResponse = await fetch(`${API_BASE_URL}/api/playback`);
 
         if (playbackResponse.ok) {
           const playbackData = await playbackResponse.json();
@@ -179,7 +185,7 @@ function App() {
       return;
     }
   
-    audioRef.current.src = `http://127.0.0.1:8000/api/tracks/${selectedTrack.id}/stream`;
+    audioRef.current.src = `${API_BASE_URL}/api/tracks/${selectedTrack.id}/stream`;
     audioRef.current.load();
   }, [selectedTrack]);
 
@@ -234,7 +240,7 @@ function App() {
       const queueTrackIds = queue.map((track) => track.id);
 
       try {
-        await fetch("http://127.0.0.1:8000/api/playback", {
+        await fetch(`${API_BASE_URL}/api/playback`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -276,7 +282,7 @@ function App() {
 
     async function savePlaybackTime() {
       try {
-        await fetch("http://127.0.0.1:8000/api/playback", {
+        await fetch(`${API_BASE_URL}/api/playback`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -325,7 +331,7 @@ function App() {
 
       try {
         const response = await fetch(
-          `http://127.0.0.1:8000/api/playlists/liked-songs/tracks/${selectedTrack.id}`
+          `${API_BASE_URL}/api/playlists/liked-songs/tracks/${selectedTrack.id}`
         );
 
         if (!response.ok) {
@@ -388,12 +394,12 @@ function App() {
     if (!("mediaSession" in navigator)) {
       return;
     }
-  
+
     if (!selectedTrack) {
       navigator.mediaSession.metadata = null;
       return;
     }
-  
+
     navigator.mediaSession.metadata = new MediaMetadata({
       title: selectedTrack.title || "Unknown Title",
       artist: selectedTrack.artist || "Unknown Artist",
@@ -654,7 +660,7 @@ function App() {
     }
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/playlists", {
+      const response = await fetch(`${API_BASE_URL}/api/playlists`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -685,7 +691,7 @@ function App() {
   async function handleAddTrackToPlaylist(trackId, playlistId) {
     try {
       const response = await fetch(
-        `http://127.0.0.1:8000/api/playlists/${playlistId}/tracks`,
+        `${API_BASE_URL}/api/playlists/${playlistId}/tracks`,
         {
           method: "POST",
           headers: {
@@ -711,7 +717,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:8000/api/playlists/${selectedPlaylist.id}/tracks/${trackId}`,
+        `${API_BASE_URL}/api/playlists/${selectedPlaylist.id}/tracks/${trackId}`,
         {
           method: "DELETE",
         }
@@ -730,7 +736,7 @@ function App() {
   async function handlePlaylistClick(playlist) {
     try {
       const response = await fetch(
-        `http://127.0.0.1:8000/api/playlists/${playlist.id}/tracks`
+        `${API_BASE_URL}/api/playlists/${playlist.id}/tracks`
       );
 
       if (!response.ok) {
@@ -752,7 +758,7 @@ function App() {
   async function handleDeletePlaylist(playlistId) {
     try {
       const response = await fetch(
-        `http://127.0.0.1:8000/api/playlists/${playlistId}`,
+        `${API_BASE_URL}/api/playlists/${playlistId}`,
         {
           method: "DELETE",
         }
@@ -793,7 +799,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:8000/api/playlists/${playlistId}`,
+        `${API_BASE_URL}/api/playlists/${playlistId}`,
         {
           method: "PATCH",
           headers: {
@@ -837,7 +843,7 @@ function App() {
 
   async function handlePurgeTracks() {
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/tracks/purge", {
+      const response = await fetch(`${API_BASE_URL}/api/tracks/purge`, {
         method: "DELETE",
       });
 
@@ -873,7 +879,7 @@ function App() {
     setConfirmAction(null)
     setSettingsNotice("Scanning Library...")
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/scan?limit=100000", {
+      const response = await fetch(`${API_BASE_URL}/api/scan?limit=100000`, {
         method: "POST",
       });
 
@@ -885,10 +891,10 @@ function App() {
 
       const [tracksResponse, artistsResponse, albumsResponse, playlistsResponse] =
         await Promise.all([
-          fetch("http://127.0.0.1:8000/api/tracks"),
-          fetch("http://127.0.0.1:8000/api/artists"),
-          fetch("http://127.0.0.1:8000/api/albums"),
-          fetch("http://127.0.0.1:8000/api/playlists"),
+          fetch(`${API_BASE_URL}/api/tracks`),
+          fetch(`${API_BASE_URL}/api/artists`),
+          fetch(`${API_BASE_URL}/api/albums`),
+          fetch(`${API_BASE_URL}/api/playlists`),
         ]);
 
       if (
@@ -944,7 +950,7 @@ function App() {
 
   async function handleSaveAppSettings() {
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/settings", {
+      const response = await fetch(`${API_BASE_URL}/api/settings`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -982,7 +988,7 @@ function App() {
     try {
       console.log("about to call cleanup api")
       const cleanupResponse = await fetch(
-        "http://127.0.0.1:8000/api/maintenance/cleanup",
+        `${API_BASE_URL}/api/maintenance/cleanup`,
         {
           method: "POST",
         }
@@ -996,10 +1002,10 @@ function App() {
 
       const [tracksResponse, artistsResponse, albumsResponse, playlistsResponse] =
         await Promise.all([
-          fetch("http://127.0.0.1:8000/api/tracks"),
-          fetch("http://127.0.0.1:8000/api/artists"),
-          fetch("http://127.0.0.1:8000/api/albums"),
-          fetch("http://127.0.0.1:8000/api/playlists"),
+          fetch(`${API_BASE_URL}/api/tracks`),
+          fetch(`${API_BASE_URL}/api/artists`),
+          fetch(`${API_BASE_URL}/api/albums`),
+          fetch(`${API_BASE_URL}/api/playlists`),
         ]);
 
       if (
@@ -1046,8 +1052,8 @@ function App() {
     try {
       const response = await fetch(
         isCurrentTrackLiked
-          ? `http://127.0.0.1:8000/api/playlists/liked-songs/tracks/${selectedTrack.id}`
-          : "http://127.0.0.1:8000/api/playlists/liked-songs/tracks",
+          ? `${API_BASE_URL}/api/playlists/liked-songs/tracks/${selectedTrack.id}`
+          : `${API_BASE_URL}/api/playlists/liked-songs/tracks`,
         isCurrentTrackLiked
           ? {
               method: "DELETE",
@@ -1070,7 +1076,7 @@ function App() {
 
       if (selectedPlaylist?.system_key === "liked_songs") {
         const likedSongsResponse = await fetch(
-          `http://127.0.0.1:8000/api/playlists/${selectedPlaylist.id}/tracks`
+          `${API_BASE_URL}/api/playlists/${selectedPlaylist.id}/tracks`
         );
 
         if (likedSongsResponse.ok) {
@@ -1125,7 +1131,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:8000/api/tracks/${editingTrack.id}`,
+        `${API_BASE_URL}/api/tracks/${editingTrack.id}`,
         {
           method: "PATCH",
           headers: {
@@ -1197,6 +1203,125 @@ function App() {
       setAlbums(refreshedAlbums);
 
       handleCloseEditTrack();
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  function handleOpenEditArtist() {
+    if (!selectedArtist) {
+      return;
+    }
+
+    setEditingArtistName(selectedArtist);
+    setTransferArtistTarget("");
+    setIsArtistActionsOpen(false);
+    setIsEditArtistModalOpen(true);
+    setIsTransferArtistMenuOpen(false);
+  }
+
+  function handleCloseEditArtist() {
+    setEditingArtistName("");
+    setTransferArtistTarget("");
+    setIsArtistActionsOpen(false);
+    setIsEditArtistModalOpen(false);
+    setIsTransferArtistMenuOpen(false);
+  }
+
+  async function handleSaveArtistEdit() {
+    if (!selectedArtist) {
+      return;
+    }
+
+    const trimmedRename = editingArtistName.trim();
+    const trimmedTransferTarget = transferArtistTarget.trim();
+
+    let currentSourceArtist = selectedArtist;
+
+    try {
+      if (trimmedRename && trimmedRename !== selectedArtist) {
+        const renameResponse = await fetch(
+          `${API_BASE_URL}/api/artists/rename`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              current_artist: selectedArtist,
+              new_artist: trimmedRename,
+            }),
+          }
+        );
+
+        if (!renameResponse.ok) {
+          throw new Error("Failed to rename artist");
+        }
+
+        currentSourceArtist = trimmedRename;
+      }
+
+      if (trimmedTransferTarget) {
+        const transferResponse = await fetch(
+          `${API_BASE_URL}/api/artists/transfer`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              source_artist: currentSourceArtist,
+              target_artist: trimmedTransferTarget,
+            }),
+          }
+        );
+
+        if (!transferResponse.ok) {
+          throw new Error("Failed to transfer artist");
+        }
+
+        currentSourceArtist = trimmedTransferTarget;
+      }
+
+      const [
+        tracksResponse,
+        artistsResponse,
+        albumsResponse,
+        playlistsResponse,
+      ] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/tracks`),
+        fetch(`${API_BASE_URL}/api/artists`),
+        fetch(`${API_BASE_URL}/api/albums`),
+        fetch(`${API_BASE_URL}/api/playlists`),
+      ]);
+
+      if (
+        !tracksResponse.ok ||
+        !artistsResponse.ok ||
+        !albumsResponse.ok ||
+        !playlistsResponse.ok
+      ) {
+        throw new Error("Failed to refresh library after artist update");
+      }
+
+      const tracksData = await tracksResponse.json();
+      const artistsData = await artistsResponse.json();
+      const albumsData = await albumsResponse.json();
+      const playlistsData = await playlistsResponse.json();
+
+      setTracks(tracksData);
+      setArtists(artistsData);
+      setAlbums(albumsData);
+      setPlaylists(
+        [...playlistsData].sort((a, b) => {
+          if (a.system_key === "liked_songs") return -1;
+          if (b.system_key === "liked_songs") return 1;
+          return a.name.localeCompare(b.name);
+        })
+      );
+
+      setSelectedArtist(currentSourceArtist);
+      handleCloseEditArtist();
     } catch (error) {
       console.error(error);
     }
@@ -1961,10 +2086,39 @@ function App() {
         <div className={`content-layout ${isQueueOpen ? "content-layout--queue-open" : ""}`}>
           <div className="content-layout__main">
             <header className="main-content__header">
-              <h1>{getHeaderTitle()}</h1>
-              {!loading && !error && (
-                <p className="main-content__subhead">{getHeaderSubtitle()}</p>
-              )}
+              <div className="main-content__header-row">
+                <div>
+                  <h1>{getHeaderTitle()}</h1>
+                  {!loading && !error && (
+                    <p className="main-content__subhead">{getHeaderSubtitle()}</p>
+                  )}
+                </div>
+                
+                {activeView === "tracks" && selectedArtist && (
+                  <div className="page-actions">
+                    <button
+                      className="page-actions__button"
+                      type="button"
+                      aria-label="Artist actions"
+                      onClick={() => setIsArtistActionsOpen((prev) => !prev)}
+                    >
+                      ⋯
+                    </button>
+                
+                    {isArtistActionsOpen && (
+                      <div className="page-actions__menu">
+                        <button
+                          className="page-actions__menu-item"
+                          type="button"
+                          onClick={handleOpenEditArtist}
+                        >
+                          Edit Artist
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </header>
             {activeView !== "settings" && (
               <div className="search-bar">
@@ -2422,6 +2576,77 @@ function App() {
                 className="settings-button"
                 type="button"
                 onClick={handleSaveTrackInfo}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {isEditArtistModalOpen && (
+        <div className="modal-overlay" onClick={handleCloseEditArtist}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal__header">
+              <h2>Edit Artist</h2>
+            </div>
+      
+            <div className="modal__body">
+              <label className="modal__field">
+                <span className="modal__label">Rename artist</span>
+                <input
+                  className="modal__input"
+                  type="text"
+                  value={editingArtistName}
+                  onChange={(event) => setEditingArtistName(event.target.value)}
+                />
+              </label>
+              <label className="modal__field">
+                <span className="modal__label">Transfer all songs and albums to</span>
+
+                <div className="modal__select-row">
+                  <button
+                    className="modal__select"
+                    type="button"
+                    onClick={() => setIsTransferArtistMenuOpen((prev) => !prev)}
+                  >
+                    {transferArtistTarget || "Select another artist"}
+                  </button>
+                </div>
+
+                {isTransferArtistMenuOpen && (
+                  <div className="modal__dropdown">
+                    {artists
+                      .filter((artist) => artist !== selectedArtist)
+                      .map((artist) => (
+                        <button
+                          key={artist}
+                          className="modal__dropdown-item"
+                          type="button"
+                          onClick={() => {
+                            setTransferArtistTarget(artist);
+                            setIsTransferArtistMenuOpen(false);
+                          }}
+                        >
+                          {artist}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </label>
+            </div>
+            <div className="modal__actions">
+              <button
+                className="settings-button settings-button--secondary"
+                type="button"
+                onClick={handleCloseEditArtist}
+              >
+                Cancel
+              </button>
+                  
+              <button
+                className="settings-button"
+                type="button"
+                onClick={handleSaveArtistEdit}
               >
                 Save
               </button>

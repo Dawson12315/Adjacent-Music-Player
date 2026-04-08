@@ -17,6 +17,7 @@ from app.routes.playback import router as playback_router
 from app.routes.settings import router as settings_router
 from app.routes.maintenance import router as maintenance_router
 from app.services.scheduler import start_scheduler
+from app.routes.artist_edit import router as artist_edit_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -58,3 +59,4 @@ app.include_router(playlists_router, prefix="/api")
 app.include_router(playback_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(maintenance_router, prefix="/api")
+app.include_router(artist_edit_router, prefix="/api")
