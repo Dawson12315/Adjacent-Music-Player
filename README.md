@@ -10,7 +10,7 @@ Built with:
 
 ---
 
-## 🚀 Quick Start (YAML Deployment Only)
+## Quick Start (YAML Deployment Only)
 
 Adjacent can be deployed with a single Docker Compose file — no repo clone required.
 
@@ -20,12 +20,13 @@ Adjacent can be deployed with a single Docker Compose file — no repo clone req
 
 Create a file called:
 
-docker-compose.yml
+`docker-compose.yml`
 
 ---
 
 ## 2. Paste this:
 
+```yaml
 version: "3.9"
 
 services:
@@ -52,116 +53,123 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
-
+```
 
 ---
 
 ## 3. Update values
 
-NOTE: If you change port on frontend, please update backend environment variable, "FRONTEND_ORIGIN", port to match.
+- NOTE: if you change frontend port, you must update port on FRONTEND_ORIGIN in backend environment section of the yaml.
 
+- Replace `YOUR_IP` with your server IP.
 
-Replace:
+Example:
 
-YOUR_IP
+`192.168.86.23`
 
-with your server IP (example: 192.168.86.23)
+- Update this path if needed, in both backend volumes and environment(must be matching):
 
-Update this path in volume and environment:
+`/mnt/media/music`
 
-/mnt/media/music
-
-to wherever your music is stored, in respect to your Docker host.
+to wherever your music is stored on your Docker host.
 
 ---
 
 ## 4. Deploy
 
-Option A — Portainer:
-- Go to Stacks
-- Click Add Stack
+### Option A — Portainer
+
+- Go to **Stacks**
+- Click **Add stack**
 - Paste the YAML
 - Deploy
 
-Option B — CLI:
+### Option B — CLI
 
+```bash
 docker compose up -d
+```
 
 ---
 
 ## 5. Access the app
 
-http://YOUR_IP:5173
+Open:
+
+`http://YOUR_IP:5173`
 
 ---
 
-## ⚙️ Required Setup
+## Required Setup
 
 You must have a music library available on your host system.
 
 Examples:
-- Synology mount → /mnt/media/music
-- Local folder → /home/user/music
+- Synology mount → `/mnt/media/music`
+- Local folder → `/home/user/music`
 
-This gets mounted into the backend container at:
+This gets mounted into the container at:
 
-/music
-
----
-
-## 🧠 Architecture
-
-Browser  
-↓  
-React Frontend (Nginx)  
-↓  
-FastAPI Backend  
-↓  
-SQLite DB + Music Files  
+`/music`
 
 ---
 
-## 🔄 Updating
+## Architecture
 
-To update to the latest version:
-
-docker compose pull  
-docker compose up -d  
+```text
+Browser
+   ↓
+React Frontend (Nginx)
+   ↓
+FastAPI Backend
+   ↓
+SQLite DB + Music Files
+```
 
 ---
 
-## 📍 Current Status
+## Updating
 
-Phase 4 — Core App + UI Refinement
+```bash
+docker compose pull
+docker compose up -d
+```
 
-Completed:
+---
+
+## Current Status
+
+Phase 5 — Core App + UI Refinement
+
+### Completed
 - Music playback
 - Library scanning
 - Persistent player UI
 - Dockerized deployment
 - CI/CD pipeline
 
-In Progress:
+### In Progress
 - UI polish
-- playback improvements
+- Playback improvements
 
 ---
 
-## 🧭 Roadmap
+## Roadmap
 
-Next:
+### Next
+- Last.fm Integration
+- Artist pages (albums + singles)
 - Playlist artwork system
 - Genre tagging + browsing
 
-Future:
-- Last.fm integration
+### Future
 - Recommendation engine
 - Related artists/songs
 - Mobile companion app
 
 ---
 
-## 💡 Purpose
+## Purpose
 
 Adjacent is built as:
 - a self-hosted Spotify alternative
@@ -170,7 +178,7 @@ Adjacent is built as:
 
 ---
 
-## ⚠️ Notes
+## Notes
 
 - Requires Docker
 - Requires a mounted music library
@@ -178,6 +186,6 @@ Adjacent is built as:
 
 ---
 
-## 👤 Author
+## Author
 
 Dawson Hudson
