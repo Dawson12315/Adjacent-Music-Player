@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     debug: bool = True
     database_url: str = "sqlite:///./data/app.db"
     music_library_path: str = "/music"
+    frontend_origin: str = "http://localhost:5173"
 
     model_config = SettingsConfigDict(
         env_file=".env",
