@@ -22,6 +22,7 @@ services:
       - "5173:80"
     environment:
       - API_BASE_URL=http://192.168.86.23:8000
+      - FRONTEND_ORIGIN=http://192.168.86.23:5173
     depends_on:
       - backend
     restart: unless-stopped
