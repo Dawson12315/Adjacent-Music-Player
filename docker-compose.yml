@@ -4,7 +4,7 @@ services:
   backend:
     build:
       context: ./backend
-    container_name: spotify-replica-backend
+    container_name: adjacent-backend
     ports:
       - "8000:8000"
     volumes:
@@ -17,11 +17,11 @@ services:
   frontend:
     build:
       context: ./frontend
-      args:
-        VITE_API_BASE_URL: http://backend:8000
-    container_name: spotify-replica-frontend
+    container_name: adjacent-frontend
     ports:
       - "5173:80"
+    environment:
+      - API_BASE_URL=http://192.168.86.23:8000
     depends_on:
       - backend
     restart: unless-stopped
