@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     debug: bool = True
     database_url: str = "sqlite:///./data/app.db"
-    music_library_path: str = "/path/to/your/music/library"
+    music_library_path: str = "/music"
 
     model_config = SettingsConfigDict(
         env_file=".env",
