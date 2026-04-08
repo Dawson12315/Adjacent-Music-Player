@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 function App() {
   const [tracks, setTracks] = useState([]);
@@ -46,6 +46,16 @@ function App() {
   const [isScanningLibrary, setIsScanningLibrary] = useState(false);
   const [likedSongsPlaylist, setLikedSongsPlaylist] = useState(null);
   const [isCurrentTrackLiked, setIsCurrentTrackLiked] = useState(false);
+  const [editingTrack, setEditingTrack] = useState(null);
+  const [editTrackTitle, setEditTrackTitle] = useState("");
+  const [editTrackArtist, setEditTrackArtist] = useState("");
+  const [editTrackAlbum, setEditTrackAlbum] = useState("");
+  const [isArtistMenuOpen, setIsArtistMenuOpen] = useState(false);
+  const [isCreatingArtist, setIsCreatingArtist] = useState(false);
+  const [newArtistName, setNewArtistName] = useState("");
+  const [isAlbumMenuOpen, setIsAlbumMenuOpen] = useState(false);
+  const [isCreatingAlbum, setIsCreatingAlbum] = useState(false);
+  const [newAlbumName, setNewAlbumName] = useState("");
 
   const TRACKS_PAGE_SIZE = 50;
   const ARTISTS_PAGE_SIZE = 50;
@@ -331,6 +341,64 @@ function App() {
     }
 
     fetchLikedState();
+  }, [selectedTrack]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) {
+      return;
+    }
+
+    navigator.mediaSession.setActionHandler("play", async () => {
+      if (!audioRef.current || !selectedTrack) {
+        return;
+      }
+
+      try {
+        await audioRef.current.play();
+      } catch (error) {
+        console.error(error);
+      }
+    });
+
+    navigator.mediaSession.setActionHandler("pause", () => {
+      if (!audioRef.current) {
+        return;
+      }
+
+      audioRef.current.pause();
+    });
+
+    navigator.mediaSession.setActionHandler("previoustrack", () => {
+      handlePreviousTrack();
+    });
+
+    navigator.mediaSession.setActionHandler("nexttrack", () => {
+      handleNextTrack();
+    });
+
+    return () => {
+      navigator.mediaSession.setActionHandler("play", null);
+      navigator.mediaSession.setActionHandler("pause", null);
+      navigator.mediaSession.setActionHandler("previoustrack", null);
+      navigator.mediaSession.setActionHandler("nexttrack", null);
+    };
+  }, [selectedTrack, queue, queueIndex, isLoop, isShuffle]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) {
+      return;
+    }
+  
+    if (!selectedTrack) {
+      navigator.mediaSession.metadata = null;
+      return;
+    }
+  
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: selectedTrack.title || "Unknown Title",
+      artist: selectedTrack.artist || "Unknown Artist",
+      album: selectedTrack.album || "Unknown Album",
+    });
   }, [selectedTrack]);
 
   function handleTrackClick(track){
@@ -1015,26 +1083,153 @@ function App() {
     }
   }
 
-  const visibleTracks = tracks.filter((track) => {
-    const matchesArtist = selectedArtist ? track.artist === selectedArtist : true
-    const matchesAlbum = selectedAlbum ? track.album === selectedAlbum : true
+  function handleOpenEditTrack(track) {
+    setEditingTrack(track);
+    setEditTrackTitle(track.title || "");
+    setEditTrackArtist(track.artist || "");
+    setEditTrackAlbum(track.album || "");
+    setOpenMenuTrackId(null);
+    setIsArtistMenuOpen(false);
+    setIsCreatingArtist(false);
+    setNewArtistName("");
+    setIsAlbumMenuOpen(false);
+    setIsCreatingAlbum(false);
+    setNewAlbumName("");
+  }
 
-    const query = searchQuery.trim().toLowerCase()
-    const matchesSearch =
-      query === "" ||
-      track.title?.toLowerCase().includes(query) ||
-      track.artist?.toLowerCase().includes(query) ||
-      track.album?.toLowerCase().includes(query)
+  function handleCloseEditTrack() {
+    setEditingTrack(null);
+    setEditTrackTitle("");
+    setEditTrackArtist("");
+    setEditTrackAlbum("");
+    setIsArtistMenuOpen(false);
+    setIsCreatingArtist(false);
+    setNewArtistName("");
+    setIsAlbumMenuOpen(false);
+    setIsCreatingAlbum(false);
+    setNewAlbumName("");
+  }
 
-    return matchesArtist && matchesAlbum && matchesSearch
-  })
+  async function handleSaveTrackInfo() {
+    if (!editingTrack) {
+      return;
+    }
 
-  const visibleArtists = artists.filter((artist) => 
-    artist.toLowerCase().includes(searchQuery.trim().toLowerCase())
-  )
-  const visibleAlbums = albums.filter((album) =>
-    album.toLowerCase().includes(searchQuery.trim().toLowerCase())
-  )
+    const trimmedTitle = editTrackTitle.trim();
+    const trimmedArtist = editTrackArtist.trim();
+    const trimmedAlbum = editTrackAlbum.trim();
+
+    if (!trimmedTitle) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/tracks/${editingTrack.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            title: trimmedTitle,
+            artist: trimmedArtist || null,
+            album: trimmedAlbum || null,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to update track info");
+      }
+
+      const updatedTrack = await response.json();
+
+      setTracks((prev) =>
+        prev.map((track) =>
+          track.id === updatedTrack.id ? updatedTrack : track
+        )
+      );
+
+      setSelectedTrack((prev) =>
+        prev?.id === updatedTrack.id ? updatedTrack : prev
+      );
+
+      setPlaylistTracks((prev) =>
+        prev.map((track) =>
+          track.id === updatedTrack.id ? updatedTrack : track
+        )
+      );
+
+      setQueue((prev) =>
+        prev.map((track) =>
+          track.id === updatedTrack.id ? updatedTrack : track
+        )
+      );
+
+      setOriginalQueue((prev) =>
+        prev.map((track) =>
+          track.id === updatedTrack.id ? updatedTrack : track
+        )
+      );
+
+      const refreshedArtists = Array.from(
+        new Set(
+          tracks
+            .map((track) =>
+              track.id === updatedTrack.id ? updatedTrack.artist : track.artist
+            )
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b));
+
+      const refreshedAlbums = Array.from(
+        new Set(
+          tracks
+            .map((track) =>
+              track.id === updatedTrack.id ? updatedTrack.album : track.album
+            )
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b));
+
+      setArtists(refreshedArtists);
+      setAlbums(refreshedAlbums);
+
+      handleCloseEditTrack();
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  const visibleTracks = useMemo(() => {
+    return tracks.filter((track) => {
+      const matchesArtist = selectedArtist ? track.artist === selectedArtist : true;
+      const matchesAlbum = selectedAlbum ? track.album === selectedAlbum : true;
+
+      const query = searchQuery.trim().toLowerCase();
+      const matchesSearch =
+        query === "" ||
+        track.title?.toLowerCase().includes(query) ||
+        track.artist?.toLowerCase().includes(query) ||
+        track.album?.toLowerCase().includes(query);
+
+      return matchesArtist && matchesAlbum && matchesSearch;
+    });
+  }, [tracks, selectedArtist, selectedAlbum, searchQuery]);
+
+  const visibleArtists = useMemo(() => {
+    return artists.filter((artist) =>
+      artist.toLowerCase().includes(searchQuery.trim().toLowerCase())
+    );
+  }, [artists, searchQuery]);
+
+  const visibleAlbums = useMemo(() => {
+    return albums.filter((album) =>
+      album.toLowerCase().includes(searchQuery.trim().toLowerCase())
+    );
+  }, [albums, searchQuery]);
+
   const paginatedTracks = visibleTracks.slice(
     (tracksPage - 1) * TRACKS_PAGE_SIZE,
     tracksPage * TRACKS_PAGE_SIZE
@@ -1055,6 +1250,15 @@ function App() {
     Math.ceil(visibleArtists.length / ARTISTS_PAGE_SIZE)
   );
 
+  const editArtistAlbums = useMemo(() => {
+    return albums.filter((album) =>
+      tracks.some(
+        (track) =>
+          (track.artist || "") === editTrackArtist &&
+          (track.album || "") === album
+      )
+    );
+  }, [albums, tracks, editTrackArtist]);
 
   function renderMainContent() {
     if (loading) {
@@ -1106,6 +1310,13 @@ function App() {
                     className="track-row__menu"
                     onClick={(event) => event.stopPropagation()}
                   >
+                    <button
+                      className="track-row__menu-item"
+                      onClick={() => handleOpenEditTrack(track)}
+                      type="button"
+                    >
+                      Edit Info
+                    </button>
                     <button
                       className="track-row__menu-item"
                       onClick={() => {
@@ -1434,6 +1645,13 @@ function App() {
                 className="track-row__menu"
                 onClick={(event) => event.stopPropagation()}
               >
+                <button
+                  className="track-row__menu-item"
+                  onClick={() => handleOpenEditTrack(track)}
+                  type="button"
+                >
+                  Edit Info
+                </button>
                 <button
                   className="track-row__menu-item"
                   onClick={() => {
@@ -1961,6 +2179,8 @@ function App() {
 
         <audio
           ref={audioRef}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
           onEnded={() => {
             setCurrentTime(0);
             if (isLoop && audioRef.current) {
@@ -1988,6 +2208,227 @@ function App() {
           }}
         />
       </footer>
+      {editingTrack && (
+        <div className="modal-overlay" onClick={handleCloseEditTrack}>
+          <div
+            className="modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal__header">
+              <h2>Edit Info</h2>
+            </div>
+
+            <div className="modal__body">
+              <label className="modal__field">
+                <span className="modal__label">Artist</span>
+
+                <div className="modal__select-row">
+                  <button
+                    className="modal__select"
+                    type="button"
+                    onClick={() => {
+                      setIsArtistMenuOpen((prev) => !prev);
+                      setIsCreatingArtist(false);
+                      setNewArtistName("");
+                    }}
+                  >
+                    {editTrackArtist || "Select artist"}
+                  </button>
+                  
+                  <button
+                    className="modal__plus-button"
+                    type="button"
+                    onClick={() => {
+                      setIsCreatingArtist((prev) => !prev);
+                      setIsArtistMenuOpen(false);
+                      setNewArtistName("");
+                    }}
+                  >
+                    +
+                  </button>
+                </div>
+                  
+                {isArtistMenuOpen && (
+                  <div className="modal__dropdown">
+                    {artists.map((artist) => (
+                      <button
+                        key={artist}
+                        className="modal__dropdown-item"
+                        type="button"
+                        onClick={() => {
+                          setEditTrackArtist(artist);
+                          setIsArtistMenuOpen(false);
+                        }}
+                      >
+                        {artist}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {isCreatingArtist && (
+                  <div className="modal__inline-create">
+                    <input
+                      className="modal__input"
+                      type="text"
+                      placeholder="New artist name"
+                      value={newArtistName}
+                      onChange={(event) => setNewArtistName(event.target.value)}
+                    />
+
+                    <div className="modal__inline-actions">
+                      <button
+                        className="settings-button settings-button--secondary"
+                        type="button"
+                        onClick={() => {
+                          setIsCreatingArtist(false);
+                          setNewArtistName("");
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      
+                      <button
+                        className="settings-button"
+                        type="button"
+                        onClick={() => {
+                          const trimmed = newArtistName.trim();
+                          if (!trimmed) return;
+                        
+                          setEditTrackArtist(trimmed);
+                          setIsCreatingArtist(false);
+                          setNewArtistName("");
+                        }}
+                      >
+                        Use artist
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </label>
+              <label className="modal__field">
+                <span className="modal__label">Album</span>
+
+                <div className="modal__select-row">
+                  <button
+                    className="modal__select"
+                    type="button"
+                    onClick={() => {
+                      setIsAlbumMenuOpen((prev) => !prev);
+                      setIsCreatingAlbum(false);
+                      setNewAlbumName("");
+                    }}
+                  >
+                    {editTrackAlbum || "Select album"}
+                  </button>
+                  
+                  <button
+                    className="modal__plus-button"
+                    type="button"
+                    onClick={() => {
+                      setIsCreatingAlbum((prev) => !prev);
+                      setIsAlbumMenuOpen(false);
+                      setNewAlbumName("");
+                    }}
+                  >
+                    +
+                  </button>
+                </div>
+                  
+                {isAlbumMenuOpen && (
+                  <div className="modal__dropdown">
+                    {editArtistAlbums.map((album) => (
+                      <button
+                        key={album}
+                        className="modal__dropdown-item"
+                        type="button"
+                        onClick={() => {
+                          setEditTrackAlbum(album);
+                          setIsAlbumMenuOpen(false);
+                        }}
+                      >
+                        {album}
+                      </button>
+                    ))}
+
+                    {editArtistAlbums.length === 0 && (
+                      <div className="modal__dropdown-empty">
+                        No albums found for this artist
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {isCreatingAlbum && (
+                  <div className="modal__inline-create">
+                    <input
+                      className="modal__input"
+                      type="text"
+                      placeholder="New album name"
+                      value={newAlbumName}
+                      onChange={(event) => setNewAlbumName(event.target.value)}
+                    />
+
+                    <div className="modal__inline-actions">
+                      <button
+                        className="settings-button settings-button--secondary"
+                        type="button"
+                        onClick={() => {
+                          setIsCreatingAlbum(false);
+                          setNewAlbumName("");
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      
+                      <button
+                        className="settings-button"
+                        type="button"
+                        onClick={() => {
+                          const trimmed = newAlbumName.trim();
+                          if (!trimmed) return;
+                        
+                          setEditTrackAlbum(trimmed);
+                          setIsCreatingAlbum(false);
+                          setNewAlbumName("");
+                        }}
+                      >
+                        Use album
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </label>
+              <label className="modal__field">
+                <span className="modal__label">Track name</span>
+                <input
+                  className="modal__input"
+                  type="text"
+                  value={editTrackTitle}
+                  onChange={(event) => setEditTrackTitle(event.target.value)}
+                />
+              </label>
+            </div>
+            <div className="modal__actions">
+              <button
+                className="settings-button settings-button--secondary"
+                type="button"
+                onClick={handleCloseEditTrack}
+              >
+                Cancel
+              </button>
+
+              <button
+                className="settings-button"
+                type="button"
+                onClick={handleSaveTrackInfo}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

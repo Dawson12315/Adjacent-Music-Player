@@ -28,7 +28,6 @@ Later Improvements:
 - Artwork for currently playing
 - Support keyboard media controls
 - Genre tagging/Browse by genre
-- Edit track: artist/album
 - Link to last.fm for play history
 
 

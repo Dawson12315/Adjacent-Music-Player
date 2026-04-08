@@ -873,3 +873,143 @@ button {
   scrollbar-width: thin;
   scrollbar-color: #2a2a2a #121212;
 }
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 1000;
+}
+
+.modal {
+  width: 100%;
+  max-width: 520px;
+  background: #181818;
+  border: 1px solid #2a2a2a;
+  border-radius: 16px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+  padding: 24px;
+}
+
+.modal__header h2 {
+  margin: 0 0 16px;
+  font-size: 1.3rem;
+}
+
+.modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal__label {
+  color: #b3b3b3;
+  font-size: 0.9rem;
+}
+
+.modal__input {
+  width: 100%;
+  background: #121212;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  color: #ffffff;
+  font: inherit;
+  padding: 12px 14px;
+  outline: none;
+}
+
+.modal__input:focus {
+  border-color: #535353;
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+.modal__select-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+
+.modal__select {
+  width: 100%;
+  background: #121212;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  color: #ffffff;
+  font: inherit;
+  padding: 12px 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.modal__select:hover,
+.modal__select:focus {
+  border-color: #535353;
+}
+
+.modal__plus-button {
+  width: 44px;
+  border: none;
+  border-radius: 10px;
+  background: #2a2a2a;
+  color: #ffffff;
+  font: inherit;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.modal__dropdown {
+  max-height: 180px;
+  overflow-y: auto;
+  background: #121212;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  margin-top: 8px;
+  padding: 6px 0;
+}
+
+.modal__dropdown-item {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  text-align: left;
+  padding: 10px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.modal__dropdown-item:hover {
+  background: #222222;
+}
+
+.modal__inline-create {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modal__inline-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.modal__dropdown-empty {
+  padding: 10px 14px;
+  color: #b3b3b3;
+  font-size: 0.9rem;
+}
