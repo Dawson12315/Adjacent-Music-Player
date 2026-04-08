@@ -1,24 +1,22 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.config import settings
 
-from app.config import settings
-from app.db import Base, engine
 from app import models
-from app.routes.health import router as health_router
-from app.routes.tracks import router as tracks_router
-from app.routes.scan import router as scan_router
-from app.routes.artists import router as artists_router
+from app.config import settings
+from app.db import Base, SessionLocal, engine
 from app.routes.albums import router as albums_router
-from app.routes.playlists import router as playlists_router
-from app.db import Base, engine, SessionLocal
-from app.services.playlists import ensure_liked_songs_playlist
-from app.services.playback import get_or_create_playback_session
-from app.routes.playback import router as playback_router
-from app.routes.settings import router as settings_router
-from app.routes.maintenance import router as maintenance_router
-from app.services.scheduler import start_scheduler
 from app.routes.artist_edit import router as artist_edit_router
+from app.routes.artists import router as artists_router
+from app.routes.health import router as health_router
+from app.routes.maintenance import router as maintenance_router
+from app.routes.playback import router as playback_router
+from app.routes.playlists import router as playlists_router
+from app.routes.scan import router as scan_router
+from app.routes.settings import router as settings_router
+from app.routes.tracks import router as tracks_router
+from app.services.playback import get_or_create_playback_session
+from app.services.playlists import ensure_liked_songs_playlist
+from app.services.scheduler import start_scheduler
 
 app = FastAPI(
     title=settings.app_name,
