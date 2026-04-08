@@ -61,7 +61,7 @@ function App() {
   const [transferArtistTarget, setTransferArtistTarget] = useState("");
   const [isEditArtistModalOpen, setIsEditArtistModalOpen] = useState(false);
   const [isTransferArtistMenuOpen, setIsTransferArtistMenuOpen] = useState(false);
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const API_BASE_URL = window.APP_CONFIG?.API_BASE_URL || "http://127.0.0.1:8000";
 
   const TRACKS_PAGE_SIZE = 50;
   const ARTISTS_PAGE_SIZE = 50;

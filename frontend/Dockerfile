@@ -7,9 +7,6 @@ RUN npm install
 
 COPY . .
 
-ARG VITE_API_BASE_URL
-ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
-
 RUN npm run build
 
 FROM nginx:alpine
@@ -18,4 +15,4 @@ COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 80
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD sh -c "echo \"window.APP_CONFIG = { API_BASE_URL: '$API_BASE_URL' };\" > /usr/share/nginx/html/config.js && nginx -g 'daemon off;'"
