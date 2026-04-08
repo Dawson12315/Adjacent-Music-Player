@@ -1013,3 +1013,54 @@ button {
   color: #b3b3b3;
   font-size: 0.9rem;
 }
+.main-content__header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.page-actions {
+  position: relative;
+}
+
+.page-actions__button {
+  background: transparent;
+  border: none;
+  color: #b3b3b3;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.page-actions__button:hover {
+  color: #ffffff;
+}
+
+.page-actions__menu {
+  position: absolute;
+  right: 0;
+  top: 32px;
+  background: #282828;
+  border-radius: 8px;
+  min-width: 160px;
+  padding: 6px 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 50;
+}
+
+.page-actions__menu-item {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  text-align: left;
+  padding: 10px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.page-actions__menu-item:hover {
+  background: #3a3a3a;
+}

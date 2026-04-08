@@ -26,7 +26,6 @@ Later Improvements:
 - Artist page: list Albums, then singles
 - Artwork as icon for sidebar - playlists: Liked Songs art locked, Customizable art for others
 - Artwork for currently playing
-- Support keyboard media controls
 - Genre tagging/Browse by genre
 - Link to last.fm for play history
 
