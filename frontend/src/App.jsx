@@ -1904,7 +1904,7 @@ function App() {
     <div className="app-layout">
       <aside className="sidebar">
         <div className="sidebar__header">
-          <img className="logo" src="../public/Adjacent.svg"></img>
+          <img className="logo" src="/Adjacent.svg" alt="Adjacent logo" />
           <div className="sidebar__brand">Adjacent</div>
         </div>
 
