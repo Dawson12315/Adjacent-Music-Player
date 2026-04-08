@@ -9,9 +9,10 @@ services:
       - "8000:8000"
     volumes:
       - ./backend/data:/app/data
-      - /Volumes/media/music:/music:ro
+      - ${MUSIC_LIBRARY_PATH_HOST}:/music:ro
     environment:
       - MUSIC_LIBRARY_PATH=/music
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN}
     restart: unless-stopped
 
   frontend:
@@ -21,8 +22,7 @@ services:
     ports:
       - "5173:80"
     environment:
-      - API_BASE_URL=http://192.168.86.23:8000
-      - FRONTEND_ORIGIN=http://192.168.86.23:5173
+      - API_BASE_URL=${API_BASE_URL}
     depends_on:
       - backend
     restart: unless-stopped
