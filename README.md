@@ -180,6 +180,7 @@ Adjacent is built as:
 
 ## Notes
 
+- Altering info for music library does not change the music library source metadata, only what is stored in the Adjacent persistent SQLite DB
 - Requires Docker
 - Requires a mounted music library
 - Designed for self-hosted environments
