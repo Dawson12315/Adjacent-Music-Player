@@ -733,6 +733,41 @@ function App() {
       console.error(error);
     }
   }
+
+  async function handlePlayPlaylist(playlist) {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/playlists/${playlist.id}/tracks`
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch playlist tracks");
+      }
+
+      const tracksData = await response.json();
+
+      if (!tracksData.length) {
+        return;
+      }
+
+      setSelectedPlaylist(playlist);
+      setPlaylistTracks(tracksData);
+      setActiveView("playlist");
+      setSelectedArtist(null);
+      setSelectedAlbum(null);
+      setSearchQuery("");
+
+      setOriginalQueue(tracksData);
+      setQueue(tracksData);
+      setQueueIndex(0);
+      setSelectedTrack(tracksData[0]);
+      setIsPlaying(true);
+      setOpenPlaylistMenuId(null);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   async function handlePlaylistClick(playlist) {
     try {
       const response = await fetch(
@@ -1325,6 +1360,46 @@ function App() {
     } catch (error) {
       console.error(error);
     }
+  }
+
+  function getPlaylistArtwork(playlist) {
+    if (playlist.system_key === "liked_songs") {
+      return {
+        type: "image",
+        src: "/liked-songs.png",
+      };
+    }
+
+    return {
+      type: "generated",
+      initials: getPlaylistInitials(playlist.name),
+      gradientClass: getPlaylistGradientClass(playlist.name),
+    };
+  }
+
+  function getPlaylistInitials(name) {
+    if (!name) return "♪";
+
+    const words = name.trim().split(/\s+/).slice(0, 2);
+    return words.map((word) => word[0]?.toUpperCase() || "").join("");
+  }
+
+  function getPlaylistGradientClass(name) {
+    const gradients = [
+      "playlist-art--gradient-1",
+      "playlist-art--gradient-2",
+      "playlist-art--gradient-3",
+      "playlist-art--gradient-4",
+      "playlist-art--gradient-5",
+      "playlist-art--gradient-6",
+    ];
+
+    let hash = 0;
+    for (let index = 0; index < name.length; index += 1) {
+      hash = name.charCodeAt(index) + ((hash << 5) - hash);
+    }
+
+    return gradients[Math.abs(hash) % gradients.length];
   }
 
   const visibleTracks = useMemo(() => {
@@ -2003,17 +2078,50 @@ function App() {
                       }}
                     />
                   ) : (
-                    <button
-                      className={`sidebar__link playlist-sidebar-item__main ${
+
+
+                    <div
+                      className={`playlist-sidebar-item__main ${
                         activeView === "playlist" && selectedPlaylist?.id === playlist.id
                           ? "sidebar__link--active"
                           : ""
                       }`}
-                      onClick={() => handlePlaylistClick(playlist)}
-                      type="button"
                     >
-                      {playlist.name}
-                    </button>
+                      <div
+                        className="playlist-art-wrapper"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handlePlayPlaylist(playlist);
+                        }}
+                      >
+                        {getPlaylistArtwork(playlist).type === "image" ? (
+                          <img
+                            className="playlist-art"
+                            src={getPlaylistArtwork(playlist).src}
+                            alt={playlist.name}
+                          />
+                        ) : (
+                          <div
+                            className={`playlist-art ${getPlaylistArtwork(playlist).gradientClass}`}
+                          >
+                            <span className="playlist-art__initials">
+                              {getPlaylistArtwork(playlist).initials}
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="playlist-art__overlay"></div>
+                      </div>
+                      
+                      <button
+                        className="playlist-sidebar-item__name-button"
+                        onClick={() => handlePlaylistClick(playlist)}
+                      >
+                        {playlist.name}
+                      </button>
+                    </div>
+
+
                   )}
                   {!playlist.is_system && (
                     <div className="playlist-sidebar-item__actions">

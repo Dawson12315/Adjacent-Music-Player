@@ -150,6 +150,122 @@ button {
 }
 
 .playlist-sidebar-item__main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+.playlist-sidebar-item__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playlist-art {
+  width: 100%;
+  height: 100%;
+  border-radius: 7px;
+  object-fit: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+}
+
+.playlist-art__initials {
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.playlist-art--gradient-1 {
+  background: linear-gradient(135deg, #5b2cff, #b56dff);
+}
+
+.playlist-art--gradient-2 {
+  background: linear-gradient(135deg, #0f766e, #34d399);
+}
+
+.playlist-art--gradient-3 {
+  background: linear-gradient(135deg, #1d4ed8, #60a5fa);
+}
+
+.playlist-art--gradient-4 {
+  background: linear-gradient(135deg, #b91c1c, #fb7185);
+}
+
+.playlist-art--gradient-5 {
+  background: linear-gradient(135deg, #92400e, #fbbf24);
+}
+
+.playlist-art--gradient-6 {
+  background: linear-gradient(135deg, #3f3f46, #a1a1aa);
+}
+.playlist-art-wrapper {
+  position: relative;
+  width: 45px;
+  height: 45px;
+  flex: 0 0 45px;
+  border-radius: 7px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.playlist-art {
+  width: 100%;
+  height: 100%;
+  border-radius: 7px;
+  object-fit: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+}
+
+.playlist-art__overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.playlist-art-wrapper:hover .playlist-art__overlay {
+  opacity: 1;
+}
+
+.playlist-art__overlay::before {
+  content: "▶";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.58);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  line-height: 1;
+  padding-left: 2px;
+}
+.playlist-sidebar-item__name-button {
+  background: transparent;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  flex: 1;
   min-width: 0;
 }
 
