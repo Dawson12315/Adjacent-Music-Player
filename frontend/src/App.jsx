@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { List } from "react-window";
 
 function App() {
   const [tracks, setTracks] = useState([]);
@@ -1543,6 +1544,8 @@ function App() {
     );
   }, [albums, tracks, editTrackArtist]);
 
+  const upcomingQueue = queue.slice(queueIndex + 1);
+
   function renderMainContent() {
     if (loading) {
       return <div className="state-message">Loading tracks...</div>
@@ -2058,6 +2061,44 @@ function App() {
   }
   const progressPercent =
     duration > 0 ? Math.min((currentTime / duration) * 100, 100) : 0;
+
+  function QueueRow({ index, style }) {
+    const track = upcomingQueue[index];
+    const actualIndex = queueIndex + 1 + index;
+
+    if (!track) {
+      return null;
+    }
+
+    return (
+      <div style={style}>
+        <div className="queue-panel__item queue-panel__item--row">
+          <button
+            className="queue-panel__item-main"
+            onClick={() => {
+              setSelectedTrack(track);
+              setQueueIndex(actualIndex);
+            }}
+            type="button"
+          >
+            <div className="queue-panel__item-title">{track.title}</div>
+            <div className="queue-panel__item-meta">
+              {track.artist || "Unknown Artist"}
+            </div>
+          </button>
+          <button
+            className="queue-panel__remove-button"
+            onClick={() => handleRemoveFromQueue(actualIndex)}
+            type="button"
+            aria-label="Remove from queue"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-layout">
       <aside className="sidebar">
@@ -2067,33 +2108,97 @@ function App() {
         </div>
 
         <nav className="sidebar__nav">
-          <button 
-            className={`sidebar__link ${activeView === "tracks" ? "sidebar__link--active" : ""}`}
+          <div
+            className={`playlist-sidebar-item__main ${
+              activeView === "tracks" ? "sidebar__link--active" : ""
+            }`}
             onClick={() => handleClearFilters()}
-            type="button"
-          >
-            Tracks
-          </button>
-          <button 
-            className={`sidebar__link ${activeView === "artists" ? "sidebar__link--active" : ""}`}
-            onClick={() => {
-              setActiveView("artists")
-              setSearchQuery("")
+            role="button"
+            tabIndex={0}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                handleClearFilters();
+              }
             }}
-            type="button"
           >
-            Artists
-          </button>
-          <button 
-            className={`sidebar__link ${activeView === "albums" ? "sidebar__link--active" : ""}`}
+            <div className="playlist-art-wrapper">
+              <img className="playlist-art" src="/tracks.png" alt="Tracks" />
+            </div>
+          
+            <button
+              className="playlist-sidebar-item__name-button"
+              onClick={handleClearFilters}
+              type="button"
+            >
+              Tracks
+            </button>
+          </div>
+          
+          <div
+            className={`playlist-sidebar-item__main ${
+              activeView === "artists" ? "sidebar__link--active" : ""
+            }`}
             onClick={() => {
-              setActiveView("albums")
-              setSearchQuery("")
+              setActiveView("artists");
+              setSearchQuery("");
             }}
-            type="button"
+            role="button"
+            tabIndex={0}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                setActiveView("artists");
+                setSearchQuery("");
+              }
+            }}
           >
-            Albums
-          </button>
+            <div className="playlist-art-wrapper">
+              <img className="playlist-art" src="/artists.png" alt="Artists" />
+            </div>
+          
+            <button
+              className="playlist-sidebar-item__name-button"
+              onClick={() => {
+                setActiveView("artists");
+                setSearchQuery("");
+              }}
+              type="button"
+            >
+              Artists
+            </button>
+          </div>
+            
+          <div
+            className={`playlist-sidebar-item__main ${
+              activeView === "albums" ? "sidebar__link--active" : ""
+            }`}
+            onClick={() => {
+              setActiveView("albums");
+              setSearchQuery("");
+            }}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                setActiveView("albums");
+                setSearchQuery("");
+              }
+            }}
+          >
+            <div className="playlist-art-wrapper">
+              <img className="playlist-art" src="/albums.png" alt="Albums" />
+            </div>
+          
+            <button
+              className="playlist-sidebar-item__name-button"
+              onClick={() => {
+                setActiveView("albums");
+                setSearchQuery("");
+              }}
+              type="button"
+            >
+              Albums
+            </button>
+          </div>
         </nav>
 
         <div className="sidebar__section sidebar__section--playlists">
@@ -2258,9 +2363,31 @@ function App() {
               ))
             )}
           </div>
-          <div className="sidebar__section">
+        <div className="sidebar__section">
+          <div
+            className={`playlist-sidebar-item__main ${
+              activeView === "settings" ? "sidebar__link--active" : ""
+            }`}
+          >
+            <div
+              className="playlist-art-wrapper"
+              onClick={() => {
+                setActiveView("settings");
+                setSearchQuery("");
+                setSelectedArtist(null);
+                setSelectedAlbum(null);
+                setSelectedPlaylist(null);
+              }}
+            >
+              <img
+                className="playlist-art"
+                src="/settings.png"
+                alt="Settings"
+              />
+            </div>
+            
             <button
-              className={`sidebar__link ${activeView === "settings" ? "sidebar__link--active"             : ""}`}
+              className="playlist-sidebar-item__name-button"
               onClick={() => {
                 setActiveView("settings");
                 setSearchQuery("");
@@ -2273,6 +2400,7 @@ function App() {
               Settings
             </button>
           </div>
+        </div>
         <div className="sidebar__section">
           <div className="sidebar__section-title">Library</div>
           <div className="sidebar__stat">Tracks: {tracks.length}</div>
@@ -2359,45 +2487,17 @@ function App() {
                 </div>
               )}
 
-              <div className="queue-panel__section">
+              <div className="queue-panel__section queue-panel__section--next">
                 <div className="queue-panel__section-title">Next Up</div>
-            
+
                 <div className="queue-panel__list">
-                  {queue
-                    .slice(queueIndex + 1)
-                    .map((track, index) => {
-                      const actualIndex = queueIndex + 1 + index;
-                    
-                      return (
-                        <div
-                          key={`${track.id}-${actualIndex}`}
-                          className="queue-panel__item queue-panel__item--row"
-                        >
-                          <button
-                            className="queue-panel__item-main"
-                            onClick={() => {
-                              setSelectedTrack(track);
-                              setQueueIndex(actualIndex);
-                            }}
-                            type="button"
-                          >
-                            <div className="queue-panel__item-title">{track.title}</div>
-                            <div className="queue-panel__item-meta">
-                              {track.artist || "Unknown Artist"}
-                            </div>
-                          </button>
-                          
-                          <button
-                            className="queue-panel__remove-button"
-                            onClick={() => handleRemoveFromQueue(actualIndex)}
-                            type="button"
-                            aria-label="Remove from queue"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      );
-                    })}
+                  <List
+                    style={{ width: "100%", height: "100%" }}
+                    rowCount={upcomingQueue.length}
+                    rowHeight={88}
+                    rowComponent={QueueRow}
+                    rowProps={{}}
+                  />
                 </div>
               </div>
             </aside>
