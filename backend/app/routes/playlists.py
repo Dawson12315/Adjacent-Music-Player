@@ -1,4 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+import os
+import shutil
+from uuid import uuid4
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -157,6 +161,47 @@ def remove_track_from_liked_songs(track_id: int, db: Session = Depends(get_db)):
     db.commit()
 
     return {"liked": False}
+
+@router.post("/playlists/{playlist_id}/artwork", response_model=PlaylistResponse, tags=["playlists"])
+def upload_playlist_artwork(
+    playlist_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
+
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+
+    if playlist.system_key == "liked_songs":
+        raise HTTPException(status_code=400, detail="Liked Songs artwork cannot be changed")
+
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    upload_dir = "app/uploads/playlist_artwork"
+    os.makedirs(upload_dir, exist_ok=True)
+
+    extension = os.path.splitext(file.filename or "")[1].lower() or ".png"
+    filename = f"{uuid4().hex}{extension}"
+    file_path = os.path.join(upload_dir, filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    if playlist.artwork_path:
+        old_path = playlist.artwork_path.lstrip("/")
+        if os.path.exists(old_path):
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
+
+    playlist.artwork_path = f"/uploads/playlist_artwork/{filename}"
+    db.commit()
+    db.refresh(playlist)
+
+    return playlist
 
 @router.post("/playlists/{playlist_id}/tracks", tags=["playlists"])
 def add_track_to_playlist(

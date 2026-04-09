@@ -7,6 +7,7 @@ class PlaylistResponse(BaseModel):
     name: str
     is_system: bool
     system_key: Optional[str] = None
+    artwork_path: Optional[str] = None
 
     class Config:
         from_attributes = True
