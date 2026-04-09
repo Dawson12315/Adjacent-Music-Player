@@ -43,7 +43,7 @@ button {
 .app-layout {
   display: grid;
   grid-template-columns: 240px 1fr;
-  grid-template-rows: 1fr 88px;
+  grid-template-rows: 1fr;
   height: 100vh;
   width: 100%;
 }
@@ -54,6 +54,9 @@ button {
   background: #000000;
   padding: 24px 16px;
   border-right: 1px solid #1f1f1f;
+  overflow-y: auto;
+  min-height: 0;
+  padding-bottom: 112px;
 }
 
 .sidebar__brand {
@@ -65,7 +68,7 @@ button {
 .sidebar__nav {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
 }
 
 .sidebar__link {
@@ -433,7 +436,8 @@ button {
   grid-column: 2 / 3;
   background: linear-gradient(to bottom, #1a1a1a, #121212 220px);
   padding: 24px;
-  overflow-y: auto;
+  overflow: hidden;
+  min-height: 0;
 }
 
 .main-content__header h1 {
@@ -451,23 +455,37 @@ button {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 24px;
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
 }
 .content-layout--queue-open {
   grid-template-columns: minmax(0, 1fr) 320px;
+  height: 100%;
+  min-height: 0;
 }
 .content-layout__main {
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 112px;
 }
 
 .queue-panel {
   background: #121212;
   border-left: 1px solid #2a2a2a;
   padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: 112px;
 }
 
 .queue-panel__header {
+  margin-top:12px;
   margin-bottom: 20px;
+  flex: 0 0 auto;
 }
 
 .queue-panel__header h2 {
@@ -482,14 +500,16 @@ button {
 }
 
 .queue-panel__list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
-
+.queue-panel__list > div {
+  overflow-x: hidden !important;
+}
 .queue-panel__item {
   width: 100%;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-radius: 8px;
   background: #181818;
   border: none;
@@ -505,23 +525,44 @@ button {
 .queue-panel__item-title {
   font-weight: 600;
   margin-bottom: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.2;
+  max-height: 2.4em;
 }
 
 .queue-panel__item-meta {
   color: #b3b3b3;
   font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .queue-panel__section {
-  margin-bottom: 24px;
+  min-height: 0;
+}
+.queue-panel__section--next {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  margin-top: 16px;
 }
 .queue-panel__item--row {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 10px;
+  height: 100%;
 }
 
 .queue-panel__item-main {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
   width: 100%;
   background: transparent;
   border: none;
@@ -545,6 +586,7 @@ button {
   color: #ffffff;
 }
 .queue-panel__section-title {
+  flex: 0 0 auto;
   font-size: 0.8rem;
   font-weight: 700;
   color: #b3b3b3;
@@ -573,7 +615,6 @@ button {
   cursor: pointer;
   width: 100%;
 }
-
 .track-row:hover {
   background: #222222;
 }
@@ -786,8 +827,11 @@ button {
   border-color: #535353;
 }
 .player-bar {
-  grid-row: 2 / 3;
-  grid-column: 1 / 3;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 88px;
   background: #181818;
   border-top: 1px solid #2a2a2a;
   display: grid;
@@ -795,6 +839,7 @@ button {
   align-items: center;
   gap: 16px;
   padding: 0 20px;
+  z-index: 900;
 }
 
 .player-bar__left {
