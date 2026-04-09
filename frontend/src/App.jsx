@@ -62,6 +62,9 @@ function App() {
   const [isEditArtistModalOpen, setIsEditArtistModalOpen] = useState(false);
   const [isTransferArtistMenuOpen, setIsTransferArtistMenuOpen] = useState(false);
   const API_BASE_URL = window.APP_CONFIG?.API_BASE_URL || "http://127.0.0.1:8000";
+  const [artworkPlaylist, setArtworkPlaylist] = useState(null);
+  const [artworkFile, setArtworkFile] = useState(null);
+  const [artworkPreviewUrl, setArtworkPreviewUrl] = useState("");
 
   const TRACKS_PAGE_SIZE = 50;
   const ARTISTS_PAGE_SIZE = 50;
@@ -1362,11 +1365,91 @@ function App() {
     }
   }
 
+  function handleOpenChangeArtwork(playlist) {
+    if (playlist.system_key === "liked_songs") {
+      return;
+    }
+
+    setArtworkPlaylist(playlist);
+    setArtworkFile(null);
+    setArtworkPreviewUrl(playlist.artwork_path ? `${API_BASE_URL}${playlist.artwork_path}` :  "");
+    setOpenPlaylistMenuId(null);
+  }
+
+  function handleCloseChangeArtwork() {
+    setArtworkPlaylist(null);
+    setArtworkFile(null);
+    setArtworkPreviewUrl("");
+  }
+
+  function handleArtworkFileChange(event) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setArtworkFile(file);
+    setArtworkPreviewUrl(URL.createObjectURL(file));
+  }
+
+  async function handleSavePlaylistArtwork() {
+    if (!artworkPlaylist || !artworkFile) {
+      return;
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("file", artworkFile);
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/playlists/${artworkPlaylist.id}/artwork`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to upload playlist artwork");
+      }
+
+      const updatedPlaylist = await response.json();
+
+      setPlaylists((prev) =>
+        prev
+          .map((playlist) =>
+            playlist.id === updatedPlaylist.id ? updatedPlaylist : playlist
+          )
+          .sort((a, b) => {
+            if (a.system_key === "liked_songs") return -1;
+            if (b.system_key === "liked_songs") return 1;
+            return a.name.localeCompare(b.name);
+          })
+      );
+
+      setSelectedPlaylist((prev) =>
+        prev?.id === updatedPlaylist.id ? updatedPlaylist : prev
+      );
+
+      handleCloseChangeArtwork();
+    } catch (error) {
+      console.error(error);
+    }
+  }
+  
   function getPlaylistArtwork(playlist) {
     if (playlist.system_key === "liked_songs") {
       return {
         type: "image",
         src: "/liked-songs.png",
+      };
+    }
+
+    if (playlist.artwork_path) {
+      return {
+        type: "image",
+        src: `${API_BASE_URL}${playlist.artwork_path}`,
       };
     }
 
@@ -2147,6 +2230,14 @@ function App() {
                           <button
                             className="playlist-sidebar-item__menu-item"
                             type="button"
+                            onClick={() => handleOpenChangeArtwork(playlist)}
+                          >
+                            Change Artwork
+                          </button>
+
+                          <button
+                            className="playlist-sidebar-item__menu-item"
+                            type="button"
                             onClick={() => handleStartRenamePlaylist(playlist)}
                           >
                             Rename Playlist
@@ -2762,6 +2853,72 @@ function App() {
           </div>
         </div>
       )}
+      {artworkPlaylist && (
+        <div className="modal-overlay" onClick={handleCloseChangeArtwork}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal__header">
+              <h2>Change Artwork</h2>
+            </div>
+      
+            <div className="modal__body">
+              <label className="modal__field">
+                <span className="modal__label">Upload artwork</span>
+
+                <div className="modal__file-row">
+                  <label className="modal__file-button">
+                    Choose file
+                    <input
+                      className="modal__file-input"
+                      type="file"
+                      accept="image/*"
+                      onChange={handleArtworkFileChange}
+                    />
+                  </label>
+
+                  <span className="modal__file-name">
+                    {artworkFile ? artworkFile.name : "No file selected"}
+                  </span>
+                </div>
+              </label>
+      
+              <div className="modal__field">
+                <span className="modal__label">Preview</span>
+                {artworkPreviewUrl ? (
+                  <img
+                    className="playlist-artwork-preview"
+                    src={artworkPreviewUrl}
+                    alt={`${artworkPlaylist.name} artwork preview`}
+                  />
+                ) : (
+                  <div className="playlist-artwork-preview playlist-artwork-preview--empty">
+                    No artwork selected
+                  </div>
+                )}
+              </div>
+            </div>
+              
+            <div className="modal__actions">
+              <button
+                className="settings-button settings-button--secondary"
+                type="button"
+                onClick={handleCloseChangeArtwork}
+              >
+                Cancel
+              </button>
+              
+              <button
+                className="settings-button"
+                type="button"
+                onClick={handleSavePlaylistArtwork}
+                disabled={!artworkFile}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

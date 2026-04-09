@@ -77,6 +77,10 @@ to wherever your music is stored on your Docker host.
 
 ## 4. Deploy
 
+## 5. Upon Start Up
+
+- Go to settings and press "Scan library now" ~ This may take a while, but status can be seen by watching library stats in sidebar menu and refreshing the page.
+
 ### Option A — Portainer
 
 - Go to **Stacks**

@@ -11,6 +11,7 @@ class Playlist(Base):
     name = Column(String, nullable=False, unique=True)
     is_system = Column(Boolean, nullable=False, default=False)
     system_key = Column(String, nullable=True, unique=True)
+    artwork_path = Column(String, nullable=True)
 
     playlist_tracks = relationship(
         "PlaylistTrack",

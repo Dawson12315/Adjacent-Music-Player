@@ -268,7 +268,23 @@ button {
   flex: 1;
   min-width: 0;
 }
+.playlist-artwork-preview {
+  width: 160px;
+  height: 160px;
+  object-fit: cover;
+  border-radius: 12px;
+  background: #121212;
+  border: 1px solid #2a2a2a;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
 
+.playlist-artwork-preview--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #b3b3b3;
+  font-size: 0.95rem;
+}
 .playlist-sidebar-item__actions {
   position: relative;
   display: flex;
@@ -1128,6 +1144,41 @@ button {
   padding: 10px 14px;
   color: #b3b3b3;
   font-size: 0.9rem;
+}
+.modal__file-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.modal__file-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #000000;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+}
+
+.modal__file-button:hover {
+  transform: translateY(-1px);
+}
+
+.modal__file-input {
+  display: none;
+}
+
+.modal__file-name {
+  color: #b3b3b3;
+  font-size: 0.95rem;
+  word-break: break-word;
 }
 .main-content__header-row {
   display: flex;

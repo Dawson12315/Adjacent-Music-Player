@@ -1,9 +1,11 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import models
 from app.config import settings
 from app.db import Base, SessionLocal, engine
+from app.db_migrations import run_simple_migrations
 from app.routes.albums import router as albums_router
 from app.routes.artist_edit import router as artist_edit_router
 from app.routes.artists import router as artists_router
@@ -23,6 +25,8 @@ app = FastAPI(
     debug=settings.debug,
 )
 
+app.mount("/uploads", StaticFiles(directory="app/uploads"), name="uploads")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_origin],
@@ -38,6 +42,7 @@ def on_startup():
 
     db = SessionLocal()
     try:
+        run_simple_migrations()
         ensure_liked_songs_playlist(db)
         get_or_create_playback_session(db)
     finally:
