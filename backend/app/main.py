@@ -29,7 +29,10 @@ app.mount("/uploads", StaticFiles(directory="app/uploads"), name="uploads")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_origin],
+    allow_origins=[
+        settings.frontend_origin,
+        "http://localhost:5173"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,10 +42,10 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
+    run_simple_migrations()
 
     db = SessionLocal()
     try:
-        run_simple_migrations()
         ensure_liked_songs_playlist(db)
         get_or_create_playback_session(db)
     finally:

@@ -12,5 +12,8 @@ class Track(Base):
     artist = Column(String, nullable=True)
     album = Column(String, nullable=True)
     file_path = Column(String, nullable=False, unique=True)
+    raw_title = Column(String, nullable=True)
+    raw_artist = Column(String, nullable=True)
+    raw_album = Column(String, nullable=True)
 
     playlist_tracks = relationship("PlaylistTrack", back_populates="track")
