@@ -1225,6 +1225,50 @@ button {
   font-size: 0.95rem;
   word-break: break-word;
 }
+.modal__raw-metadata {
+  background: #121212;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modal__raw-metadata-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #b3b3b3;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.modal__raw-metadata-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modal__raw-metadata-label {
+  font-size: 0.82rem;
+  color: #8a8a8a;
+}
+
+.modal__raw-metadata-value {
+  font-size: 0.95rem;
+  color: #ffffff;
+  word-break: break-word;
+}
+.modal__raw-metadata-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+.modal__metadata-warning {
+  font-size: 12px;
+  color: #f59e0b;
+  margin-bottom: 6px;
+}
 .main-content__header-row {
   display: flex;
   align-items: flex-start;

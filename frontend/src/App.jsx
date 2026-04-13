@@ -1155,6 +1155,22 @@ function App() {
     setNewAlbumName("");
   }
 
+  function handleUseRawMetadata() {
+    if (!editingTrack) {
+      return;
+    }
+
+    setEditTrackTitle(editingTrack.raw_title || "");
+    setEditTrackArtist(editingTrack.raw_artist || "");
+    setEditTrackAlbum(editingTrack.raw_album || "");
+    setIsArtistMenuOpen(false);
+    setIsCreatingArtist(false);
+    setNewArtistName("");
+    setIsAlbumMenuOpen(false);
+    setIsCreatingAlbum(false);
+    setNewAlbumName("");
+  }
+
   async function handleSaveTrackInfo() {
     if (!editingTrack) {
       return;
@@ -2062,6 +2078,15 @@ function App() {
   const progressPercent =
     duration > 0 ? Math.min((currentTime / duration) * 100, 100) : 0;
 
+
+  const hasMetadataMismatch =
+    editingTrack &&
+    (
+      (editingTrack.raw_title && editingTrack.raw_title !== editingTrack.title) ||
+      (editingTrack.raw_artist && editingTrack.raw_artist !== editingTrack.artist) ||
+      (editingTrack.raw_album && editingTrack.raw_album !== editingTrack.album)
+    );
+
   function QueueRow({ index, style }) {
     const track = upcomingQueue[index];
     const actualIndex = queueIndex + 1 + index;
@@ -2672,6 +2697,52 @@ function App() {
             </div>
 
             <div className="modal__body">
+
+              <div className="modal__raw-metadata">
+                {hasMetadataMismatch && (
+                  <div className="modal__metadata-warning">
+                    Metadata was modified during import. Review for accuracy.
+                  </div>
+                )}
+                <div className="modal__raw-metadata-title">Original file metadata</div>
+
+                <div className="modal__raw-metadata-row">
+                  <span className="modal__raw-metadata-label">Raw title:</span>
+                  <span className="modal__raw-metadata-value">
+                    {editingTrack.raw_title || "—"}
+                  </span>
+                </div>
+
+                <div className="modal__raw-metadata-row">
+                  <span className="modal__raw-metadata-label">Raw artist:</span>
+                  <span className="modal__raw-metadata-value">
+                    {editingTrack.raw_artist || "—"}
+                  </span>
+                </div>
+
+                <div className="modal__raw-metadata-row">
+                  <span className="modal__raw-metadata-label">Raw album:</span>
+                  <span className="modal__raw-metadata-value">
+                    {editingTrack.raw_album || "—"}
+                  </span>
+                </div>
+
+                <div className="modal__raw-metadata-actions">
+                  <button
+                    className="settings-button settings-button--secondary"
+                    type="button"
+                    onClick={handleUseRawMetadata}
+                    disabled={
+                      !editingTrack.raw_title &&
+                      !editingTrack.raw_artist &&
+                      !editingTrack.raw_album
+                    }
+                  >
+                    Use raw values
+                  </button>
+                </div>
+              </div>
+
               <label className="modal__field">
                 <span className="modal__label">Artist</span>
 
