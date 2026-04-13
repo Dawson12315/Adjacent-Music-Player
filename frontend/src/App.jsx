@@ -66,9 +66,15 @@ function App() {
   const [artworkPlaylist, setArtworkPlaylist] = useState(null);
   const [artworkFile, setArtworkFile] = useState(null);
   const [artworkPreviewUrl, setArtworkPreviewUrl] = useState("");
+  const [genres, setGenres] = useState([]);
+  const [selectedGenre, setSelectedGenre] = useState(null);
+  const [selectedArtistGenres, setSelectedArtistGenres] = useState([]);
+  const [similarTracks, setSimilarTracks] = useState([]);
+  const [similarRefreshKey, setSimilarRefreshKey] = useState(0);
 
   const TRACKS_PAGE_SIZE = 50;
   const ARTISTS_PAGE_SIZE = 50;
+  const SIMILAR_TRACK_LIMIT = 5;
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
@@ -80,14 +86,17 @@ function App() {
         const [
           tracksResponse,
           artistsResponse,
-          albumsResponse,
+          albumsResponse,          
+          genresResponse,
           playlistsResponse,
           settingsResponse,
           likedSongsPlaylistResponse
+
         ] = await Promise.all([
           fetch(`${API_BASE_URL}/api/tracks`),
           fetch(`${API_BASE_URL}/api/artists`),
-          fetch(`${API_BASE_URL}/api/albums`),
+          fetch(`${API_BASE_URL}/api/albums`),          
+          fetch(`${API_BASE_URL}/api/genres`),
           fetch(`${API_BASE_URL}/api/playlists`),
           fetch(`${API_BASE_URL}/api/settings`),
           fetch(`${API_BASE_URL}/api/playlists/liked-songs`)
@@ -97,10 +106,11 @@ function App() {
           !tracksResponse.ok ||
           !artistsResponse.ok ||
           !albumsResponse.ok ||
+          !genresResponse.ok ||
           !playlistsResponse.ok ||
           !settingsResponse.ok ||
           !likedSongsPlaylistResponse.ok
-        ){
+        ) {
           throw new Error("Failed to fetch library data");
         }
 
@@ -110,10 +120,12 @@ function App() {
         const playlistsData = await playlistsResponse.json();
         const settingsData = await settingsResponse.json()
         const likedSongsPlaylistData = await likedSongsPlaylistResponse.json();
+        const genresData = await genresResponse.json();
 
         setTracks(tracksData);
         setArtists(artistsData);
         setAlbums(albumsData);
+        setGenres(genresData);
         setPlaylists(
           [...playlistsData].sort((a, b) => {
             if (a.system_key === "liked_songs") return -1
@@ -411,6 +423,33 @@ function App() {
     });
   }, [selectedTrack]);
 
+  useEffect(() => {
+    async function fetchArtistGenres() {
+      if (!selectedArtist) {
+        setSelectedArtistGenres([]);
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/artists/${encodeURIComponent(selectedArtist)}/genres`
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch artist genres");
+        }
+
+        const data = await response.json();
+        setSelectedArtistGenres(data);
+      } catch (error) {
+        console.error(error);
+        setSelectedArtistGenres([]);
+      }
+    }
+
+    fetchArtistGenres();
+  }, [selectedArtist]);
+
   function handleTrackClick(track){
     setOpenMenuTrackId(null)
     setSelectedTrack(track);
@@ -437,18 +476,28 @@ function App() {
   function handleArtistClick(artist) {
     setSelectedArtist(artist);
     setSelectedAlbum(null)
+    setSelectedGenre(null);
     setSearchQuery("")
     setActiveView("tracks")
   }
   function handleAlbumClick(album) {
     setSelectedAlbum(album)
     setSelectedArtist(null)
+    setSelectedGenre(null);
     setSearchQuery("")
     setActiveView("tracks")
+  }
+  function handleGenreClick(genre) {
+    setSelectedGenre(genre);
+    setSelectedArtist(null);
+    setSelectedAlbum(null);
+    setSearchQuery("");
+    setActiveView("tracks");
   }
   function handleClearFilters() {
     setSelectedArtist(null);
     setSelectedAlbum(null)
+    setSelectedGenre(null);
     setSearchQuery("")
     setActiveView("tracks");
   }
@@ -642,6 +691,7 @@ function App() {
     const nextIndex = queueIndex + 1
     setQueueIndex(nextIndex)
     setSelectedTrack(queue[nextIndex])
+    setIsPlaying(true);
   }
   function handleSeek(event) {
     if (!audioRef.current || !progressBarRef.current || duration <= 0) {
@@ -759,6 +809,7 @@ function App() {
       setActiveView("playlist");
       setSelectedArtist(null);
       setSelectedAlbum(null);
+      setSelectedGenre(null);
       setSearchQuery("");
 
       setOriginalQueue(tracksData);
@@ -788,8 +839,10 @@ function App() {
       setPlaylistTracks(tracksData);
       setSelectedArtist(null);
       setSelectedAlbum(null);
+      setSelectedGenre(null);
       setSearchQuery("");
       setActiveView("playlist");
+
     } catch (error) {
       console.error(error);
     }
@@ -901,6 +954,7 @@ function App() {
       setIsPlaying(false);
       setSelectedArtist(null);
       setSelectedAlbum(null);
+      setSelectedGenre(null);
 
       setConfirmAction(null);
       setSettingsNotice("Stored tracks were purged successfully.");
@@ -1455,6 +1509,38 @@ function App() {
     }
   }
   
+  function handleRefreshSimilarTracks() {
+      setSimilarRefreshKey((prev) => prev + 1);
+    }
+
+    async function handleAddSimilarTrackToCurrentPlaylist(track) {
+    if (!selectedPlaylist) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/playlists/${selectedPlaylist.id}/tracks`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ track_id: track.id }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to add similar track to playlist");
+      }
+
+      setPlaylistTracks((prev) => [...prev, track]);
+      setSimilarRefreshKey((prev) => prev + 1);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   function getPlaylistArtwork(playlist) {
     if (playlist.system_key === "liked_songs") {
       return {
@@ -1506,17 +1592,78 @@ function App() {
     return tracks.filter((track) => {
       const matchesArtist = selectedArtist ? track.artist === selectedArtist : true;
       const matchesAlbum = selectedAlbum ? track.album === selectedAlbum : true;
+      const matchesGenre = selectedGenre ? track.genre === selectedGenre : true;
 
       const query = searchQuery.trim().toLowerCase();
       const matchesSearch =
         query === "" ||
         track.title?.toLowerCase().includes(query) ||
         track.artist?.toLowerCase().includes(query) ||
-        track.album?.toLowerCase().includes(query);
+        track.album?.toLowerCase().includes(query) ||
+        track.genre?.toLowerCase().includes(query);
 
-      return matchesArtist && matchesAlbum && matchesSearch;
+      return matchesArtist && matchesAlbum && matchesGenre && matchesSearch;
     });
-  }, [tracks, selectedArtist, selectedAlbum, searchQuery]);
+  }, [tracks, selectedArtist, selectedAlbum, selectedGenre, searchQuery]);
+
+  const shouldShowSimilarSection =
+    (activeView === "tracks" && (selectedArtist || selectedAlbum) && !selectedGenre) ||
+    activeView === "playlist";
+
+  const similarSourceTrack = useMemo(() => {
+    if (!shouldShowSimilarSection) {
+      return null;
+    }
+
+    const sourceTracks = activeView === "playlist" ? playlistTracks : visibleTracks;
+
+    if (selectedTrack && sourceTracks.some((track) => track.id === selectedTrack.id)) {
+      return selectedTrack;
+    }
+
+    return sourceTracks[0] || null;
+  }, [shouldShowSimilarSection, activeView, playlistTracks, visibleTracks, selectedTrack]);
+
+  useEffect(() => {
+    async function fetchSimilar() {
+      if (!similarSourceTrack || !shouldShowSimilarSection) {
+        setSimilarTracks([]);
+        return;
+      }
+
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/api/tracks/${similarSourceTrack.id}/similar`
+        );
+
+        if (!res.ok) {
+          throw new Error("Failed to fetch similar tracks");
+        }
+
+        const data = await res.json();
+
+        if (activeView === "playlist") {
+          const playlistTrackIds = new Set(playlistTracks.map((track) => track.id));
+
+          const filtered = data.filter((track) => !playlistTrackIds.has(track.id));
+          setSimilarTracks(filtered.slice(0, SIMILAR_TRACK_LIMIT));
+        } else {
+          setSimilarTracks(data.slice(0, SIMILAR_TRACK_LIMIT));
+        }
+      } catch (error) {
+        console.error(error);
+        setSimilarTracks([]);
+      }
+    }
+
+    fetchSimilar();
+  }, [
+    similarSourceTrack,
+    shouldShowSimilarSection,
+    activeView,
+    playlistTracks,
+    similarRefreshKey,
+  ]);
 
   const visibleArtists = useMemo(() => {
     return artists.filter((artist) =>
@@ -1529,6 +1676,12 @@ function App() {
       album.toLowerCase().includes(searchQuery.trim().toLowerCase())
     );
   }, [albums, searchQuery]);
+
+  const visibleGenres = useMemo(() => {
+    return genres.filter((genre) =>
+      genre.toLowerCase().includes(searchQuery.trim().toLowerCase())
+    );
+  }, [genres, searchQuery]);
 
   const paginatedTracks = visibleTracks.slice(
     (tracksPage - 1) * TRACKS_PAGE_SIZE,
@@ -1602,6 +1755,28 @@ function App() {
     ).size;
   }, [tracks, selectedAlbum]);
 
+  const selectedGenreTrackCount = useMemo(() => {
+    if (!selectedGenre) {
+      return 0;
+    }
+
+    return tracks.filter((track) => track.genre === selectedGenre).length;
+  }, [tracks, selectedGenre]);
+
+  const genreCounts = useMemo(() => {
+    const counts = new Map();
+
+    tracks.forEach((track) => {
+      if (!track.genre) {
+        return;
+      }
+
+      counts.set(track.genre, (counts.get(track.genre) || 0) + 1);
+    });
+
+    return counts;
+  }, [tracks]);
+
   function renderMainContent() {
     if (loading) {
       return <div className="state-message">Loading tracks...</div>
@@ -1613,94 +1788,140 @@ function App() {
       if (playlistTracks.length === 0) {
         return <div className="state-message">This Playlist is empty.</div>
       }
+    
       return (
-        <div className="track-list">
-          {playlistTracks.map((track, index) => (
-            <button
-              key={track.id}
-              className={`track-row ${
-                selectedTrack?.id === track.id ? "track-row--active" : ""
-              }`}
-              onClick={() => handleTrackClick(track)}
-              type="button"
-            >
-              <div className="track-row__index">{index + 1}</div>
-
-              <div className="track-row__content">
-                <div className="track-row__title">{track.title}</div>
-                <div className="track-row__meta">
-                  {track.artist || "Unknown Artist"} •{" "}
-                  {track.album || "Unknown Album"}
+        <>
+          <div className="track-list">
+            {playlistTracks.map((track, index) => (
+              <button
+                key={track.id}
+                className={`track-row ${
+                  selectedTrack?.id === track.id ? "track-row--active" : ""
+                }`}
+                onClick={() => handleTrackClick(track)}
+                type="button"
+              >
+                <div className="track-row__index">{index + 1}</div>
+              
+                <div className="track-row__content">
+                  <div className="track-row__title">{track.title}</div>
+                  <div className="track-row__meta">
+                    {track.artist || "Unknown Artist"} •{" "}
+                    {track.album || "Unknown Album"}
+                  </div>
                 </div>
-              </div>
-
-              <div className="track-row__actions">
-                <button
-                  className="track-row__menu-button"
-                  type="button"
-                  aria-label="Track actions"
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    setOpenMenuTrackId((prev) => (prev === track.id ? null : track.id))
-                  }}
-                >
-                  ⋯
-                </button>
-
-                {openMenuTrackId === track.id && (
-                  <div
-                    className="track-row__menu"
-                    onClick={(event) => event.stopPropagation()}
+              
+                <div className="track-row__actions">
+                  <button
+                    className="track-row__menu-button"
+                    type="button"
+                    aria-label="Track actions"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setOpenMenuTrackId((prev) => (prev === track.id ? null : track.id));
+                    }}
                   >
+                    ⋯
+                  </button>
+                  
+                  {openMenuTrackId === track.id && (
+                    <div
+                      className="track-row__menu"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <button
+                        className="track-row__menu-item"
+                        onClick={() => handleOpenEditTrack(track)}
+                        type="button"
+                      >
+                        Edit Info
+                      </button>
+                      <button
+                        className="track-row__menu-item"
+                        onClick={() => {
+                          handleAddToQueue(track);
+                          setOpenMenuTrackId(null);
+                        }}
+                        type="button"
+                      >
+                        Add to Queue
+                      </button>
+                      {playlists.length > 0 && (
+                        <>
+                          <div className="track-row__menu-divider" />
+                          <div className="track-row__menu-label">Add to Playlist</div>
+                      
+                          {playlists.map((playlist) => (
+                            <button
+                              key={playlist.id}
+                              className="track-row__menu-item"
+                              onClick={() => handleAddTrackToPlaylist(track.id, playlist.id)}
+                              type="button"
+                            >
+                              {playlist.name}
+                            </button>
+                          ))}
+                        </>
+                      )}
+                      <div className="track-row__menu-divider" />
+                      <button
+                        className="track-row__menu-item"
+                        onClick={() => handleRemoveTrackFromPlaylist(track.id)}
+                        type="button"
+                      >
+                        Remove from Playlist
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+          
+          {similarSourceTrack && similarTracks.length > 0 && (
+            <div className="similar-section">
+              <div className="similar-section__header">
+                <h3>More like this</h3>
+                <button
+                  className="similar-section__refresh-button"
+                  type="button"
+                  onClick={handleRefreshSimilarTracks}
+                >
+                  ↻
+                </button>
+              </div>
+          
+              <div className="similar-section__list">
+                {similarTracks.map((track) => (
+                  <div key={track.id} className="track-row similar-track-row">
                     <button
-                      className="track-row__menu-item"
-                      onClick={() => handleOpenEditTrack(track)}
+                      className="similar-track-row__main"
+                      onClick={() => handleTrackClick(track)}
                       type="button"
                     >
-                      Edit Info
+                      <div className="track-row__content">
+                        <div className="track-row__title">{track.title}</div>
+                        <div className="track-row__meta">
+                          {track.artist || "Unknown Artist"} • {track.album || "Unknown Album"}
+                        </div>
+                      </div>
                     </button>
-                    <button
-                      className="track-row__menu-item"
-                      onClick={() => {
-                        handleAddToQueue(track)
-                        setOpenMenuTrackId(null)
-                      }}
-                      type="button"
-                    >
-                      Add to Queue
-                    </button>
-                    {playlists.length > 0 && (
-                      <>
-                        <div className="track-row__menu-divider" />
-                        <div className="track-row__menu-label">Add to Playlist</div>
 
-                        {playlists.map((playlist) => (
-                          <button
-                            key={playlist.id}
-                            className="track-row__menu-item"
-                            onClick={() => handleAddTrackToPlaylist(track.id, playlist.id)}
-                            type="button"
-                          >
-                            {playlist.name}
-                          </button>
-                        ))}
-                      </>
-                    )}
-                    <div className="track-row__menu-divider" />
                     <button
-                      className="track-row__menu-item"
-                      onClick={() => handleRemoveTrackFromPlaylist(track.id)}
+                      className="similar-track-row__add-button"
                       type="button"
+                      onClick={() => handleAddSimilarTrackToCurrentPlaylist(track)}
+                      aria-label={`Add ${track.title} to playlist`}
                     >
-                      Remove from Playlist
+                      +
                     </button>
                   </div>
-                )}
+                ))}
               </div>
-            </button>
-          ))}
-        </div>
-      )
+            </div>
+          )}
+        </>
+      );
     }
     if (activeView === "settings") {
       return (
@@ -1932,6 +2153,28 @@ function App() {
         </div>
       )
     }
+    if (activeView === "genres") {
+      return (
+        <div className="genre-grid">
+          {[...visibleGenres]
+            .sort((a, b) => (genreCounts.get(b) || 0) - (genreCounts.get(a) || 0))
+            .map((genre) => (
+              <button
+                key={genre}
+                className="genre-card"
+                onClick={() => handleGenreClick(genre)}
+                type="button"
+              >
+                <div className="genre-card__title">{genre}</div>
+                <div className="genre-card__meta">
+                  {genreCounts.get(genre) || 0} tracks
+                </div>
+              </button>
+          ))}
+        </div>
+      );
+    }
+    
     if (visibleTracks.length === 0) {
       return <div className="state-message">No matching tracks found.</div>
     }
@@ -2055,7 +2298,29 @@ function App() {
             </button>
           </div>
         )}
-
+        {shouldShowSimilarSection && similarSourceTrack && similarTracks.length > 0 && (
+          <div className="similar-section">
+            <h3>More like this</h3>
+        
+            <div className="similar-section__list">
+              {similarTracks.map((track) => (
+                <button
+                  key={track.id}
+                  className="track-row"
+                  onClick={() => handleTrackClick(track)}
+                  type="button"
+                >
+                  <div className="track-row__content">
+                    <div className="track-row__title">{track.title}</div>
+                    <div className="track-row__meta">
+                      {track.artist || "Unknown Artist"} • {track.album || "Unknown Album"}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -2067,6 +2332,9 @@ function App() {
 
     if (activeView === "albums") {
       return "Albums";
+    }
+    if (activeView === "genres") {
+      return "Genres";
     }
     if (activeView === "playlist" && selectedPlaylist) {
       return selectedPlaylist.name
@@ -2082,6 +2350,9 @@ function App() {
     if (selectedAlbum) {
       return selectedAlbum
     }
+    if (selectedGenre) {
+      return selectedGenre;
+    }
 
     return "Your Music"
   }
@@ -2096,6 +2367,9 @@ function App() {
     if (activeView === "albums") {
       return `${visibleAlbums.length} albums`;
     }
+    if (activeView === "genres") {
+      return `${visibleGenres.length} genres`;
+    }
     if (activeView === "playlist" && selectedPlaylist) {
       return `${playlistTracks.length} tracks`;
     }
@@ -2109,6 +2383,9 @@ function App() {
       return `${selectedAlbumTrackCount} tracks • ${selectedAlbumArtistCount} artist${
         selectedAlbumArtistCount === 1 ? "" : "s"
       }`;
+    }
+    if (selectedGenre) {
+      return `${selectedGenreTrackCount} tracks`;
     }
 
     return `${visibleTracks.length} tracks`;
@@ -2217,6 +2494,7 @@ function App() {
               setSearchQuery("");
               setSelectedArtist(null);
               setSelectedAlbum(null);
+              setSelectedGenre(null);
               setSelectedPlaylist(null);
             }}
             role="button"
@@ -2227,6 +2505,7 @@ function App() {
                 setSearchQuery("");
                 setSelectedArtist(null);
                 setSelectedAlbum(null);
+                setSelectedGenre(null);
                 setSelectedPlaylist(null);
               }
             }}
@@ -2256,6 +2535,7 @@ function App() {
               setSearchQuery("");
               setSelectedArtist(null);
               setSelectedAlbum(null);
+              setSelectedGenre(null);
               setSelectedPlaylist(null);
             }}
             role="button"
@@ -2266,6 +2546,7 @@ function App() {
                 setSearchQuery("");
                 setSelectedArtist(null);
                 setSelectedAlbum(null);
+                setSelectedGenre(null);
                 setSelectedPlaylist(null);
               }
             }}
@@ -2285,6 +2566,52 @@ function App() {
               Albums
             </button>
           </div>
+
+          <div
+            className={`playlist-sidebar-item__main ${
+              activeView === "genres" ? "sidebar__link--active" : ""
+            }`}
+            onClick={() => {
+              setActiveView("genres");
+              setSearchQuery("");
+              setSelectedArtist(null);
+              setSelectedAlbum(null);
+              setSelectedGenre(null);
+              setSelectedPlaylist(null);
+            }}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                setActiveView("genres");
+                setSearchQuery("");
+                setSelectedArtist(null);
+                setSelectedAlbum(null);
+                setSelectedGenre(null);
+                setSelectedPlaylist(null);
+              }
+            }}
+          >
+            <div className="playlist-art-wrapper">
+              <img className="playlist-art" src="/genre.png" alt="Genres" />
+            </div>
+
+            <button
+              className="playlist-sidebar-item__name-button"
+              onClick={() => {
+                setActiveView("genres");
+                setSearchQuery("");
+                setSelectedArtist(null);
+                setSelectedAlbum(null);
+                setSelectedGenre(null);
+                setSelectedPlaylist(null);
+              }}
+              type="button"
+            >
+              Genres
+            </button>
+          </div>
+
         </nav>
 
         <div className="sidebar__section sidebar__section--playlists">
@@ -2462,6 +2789,7 @@ function App() {
                 setSearchQuery("");
                 setSelectedArtist(null);
                 setSelectedAlbum(null);
+                setSelectedGenre(null);
                 setSelectedPlaylist(null);
               }}
             >
@@ -2479,6 +2807,7 @@ function App() {
                 setSearchQuery("");
                 setSelectedArtist(null);
                 setSelectedAlbum(null);
+                setSelectedGenre(null);
                 setSelectedPlaylist(null);
               }}
               type="button"
@@ -2505,8 +2834,16 @@ function App() {
                   {!loading && !error && (
                     <div className="page-header__meta">
                       <p className="main-content__subhead">{getHeaderSubtitle()}</p>
-
-                      {(selectedArtist || selectedAlbum) && (
+                        {activeView === "tracks" && selectedArtist && selectedArtistGenres.length > 0 && (
+                          <div className="genre-badges">
+                            {selectedArtistGenres.map((genre) => (
+                              <span key={genre} className="genre-badge">
+                                {genre}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      {activeView === "tracks" && (selectedArtist || selectedAlbum || selectedGenre) && (
                         <button
                           className="page-header__play-button"
                           type="button"

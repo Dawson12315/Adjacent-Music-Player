@@ -23,6 +23,7 @@ def extract_track_metadata(file_path: str) -> dict:
     title = _first_value(tags.get("TIT2")) or _first_value(tags.get("title"))
     artist = _first_value(tags.get("TPE1")) or _first_value(tags.get("artist"))
     album = _first_value(tags.get("TALB")) or _first_value(tags.get("album"))
+    genre = _first_value(tags.get("TCON")) or _first_value(tags.get("genre"))
 
     if title is not None:
         title = str(title)
@@ -30,6 +31,8 @@ def extract_track_metadata(file_path: str) -> dict:
         artist = str(artist)
     if album is not None:
         album = str(album)
+    if genre is not None:
+        genre = str(genre)
 
     if not title:
         title = path.stem
@@ -38,5 +41,10 @@ def extract_track_metadata(file_path: str) -> dict:
         "title": title,
         "artist": artist,
         "album": album,
+        "genre": genre,
+        "raw_title": title,
+        "raw_artist": artist,
+        "raw_album": album,
+        "raw_genre": genre,
         "file_path": str(path),
     }

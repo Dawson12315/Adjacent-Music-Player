@@ -9,6 +9,7 @@ from app.services.metadata_normalizer import (
     normalize_artist,
     normalize_title
 )
+from app.services.genre_normalizer import normalize_genre
 from app.utils.files import is_supported_audio_file
 
 
@@ -40,12 +41,13 @@ def scan_directory(base_path: str, limit: int = 20) -> dict:
             try:
                 metadata = extract_track_metadata(str(file_path))
             except Exception as e:
-                print(f"Skipping file (metadata error): {file_path}")
+                print(f"Skipping file (metadata error): {file_path} -> {e}")
                 continue
 
             raw_title = metadata.get("title") or None
             raw_artist = metadata.get("artist") or None
             raw_album = metadata.get("album") or None
+            raw_genre = metadata.get("raw_genre") or None
 
             filename_artist, filename_album, filename_title = extract_metadata_from_filename(
                 str(file_path)
@@ -63,14 +65,17 @@ def scan_directory(base_path: str, limit: int = 20) -> dict:
             )
             final_artist = normalize_artist(raw_artist or filename_artist)
             final_album = normalize_album(raw_album or filename_album)
+            normalized_genre = normalize_genre(metadata.get("genre"))
 
             track = Track(
                 title=final_title,
                 artist=final_artist,
                 album=final_album,
+                genre=normalized_genre,
                 raw_title=raw_title,
                 raw_artist=raw_artist,
                 raw_album=raw_album,
+                raw_genre=raw_genre,
                 file_path=metadata["file_path"],
             )
 

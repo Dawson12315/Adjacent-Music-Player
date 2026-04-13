@@ -34,3 +34,13 @@ def run_simple_migrations():
             connection.execute(
                 text("ALTER TABLE tracks ADD COLUMN raw_album TEXT")
             )
+            
+        if "genre" not in track_column_names:
+            connection.execute(
+                text("ALTER TABLE tracks ADD COLUMN genre TEXT")
+            )
+
+        if "raw_genre" not in track_column_names:
+            connection.execute(
+                text("ALTER TABLE tracks ADD COLUMN raw_genre TEXT")
+            )
