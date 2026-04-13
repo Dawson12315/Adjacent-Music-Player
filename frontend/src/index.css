@@ -451,6 +451,30 @@ button {
   font-size: 0.95rem;
   padding-bottom: 10px
 }
+.page-header__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.page-header__play-button {
+  align-self: flex-start;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  background: #ffffff;
+  color: #111111;
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+  margin-bottom: 15px;
+}
+
+.page-header__play-button:hover {
+  transform: scale(1.03);
+  opacity: 0.95;
+}
 .content-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
