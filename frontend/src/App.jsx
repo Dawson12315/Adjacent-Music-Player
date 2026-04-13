@@ -1562,6 +1562,46 @@ function App() {
 
   const upcomingQueue = queue.slice(queueIndex + 1);
 
+  const selectedArtistTrackCount = useMemo(() => {
+    if (!selectedArtist) {
+      return 0;
+    }
+
+    return tracks.filter((track) => track.artist === selectedArtist).length;
+  }, [tracks, selectedArtist]);
+
+  const selectedArtistAlbumCount = useMemo(() => {
+    if (!selectedArtist) {
+      return 0;
+    }
+
+    return new Set(
+      tracks
+        .filter((track) => track.artist === selectedArtist && track.album)
+        .map((track) => track.album)
+    ).size;
+  }, [tracks, selectedArtist]);
+
+  const selectedAlbumTrackCount = useMemo(() => {
+    if (!selectedAlbum) {
+      return 0;
+    }
+
+    return tracks.filter((track) => track.album === selectedAlbum).length;
+  }, [tracks, selectedAlbum]);
+
+  const selectedAlbumArtistCount = useMemo(() => {
+    if (!selectedAlbum) {
+      return 0;
+    }
+
+    return new Set(
+      tracks
+        .filter((track) => track.album === selectedAlbum && track.artist)
+        .map((track) => track.artist)
+    ).size;
+  }, [tracks, selectedAlbum]);
+
   function renderMainContent() {
     if (loading) {
       return <div className="state-message">Loading tracks...</div>
@@ -2054,17 +2094,26 @@ function App() {
       return `${visibleArtists.length} artists`;
     }
     if (activeView === "albums") {
-      return `${visibleAlbums.length} albums`
+      return `${visibleAlbums.length} albums`;
     }
     if (activeView === "playlist" && selectedPlaylist) {
-      return `${playlistTracks.length} tracks`
+      return `${playlistTracks.length} tracks`;
     }
     if (activeView === "settings") {
       return "App preferences and playback options";
     }
+    if (selectedArtist) {
+      return `${selectedArtistTrackCount} tracks • ${selectedArtistAlbumCount} albums`;
+    }
+    if (selectedAlbum) {
+      return `${selectedAlbumTrackCount} tracks • ${selectedAlbumArtistCount} artist${
+        selectedAlbumArtistCount === 1 ? "" : "s"
+      }`;
+    }
 
     return `${visibleTracks.length} tracks`;
   }
+
   function formatTime(timeInSeconds) {
     if (!Number.isFinite(timeInSeconds)) {
       return "0:00";
@@ -2166,6 +2215,9 @@ function App() {
             onClick={() => {
               setActiveView("artists");
               setSearchQuery("");
+              setSelectedArtist(null);
+              setSelectedAlbum(null);
+              setSelectedPlaylist(null);
             }}
             role="button"
             tabIndex={0}
@@ -2173,6 +2225,9 @@ function App() {
               if (event.key === "Enter" || event.key === " ") {
                 setActiveView("artists");
                 setSearchQuery("");
+                setSelectedArtist(null);
+                setSelectedAlbum(null);
+                setSelectedPlaylist(null);
               }
             }}
           >
@@ -2199,6 +2254,9 @@ function App() {
             onClick={() => {
               setActiveView("albums");
               setSearchQuery("");
+              setSelectedArtist(null);
+              setSelectedAlbum(null);
+              setSelectedPlaylist(null);
             }}
             role="button"
             tabIndex={0}
@@ -2206,6 +2264,9 @@ function App() {
               if (event.key === "Enter" || event.key === " ") {
                 setActiveView("albums");
                 setSearchQuery("");
+                setSelectedArtist(null);
+                setSelectedAlbum(null);
+                setSelectedPlaylist(null);
               }
             }}
           >
@@ -2442,7 +2503,29 @@ function App() {
                 <div>
                   <h1>{getHeaderTitle()}</h1>
                   {!loading && !error && (
-                    <p className="main-content__subhead">{getHeaderSubtitle()}</p>
+                    <div className="page-header__meta">
+                      <p className="main-content__subhead">{getHeaderSubtitle()}</p>
+
+                      {(selectedArtist || selectedAlbum) && (
+                        <button
+                          className="page-header__play-button"
+                          type="button"
+                          onClick={() => {
+                            const sourceTracks = visibleTracks;
+                          
+                            if (!sourceTracks.length) return;
+                          
+                            setOriginalQueue(sourceTracks);
+                            setQueue(sourceTracks);
+                            setQueueIndex(0);
+                            setSelectedTrack(sourceTracks[0]);
+                            setIsPlaying(true);
+                          }}
+                        >
+                          ▶ Play
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
                 
