@@ -1,9 +1,11 @@
 from app.db import SessionLocal
 from app.models.track import Track
+from app.models.track_artist import TrackArtist
 from app.services.filename_metadata import extract_metadata_from_filename
 from app.services.metadata_normalizer import (
     normalize_album,
-    normalize_artist,
+    normalize_artist_list,
+    normalize_primary_artist,
     normalize_title,
 )
 
@@ -34,7 +36,9 @@ def main():
             resolved_title = normalize_title(
                 filename_title if use_filename_title else raw_title or track.title
             )
-            resolved_artist = normalize_artist(raw_artist or filename_artist)
+            source_artist = raw_artist or filename_artist
+            resolved_artist = normalize_primary_artist(source_artist)
+            resolved_artist_list = normalize_artist_list(source_artist)
             resolved_album = normalize_album(raw_album or filename_album)
 
             changed = False
@@ -50,6 +54,17 @@ def main():
             if track.album != resolved_album:
                 track.album = resolved_album
                 changed = True
+
+            db.query(TrackArtist).filter(TrackArtist.track_id == track.id).delete()
+
+            for index, artist_name in enumerate(resolved_artist_list):
+                db.add(
+                    TrackArtist(
+                        track_id=track.id,
+                        artist_name=artist_name,
+                        position=index,
+                    )
+                )
 
             if changed:
                 updated += 1

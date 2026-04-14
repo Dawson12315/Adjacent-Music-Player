@@ -1,5 +1,7 @@
 import re
-from typing import Optional
+from typing import Optional, List
+
+from app.utils.artist_parsing import split_artist_names
 
 
 FEATURE_PATTERNS = [
@@ -168,14 +170,68 @@ def normalize_artist(value: Optional[str]) -> Optional[str]:
     cleaned = cleaned.replace(";", ", ")
     cleaned = _collapse_spaces(cleaned)
 
-    # normalize some obvious all-upper/all-lower cases only
-    if cleaned.isupper() or cleaned.islower():
-        cleaned = cleaned.title()
-
+    # apply full-string alias cleanup first
     cleaned = ARTIST_ALIASES.get(cleaned, cleaned)
 
     return cleaned
 
+def normalize_artist_name(value: Optional[str]) -> Optional[str]:
+    """
+    Normalize a single artist name only.
+    This should be used after splitting a multi-artist string.
+    """
+    if not value:
+        return value
+
+    cleaned = value.strip()
+    cleaned = cleaned.replace("_", " ")
+    cleaned = _collapse_spaces(cleaned)
+
+    if cleaned.isupper() or cleaned.islower():
+        cleaned = cleaned.title()
+
+    cleaned = ARTIST_ALIASES.get(cleaned, cleaned)
+    return cleaned
+
+
+def normalize_artist_list(value: Optional[str]) -> List[str]:
+    """
+    Normalize a raw artist field into a clean list of artist names.
+    Example:
+        '2Pac, Left Eye' -> ['2Pac', 'Left Eye']
+        '$Uicideboy$ & Travis Barker' -> ['$Uicideboy$', 'Travis Barker']
+    """
+    cleaned = normalize_artist(value)
+    if not cleaned:
+        return []
+
+    split_names = split_artist_names(cleaned)
+
+    normalized: List[str] = []
+    seen = set()
+
+    for name in split_names:
+        normalized_name = normalize_artist_name(name)
+        if not normalized_name:
+            continue
+
+        key = normalized_name.casefold()
+        if key in seen:
+            continue
+
+        seen.add(key)
+        normalized.append(normalized_name)
+
+    return normalized
+
+
+def normalize_primary_artist(value: Optional[str]) -> Optional[str]:
+    """
+    Returns the first artist from the normalized artist list.
+    Keeps your existing Track.artist behavior intact.
+    """
+    artists = normalize_artist_list(value)
+    return artists[0] if artists else None
 
 def normalize_title(value: Optional[str]) -> Optional[str]:
     if not value:

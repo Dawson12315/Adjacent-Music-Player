@@ -44,3 +44,44 @@ def run_simple_migrations():
             connection.execute(
                 text("ALTER TABLE tracks ADD COLUMN raw_genre TEXT")
             )
+
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS track_artists (
+                    id INTEGER PRIMARY KEY,
+                    track_id INTEGER NOT NULL,
+                    artist_name TEXT NOT NULL,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_track_artist_pair
+                ON track_artists(track_id, artist_name)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_track_artists_track_id
+                ON track_artists(track_id)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_track_artists_artist_name
+                ON track_artists(artist_name)
+                """
+            )
+        )

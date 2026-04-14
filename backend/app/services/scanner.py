@@ -2,11 +2,14 @@ from pathlib import Path
 
 from app.db import SessionLocal
 from app.models.track import Track
+from app.models.track_artist import TrackArtist
 from app.services.filename_metadata import extract_metadata_from_filename
 from app.services.metadata import extract_track_metadata
 from app.services.metadata_normalizer import (
     normalize_album,
     normalize_artist,
+    normalize_artist_list,
+    normalize_primary_artist,
     normalize_title
 )
 from app.services.genre_normalizer import normalize_genre
@@ -60,12 +63,14 @@ def scan_directory(base_path: str, limit: int = 20) -> dict:
             elif " - " in raw_title and filename_title:
                 use_filename_title = True
 
+            resolved_artist_value = raw_artist or filename_artist
             final_title = normalize_title(
                 filename_title if use_filename_title else raw_title
             )
-            final_artist = normalize_artist(raw_artist or filename_artist)
+            final_artist = normalize_primary_artist(resolved_artist_value)
             final_album = normalize_album(raw_album or filename_album)
             normalized_genre = normalize_genre(metadata.get("genre"))
+            artist_list = normalize_artist_list(resolved_artist_value)
 
             track = Track(
                 title=final_title,
@@ -80,6 +85,17 @@ def scan_directory(base_path: str, limit: int = 20) -> dict:
             )
 
             db.add(track)
+            db.flush()
+
+            for index, artist_name in enumerate(artist_list):
+                db.add(
+                    TrackArtist(
+                        track_id=track.id,
+                        artist_name=artist_name,
+                        position=index,
+                    )
+                )
+
             db.commit()
 
             count += 1

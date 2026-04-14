@@ -36,7 +36,7 @@ def update_playback_state(payload: PlaybackStateUpdate, db: Session = Depends(ge
 
     db.query(PlaybackQueueItem).filter(
         PlaybackQueueItem.session_id == session.id
-    ).delete()
+    ).delete(synchronize_session=False)
 
     for position, track_id in enumerate(payload.queue_track_ids):
         queue_item = PlaybackQueueItem(
