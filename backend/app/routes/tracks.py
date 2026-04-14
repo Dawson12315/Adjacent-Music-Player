@@ -9,12 +9,15 @@ from sqlalchemy.orm import Session, selectinload
 from app.db import get_db
 from app.models.track import Track
 from app.models.track_artist import TrackArtist
+from app.models.track_genre import TrackGenre
 from app.schemas.track import TrackResponse
 from app.schemas.track_edit import TrackUpdate
 
 from app.models.playlist_track import PlaylistTrack
 from app.models.playback_queue_item import PlaybackQueueItem
 from app.models.playback_session import PlaybackSession
+
+from app.services.metadata_normalizer import normalize_genre_list
 
 router = APIRouter()
 
@@ -29,7 +32,10 @@ def get_track_count(db: Session = Depends(get_db)):
 def list_tracks(db: Session = Depends(get_db)):
     tracks = (
         db.query(Track)
-        .options(selectinload(Track.track_artists))
+        .options(
+            selectinload(Track.track_artists),
+            selectinload(Track.track_genres),
+        )
         .order_by(Track.artist.asc(), Track.album.asc(), Track.title.asc())
         .all()
     )
@@ -44,6 +50,7 @@ def list_tracks(db: Session = Depends(get_db)):
                 artist=track.artist,
                 album=track.album,
                 genre=track.genre,
+                genres=[item.genre for item in track.track_genres],
                 file_path=track.file_path,
                 raw_title=track.raw_title,
                 raw_artist=track.raw_artist,
@@ -94,6 +101,7 @@ def purge_tracks(db: Session = Depends(get_db)):
         session.is_playing = False
 
     db.query(TrackArtist).delete()
+    db.query(TrackGenre).delete()
     db.query(Track).delete()
 
     db.commit()
@@ -108,7 +116,10 @@ def purge_tracks(db: Session = Depends(get_db)):
 def update_track(track_id: int, payload: TrackUpdate, db: Session = Depends(get_db)):
     track = (
         db.query(Track)
-        .options(selectinload(Track.track_artists))
+        .options(
+            selectinload(Track.track_artists),
+            selectinload(Track.track_genres),
+        )
         .filter(Track.id == track_id)
         .first()
     )
@@ -120,7 +131,33 @@ def update_track(track_id: int, payload: TrackUpdate, db: Session = Depends(get_
     track.artist = payload.artist
     track.album = payload.album
 
+    if payload.genres is not None:
+        normalized_genres = normalize_genre_list(", ".join(payload.genres))
+    
+        track.genre = normalized_genres[0] if normalized_genres else None
+    
+        db.query(TrackGenre).filter(
+            TrackGenre.track_id == track.id
+        ).delete(synchronize_session=False)
+    
+        for genre_name in normalized_genres:
+            db.add(
+                TrackGenre(
+                    track_id=track.id,
+                    genre=genre_name,
+                )
+            )
+
     db.commit()
+    track = (
+        db.query(Track)
+        .options(
+            selectinload(Track.track_artists),
+            selectinload(Track.track_genres),
+        )
+        .filter(Track.id == track_id)
+        .first()
+    )
     db.refresh(track)
 
     return TrackResponse(
@@ -129,6 +166,7 @@ def update_track(track_id: int, payload: TrackUpdate, db: Session = Depends(get_
         artist=track.artist,
         album=track.album,
         genre=track.genre,
+        genres=[item.genre for item in track.track_genres],
         file_path=track.file_path,
         raw_title=track.raw_title,
         raw_artist=track.raw_artist,

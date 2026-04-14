@@ -7,9 +7,12 @@ def normalize_genre(value):
     if not cleaned:
         return None
 
+    lowered = cleaned.lower()
+
     aliases = {
         "pop": "Pop",
         "r&b": "R&B",
+        "rnb": "R&B",
         "hip-hop": "Hip-Hop",
         "rap": "Rap",
         "rock": "Rock",
@@ -23,5 +26,6 @@ def normalize_genre(value):
         "alternative": "Alternative",
     }
 
-    lowered = cleaned.lower()
-    return aliases.get(lowered, cleaned)
+    if lowered in aliases:
+        return aliases[lowered]
+    return cleaned.title()
