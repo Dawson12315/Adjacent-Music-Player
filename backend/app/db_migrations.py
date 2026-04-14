@@ -85,3 +85,23 @@ def run_simple_migrations():
                 """
             )
         )
+
+        existing_tables = connection.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table'")
+        ).fetchall()
+        existing_table_names = {table[0] for table in existing_tables}
+
+        if "track_genres" not in existing_table_names:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE track_genres (
+                        id INTEGER PRIMARY KEY,
+                        track_id INTEGER NOT NULL,
+                        genre TEXT NOT NULL,
+                        FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE,
+                        CONSTRAINT uq_track_genre_pair UNIQUE (track_id, genre)
+                    )
+                    """
+                )
+            )

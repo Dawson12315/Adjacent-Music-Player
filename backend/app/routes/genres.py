@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.db import get_db
-from app.models.track import Track
+from app.models.track_genre import TrackGenre
 
 router = APIRouter()
 
@@ -10,11 +11,10 @@ router = APIRouter()
 @router.get("/genres", tags=["genres"])
 def list_genres(db: Session = Depends(get_db)):
     genres = (
-        db.query(Track.genre)
-        .filter(Track.genre.isnot(None))
+        db.query(TrackGenre.genre)
         .distinct()
-        .order_by(Track.genre.asc())
+        .order_by(func.lower(TrackGenre.genre))
         .all()
     )
 
-    return [genre for (genre,) in genres if genre]
+    return [g[0] for g in genres if g[0]]

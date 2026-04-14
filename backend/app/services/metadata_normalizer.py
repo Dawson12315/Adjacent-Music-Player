@@ -2,6 +2,8 @@ import re
 from typing import Optional, List
 
 from app.utils.artist_parsing import split_artist_names
+from app.services.genre_normalizer import normalize_genre
+from app.utils.genre_parsing import split_genre_names
 
 
 FEATURE_PATTERNS = [
@@ -264,3 +266,29 @@ def normalize_album(value: Optional[str]) -> Optional[str]:
     cleaned = _collapse_spaces(cleaned)
     cleaned = ALBUM_ALIASES.get(cleaned, cleaned)
     return cleaned
+
+def normalize_genre_list(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+
+    cleaned = value.strip()
+
+    split_names = split_genre_names(cleaned)
+
+    normalized: List[str] = []
+    seen: set[str] = set()
+
+    for name in split_names:
+        normalized_name = normalize_genre(name)
+
+        if not normalized_name:
+            continue
+
+        dedupe_key = normalized_name.casefold()
+        if dedupe_key in seen:
+            continue
+
+        seen.add(dedupe_key)
+        normalized.append(normalized_name)
+
+    return normalized

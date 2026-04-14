@@ -51,6 +51,7 @@ function App() {
   const [editTrackTitle, setEditTrackTitle] = useState("");
   const [editTrackArtist, setEditTrackArtist] = useState("");
   const [editTrackAlbum, setEditTrackAlbum] = useState("");
+  const [editTrackGenres, setEditTrackGenres] = useState("");
   const [isArtistMenuOpen, setIsArtistMenuOpen] = useState(false);
   const [isCreatingArtist, setIsCreatingArtist] = useState(false);
   const [newArtistName, setNewArtistName] = useState("");
@@ -1187,6 +1188,7 @@ function App() {
     setEditTrackTitle(track.title || "");
     setEditTrackArtist(track.artist || "");
     setEditTrackAlbum(track.album || "");
+    setEditTrackGenres((track.genres || []).join(", "));
     setOpenMenuTrackId(null);
     setIsArtistMenuOpen(false);
     setIsCreatingArtist(false);
@@ -1201,6 +1203,7 @@ function App() {
     setEditTrackTitle("");
     setEditTrackArtist("");
     setEditTrackAlbum("");
+    setEditTrackGenres("");
     setIsArtistMenuOpen(false);
     setIsCreatingArtist(false);
     setNewArtistName("");
@@ -1217,6 +1220,11 @@ function App() {
     setEditTrackTitle(editingTrack.raw_title || "");
     setEditTrackArtist(editingTrack.raw_artist || "");
     setEditTrackAlbum(editingTrack.raw_album || "");
+    setEditTrackGenres(
+      editingTrack.raw_genre
+        ? editingTrack.raw_genre
+        : (editingTrack.genres || []).join(", ")
+    );
     setIsArtistMenuOpen(false);
     setIsCreatingArtist(false);
     setNewArtistName("");
@@ -1233,6 +1241,10 @@ function App() {
     const trimmedTitle = editTrackTitle.trim();
     const trimmedArtist = editTrackArtist.trim();
     const trimmedAlbum = editTrackAlbum.trim();
+    const parsedGenres = editTrackGenres
+      .split(",")
+      .map((genre) => genre.trim())
+      .filter(Boolean);
 
     if (!trimmedTitle) {
       return;
@@ -1250,6 +1262,7 @@ function App() {
             title: trimmedTitle,
             artist: trimmedArtist || null,
             album: trimmedAlbum || null,
+            genres: parsedGenres
           }),
         }
       );
@@ -1594,7 +1607,9 @@ function App() {
         ? (track.artists?.includes(selectedArtist) || track.artist === selectedArtist)
         : true;
       const matchesAlbum = selectedAlbum ? track.album === selectedAlbum : true;
-      const matchesGenre = selectedGenre ? track.genre === selectedGenre : true;
+      const matchesGenre = selectedGenre
+        ? (track.genres || []).includes(selectedGenre)
+        : true;
 
       const query = searchQuery.trim().toLowerCase();
       const matchesSearch =
@@ -1762,18 +1777,20 @@ function App() {
       return 0;
     }
 
-    return tracks.filter((track) => track.genre === selectedGenre).length;
+    return tracks.filter((track) =>
+      (track.genres || []).includes(selectedGenre)
+    ).length;
   }, [tracks, selectedGenre]);
 
   const genreCounts = useMemo(() => {
     const counts = new Map();
 
     tracks.forEach((track) => {
-      if (!track.genre) {
-        return;
-      }
+      const genres = track.genres || [];
 
-      counts.set(track.genre, (counts.get(track.genre) || 0) + 1);
+      genres.forEach((genre) => {
+        counts.set(genre, (counts.get(genre) || 0) + 1);
+      });
     });
 
     return counts;
@@ -3354,6 +3371,18 @@ function App() {
                   onChange={(event) => setEditTrackTitle(event.target.value)}
                 />
               </label>
+
+              <label className="modal__field">
+                <span className="modal__label">Genres</span>
+                <input
+                  className="modal__input"
+                  type="text"
+                  value={editTrackGenres}
+                  onChange={(event) => setEditTrackGenres(event.target.value)}
+                  placeholder="Pop, Dance"
+                />
+              </label>
+
             </div>
             <div className="modal__actions">
               <button
