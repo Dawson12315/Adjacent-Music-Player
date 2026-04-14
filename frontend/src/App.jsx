@@ -1590,7 +1590,9 @@ function App() {
 
   const visibleTracks = useMemo(() => {
     return tracks.filter((track) => {
-      const matchesArtist = selectedArtist ? track.artist === selectedArtist : true;
+      const matchesArtist = selectedArtist
+        ? (track.artists?.includes(selectedArtist) || track.artist === selectedArtist)
+        : true;
       const matchesAlbum = selectedAlbum ? track.album === selectedAlbum : true;
       const matchesGenre = selectedGenre ? track.genre === selectedGenre : true;
 

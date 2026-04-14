@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 
 class TrackResponse(BaseModel):
@@ -13,6 +13,7 @@ class TrackResponse(BaseModel):
     raw_artist: Optional[str] = None
     raw_album: Optional[str] = None
     raw_genre: Optional[str] = None
+    artists: List[str] = []
 
     class Config:
         from_attributes = True

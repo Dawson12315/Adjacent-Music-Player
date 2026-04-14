@@ -1,18 +1,21 @@
 from pathlib import Path
 import mimetypes
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.models.track import Track
+from app.models.track_artist import TrackArtist
 from app.schemas.track import TrackResponse
 from app.schemas.track_edit import TrackUpdate
 
 from app.models.playlist_track import PlaylistTrack
 from app.models.playback_queue_item import PlaybackQueueItem
 from app.models.playback_session import PlaybackSession
+
 router = APIRouter()
 
 
@@ -21,14 +24,37 @@ def get_track_count(db: Session = Depends(get_db)):
     count = db.query(func.count(Track.id)).scalar()
     return {"count": count}
 
+
 @router.get("/tracks", response_model=list[TrackResponse], tags=["tracks"])
 def list_tracks(db: Session = Depends(get_db)):
     tracks = (
         db.query(Track)
+        .options(selectinload(Track.track_artists))
         .order_by(Track.artist.asc(), Track.album.asc(), Track.title.asc())
         .all()
     )
-    return tracks
+
+    response = []
+
+    for track in tracks:
+        response.append(
+            TrackResponse(
+                id=track.id,
+                title=track.title,
+                artist=track.artist,
+                album=track.album,
+                genre=track.genre,
+                file_path=track.file_path,
+                raw_title=track.raw_title,
+                raw_artist=track.raw_artist,
+                raw_album=track.raw_album,
+                raw_genre=track.raw_genre,
+                artists=[item.artist_name for item in track.track_artists],
+            )
+        )
+
+    return response
+
 
 @router.get("/tracks/{track_id}/stream", tags=["tracks"])
 def stream_track(track_id: int, db: Session = Depends(get_db)):
@@ -36,12 +62,12 @@ def stream_track(track_id: int, db: Session = Depends(get_db)):
 
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
-    
+
     file_path = Path(track.file_path)
 
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
-    
+
     media_type, _ = mimetypes.guess_type(str(file_path))
     if media_type is None:
         media_type = "application/octet-stream"
@@ -52,17 +78,14 @@ def stream_track(track_id: int, db: Session = Depends(get_db)):
         filename=file_path.name,
     )
 
+
 @router.delete("/tracks/purge", tags=["tracks"])
 def purge_tracks(db: Session = Depends(get_db)):
     deleted_tracks = db.query(Track).count()
 
-    # Clears playlist-track relationships
     db.query(PlaylistTrack).delete()
-
-    # Clears playback queue
     db.query(PlaybackQueueItem).delete()
 
-    # Reset playback session to a default
     session = db.query(PlaybackSession).first()
     if session:
         session.current_track_id = None
@@ -70,7 +93,7 @@ def purge_tracks(db: Session = Depends(get_db)):
         session.current_time_seconds = 0
         session.is_playing = False
 
-    # Delete Tracks
+    db.query(TrackArtist).delete()
     db.query(Track).delete()
 
     db.commit()
@@ -80,9 +103,15 @@ def purge_tracks(db: Session = Depends(get_db)):
         "deleted_count": deleted_tracks,
     }
 
+
 @router.patch("/tracks/{track_id}", response_model=TrackResponse, tags=["tracks"])
 def update_track(track_id: int, payload: TrackUpdate, db: Session = Depends(get_db)):
-    track = db.query(Track).filter(Track.id == track_id).first()
+    track = (
+        db.query(Track)
+        .options(selectinload(Track.track_artists))
+        .filter(Track.id == track_id)
+        .first()
+    )
 
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
@@ -94,4 +123,16 @@ def update_track(track_id: int, payload: TrackUpdate, db: Session = Depends(get_
     db.commit()
     db.refresh(track)
 
-    return track
+    return TrackResponse(
+        id=track.id,
+        title=track.title,
+        artist=track.artist,
+        album=track.album,
+        genre=track.genre,
+        file_path=track.file_path,
+        raw_title=track.raw_title,
+        raw_artist=track.raw_artist,
+        raw_album=track.raw_album,
+        raw_genre=track.raw_genre,
+        artists=[item.artist_name for item in track.track_artists],
+    )
