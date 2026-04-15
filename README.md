@@ -161,10 +161,8 @@ Phase 5 — Core App + UI Refinement
 ## Roadmap
 
 ### Next
-- Last.fm Integration
+- Last.fm Integration(genre tag enrichment and scrobbling)
 - Artist pages (albums + singles)
-- Playlist artwork system
-- Genre tagging + browsing
 
 ### Future
 - Recommendation engine

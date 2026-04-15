@@ -17,6 +17,7 @@ class Track(Base):
     raw_artist = Column(String, nullable=True)
     raw_album = Column(String, nullable=True)
     raw_genre = Column(String, nullable=True)
+    musicbrainz_recording_id = Column(String, nullable=True, index=True)
 
     playlist_tracks = relationship("PlaylistTrack", back_populates="track")
     track_artists = relationship("TrackArtist", back_populates="track", cascade="all, delete-orphan")

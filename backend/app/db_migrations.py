@@ -105,3 +105,18 @@ def run_simple_migrations():
                     """
                 )
             )
+
+        if "musicbrainz_recording_id" not in track_column_names:
+            connection.execute(
+                text("ALTER TABLE tracks ADD COLUMN musicbrainz_recording_id TEXT")
+            )
+
+        job_lock_columns = connection.execute(
+            text("PRAGMA table_info(job_locks)")
+        ).fetchall()
+        job_lock_column_names = {column[1] for column in job_lock_columns}
+        
+        if "started_at" not in job_lock_column_names:
+            connection.execute(
+                text("ALTER TABLE job_locks ADD COLUMN started_at DATETIME")
+            )
