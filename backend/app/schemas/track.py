@@ -14,6 +14,7 @@ class TrackResponse(BaseModel):
     raw_artist: Optional[str] = None
     raw_album: Optional[str] = None
     raw_genre: Optional[str] = None
+    musicbrainz_recording_id: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -13,6 +13,7 @@ from app.services.metadata_normalizer import (
     normalize_primary_artist,
     normalize_title
 )
+from app.services.musicbrainz_backfill import backfill_musicbrainz_recording_ids
 from app.services.genre_normalizer import normalize_genre
 from app.utils.files import is_supported_audio_file
 
@@ -115,6 +116,11 @@ def scan_directory(base_path: str, limit: int = 20) -> dict:
                 break
 
         print(f"Scan complete. Added {count} tracks.")
+
+        if count > 0:
+            print("Starting MusicBrainz recording ID backfill after scan...")
+            backfill_musicbrainz_recording_ids(batch_size=50)
+
         return {"added": count}
 
     finally:
