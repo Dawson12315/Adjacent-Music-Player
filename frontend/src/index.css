@@ -983,6 +983,148 @@ button {
 .settings-time-input:focus {
   border-color: #535353;
 }
+.settings-text-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #ffffff;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.settings-text-input:focus {
+  border-color: rgba(29, 185, 84, 0.8);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.settings-text-input::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+.lastfm-progress-card {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.lastfm-progress-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.lastfm-progress-card__batch {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.lastfm-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.lastfm-status-pill--idle {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.lastfm-status-pill--running {
+  background: rgba(29, 185, 84, 0.16);
+  color: #4ade80;
+}
+
+.lastfm-status-pill--stopping {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fbbf24;
+}
+
+.lastfm-status-pill--stopped {
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+}
+
+.lastfm-progress-card__track {
+  margin-bottom: 14px;
+}
+
+.lastfm-progress-card__label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.48);
+}
+
+.lastfm-progress-card__value {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.92);
+  word-break: break-word;
+}
+
+.lastfm-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.lastfm-progress-stat {
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.lastfm-progress-stat__label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.56);
+  margin-bottom: 6px;
+}
+
+.lastfm-progress-stat__value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.lastfm-progress-card__footer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lastfm-progress-card__result {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.lastfm-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.lastfm-summary__item {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.82);
+}
 .player-bar {
   position: fixed;
   left: 0;

@@ -8,6 +8,7 @@ class AppSettingsResponse(BaseModel):
     cleanup_time: Optional[str] = None
     scan_enabled: bool
     scan_time: Optional[str] = None
+    lastfm_api_key: Optional[str] = None
 
 
 class AppSettingsUpdate(BaseModel):
@@ -15,3 +16,4 @@ class AppSettingsUpdate(BaseModel):
     cleanup_time: Optional[str] = None
     scan_enabled: bool
     scan_time: Optional[str] = None
+    lastfm_api_key: Optional[str] = None

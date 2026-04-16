@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Boolean, Column, Integer, String
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -18,6 +18,7 @@ class Track(Base):
     raw_album = Column(String, nullable=True)
     raw_genre = Column(String, nullable=True)
     musicbrainz_recording_id = Column(String, nullable=True, index=True)
+    lastfm_tags_enriched = Column(Boolean, nullable=False, default=False)
 
     playlist_tracks = relationship("PlaylistTrack", back_populates="track")
     track_artists = relationship("TrackArtist", back_populates="track", cascade="all, delete-orphan")

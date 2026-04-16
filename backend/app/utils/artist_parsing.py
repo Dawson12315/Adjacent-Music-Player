@@ -29,3 +29,56 @@ def split_artist_names(artist_value: Optional[str]) -> List[str]:
         cleaned.append(name)
 
     return cleaned
+
+def extract_featured_artists(text: Optional[str]) -> List[str]:
+    if not text:
+        return []
+
+    matches = re.findall(r"\((?:feat\.|ft\.)\s+([^)]+)\)", text, flags=re.IGNORECASE)
+
+    cleaned: List[str] = []
+    seen: set[str] = set()
+
+    for match in matches:
+        parts = re.split(r"\s*&\s*|\s*,\s*|\s+and\s+", match, flags=re.IGNORECASE)
+
+        for part in parts:
+            name = part.strip()
+            if not name:
+                continue
+
+            dedupe_key = name.casefold()
+            if dedupe_key in seen:
+                continue
+
+            seen.add(dedupe_key)
+            cleaned.append(name)
+
+    return cleaned
+
+def extract_featured_artists(text: Optional[str]) -> List[str]:
+    if not text:
+        return []
+
+    matches = re.findall(r"\((?:feat\.|ft\.)\s+([^)]+)\)", text, flags=re.IGNORECASE)
+
+    cleaned: List[str] = []
+    seen: set[str] = set()
+
+    for match in matches:
+        parts = re.split(r"\s*&\s*|\s*,\s*|\s+and\s+", match, flags=re.IGNORECASE)
+
+        for part in parts:
+            name = part.strip()
+            if not name:
+                continue
+
+            dedupe_key = name.casefold()
+            if dedupe_key in seen:
+                continue
+
+            seen.add(dedupe_key)
+            cleaned.append(name)
+
+
+    return cleaned

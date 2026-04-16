@@ -13,6 +13,7 @@ services:
     environment:
       - MUSIC_LIBRARY_PATH=/music
       - FRONTEND_ORIGIN=${FRONTEND_ORIGIN}
+      - MUSICBRAINZ_EMAIL=${MUSICBRAINZ_EMAIL}
     restart: unless-stopped
 
   frontend:

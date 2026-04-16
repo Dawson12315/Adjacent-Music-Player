@@ -72,6 +72,10 @@ function App() {
   const [selectedArtistGenres, setSelectedArtistGenres] = useState([]);
   const [similarTracks, setSimilarTracks] = useState([]);
   const [similarRefreshKey, setSimilarRefreshKey] = useState(0);
+  const [lastfmApiKey, setLastfmApiKey] = useState("");
+  const [isLastfmEnriching, setIsLastfmEnriching] = useState(false);
+  const [lastfmEnrichmentSummary, setLastfmEnrichmentSummary] = useState(null);
+  const [lastfmProgress, setLastfmProgress] = useState(null)
 
   const TRACKS_PAGE_SIZE = 50;
   const ARTISTS_PAGE_SIZE = 50;
@@ -81,6 +85,8 @@ function App() {
   const progressBarRef = useRef(null)
   const pendingSeekRef = useRef(null)
   
+  const lastfmProgressIntervalRef = useRef(null)
+
   useEffect(() =>{
     async function fetchLibraryData() {
       try {
@@ -141,6 +147,7 @@ function App() {
           scan_time: settingsData.scan_time || "",
         })
         setLikedSongsPlaylist(likedSongsPlaylistData);
+        setLastfmApiKey(settingsData.lastfm_api_key || "");
 
         // Restore playback state
         const playbackResponse = await fetch(`${API_BASE_URL}/api/playback`);
@@ -1054,6 +1061,7 @@ function App() {
           cleanup_time: appSettings.cleanup_time || null,
           scan_enabled: appSettings.scan_enabled,
           scan_time: appSettings.scan_time || null,
+          lastfm_api_key: lastfmApiKey.trim() || null,
         }),
       });
 
@@ -1071,6 +1079,7 @@ function App() {
       });
 
       setSettingsNotice("Settings saved successfully.");
+      setLastfmApiKey(savedSettings.lastfm_api_key || "");
     } catch (error) {
       console.error(error);
       setSettingsNotice("Failed to save settings.");
@@ -1554,6 +1563,125 @@ function App() {
     }
   }
 
+  async function handleRunLastfmEnrichment() {
+    setLastfmEnrichmentSummary(null)
+    setSettingsNotice("Starting Last.fm genre enrichment...")
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/settings/lastfm/enrich`, {
+        method: "POST",
+        cache: "no-store",
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to start Last.fm enrichment")
+      }
+
+      const result = await response.json()
+
+      if (result.reason === "already_running") {
+        setSettingsNotice("Last.fm genre enrichment is already running.")
+        startLastfmProgressPolling()
+        await fetchLastfmProgress()
+        return
+      }
+
+      if (!result.started) {
+        throw new Error("Last.fm enrichment did not start")
+      }
+
+      setSettingsNotice("Last.fm genre enrichment started.")
+      startLastfmProgressPolling()
+      await fetchLastfmProgress()
+    } catch (error) {
+      console.error(error)
+      setSettingsNotice("Failed to start Last.fm genre enrichment.")
+    }
+  }
+
+  async function handleStopLastfmEnrichment() {
+    try {
+      setLastfmProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              is_running: true,
+              is_stopping: true,
+              is_stopped: false,
+              last_result: "stop_requested",
+            }
+          : prev
+      )
+
+      await fetch(`${API_BASE_URL}/api/settings/lastfm/stop`, {
+        method: "POST",
+        cache: "no-store",
+      })
+
+      setSettingsNotice("Stopping Last.fm genre enrichment...")
+      await fetchLastfmProgress()
+    } catch (error) {
+      console.error(error)
+      setSettingsNotice("Failed to stop enrichment.")
+    }
+  }
+
+  async function fetchLastfmProgress() {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/settings/lastfm/progress?_=${Date.now()}`,
+        {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch Last.fm progress")
+      }
+
+      const data = await response.json()
+
+      setLastfmProgress(data)
+      setIsLastfmEnriching(data.is_running || data.is_stopping)
+
+      if (!data.is_running && !data.is_stopping && lastfmProgressIntervalRef.current) {
+        clearInterval(lastfmProgressIntervalRef.current)
+        lastfmProgressIntervalRef.current = null
+      }
+    } catch (error) {
+      console.error(error)
+
+      if (lastfmProgressIntervalRef.current) {
+        clearInterval(lastfmProgressIntervalRef.current)
+        lastfmProgressIntervalRef.current = null
+      }
+    }
+  }
+
+  function startLastfmProgressPolling() {
+    if (lastfmProgressIntervalRef.current) {
+      return
+    }
+  
+    fetchLastfmProgress()
+  
+    lastfmProgressIntervalRef.current = window.setInterval(() => {
+      fetchLastfmProgress()
+    }, 1000)
+  }
+
+  function stopLastfmProgressPolling() {
+    if (lastfmProgressIntervalRef.current) {
+      clearInterval(lastfmProgressIntervalRef.current)
+      lastfmProgressIntervalRef.current = null
+    }
+  }
+
   function getPlaylistArtwork(playlist) {
     if (playlist.system_key === "liked_songs") {
       return {
@@ -1681,6 +1809,28 @@ function App() {
     playlistTracks,
     similarRefreshKey,
   ]);
+
+  useEffect(() => {
+    return () => {
+      stopLastfmProgressPolling()
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchLastfmProgress()
+  }, [])
+
+  useEffect(() => {
+    if (!lastfmProgress) {
+      return
+    }
+
+    const isActive = lastfmProgress.is_running || lastfmProgress.is_stopping
+
+    if (isActive && !lastfmProgressIntervalRef.current) {
+      startLastfmProgressPolling()
+    }
+  }, [lastfmProgress])
 
   const visibleArtists = useMemo(() => {
     return artists.filter((artist) =>
@@ -2041,35 +2191,6 @@ function App() {
             </div>
           </div>
           <div className="settings-card">
-            <div className="settings-card__title">Cleanup missing files</div>
-            <div className="settings-card__text">
-              Check whether indexed music files still exist on disk and remove missing
-              files from the database and track lists.
-            </div>
-
-            <label className="settings-field settings-field--inline">
-              <input
-                type="checkbox"
-                checked={appSettings.cleanup_enabled}
-                onChange={() => handleSettingsToggle("cleanup_enabled")}
-              />
-              <span>Enable daily cleanup</span>
-            </label>
-
-            <label className="settings-field">
-              <span className="settings-field__label">Run time</span>
-              <input
-                className="settings-time-input"
-                type="time"
-                value={appSettings.cleanup_time}
-                onChange={(event) =>
-                  handleSettingsTimeChange("cleanup_time", event.target.value)
-                }
-              />
-            </label>
-          </div>
-              
-          <div className="settings-card">
             <div className="settings-card__title">Scan library for new files</div>
             <div className="settings-card__text">
               Scan the music library on a schedule and add newly discovered tracks to the
@@ -2097,14 +2218,165 @@ function App() {
               />
             </label>
           </div>
-              
+          
+          <div className="settings-card">
+            <div className="settings-card__title">Cleanup missing files</div>
+            <div className="settings-card__text">
+              Check whether indexed music files still exist on disk and remove missing
+              files from the database and track lists.
+            </div>
+
+            <label className="settings-field settings-field--inline">
+              <input
+                type="checkbox"
+                checked={appSettings.cleanup_enabled}
+                onChange={() => handleSettingsToggle("cleanup_enabled")}
+              />
+              <span>Enable daily cleanup</span>
+            </label>
+
+            <label className="settings-field">
+              <span className="settings-field__label">Run time</span>
+              <input
+                className="settings-time-input"
+                type="time"
+                value={appSettings.cleanup_time}
+                onChange={(event) =>
+                  handleSettingsTimeChange("cleanup_time", event.target.value)
+                }
+              />
+            </label>
+          </div>
+
+          <div className="settings-card">
+            <div className="settings-card__title">Last.fm Integration</div>
+            <div className="settings-card__text">
+              Paste your Last.fm API key to enable genre-tag enrichment from Last.fm.
+            </div>
+
+            <label className="settings-field">
+              <span className="settings-field__label">Last.fm API key</span>
+              <input
+                className="settings-text-input"
+                type="text"
+                value={lastfmApiKey}
+                onChange={(event) => setLastfmApiKey(event.target.value)}
+                placeholder="Enter Last.fm API key"
+              />
+            </label>
+
+            <div className="settings-card__actions">
+              <button
+                className="settings-button"
+                type="button"
+                onClick={handleRunLastfmEnrichment}
+                disabled={isLastfmEnriching || !lastfmApiKey.trim()}
+              >
+                {isLastfmEnriching ? "Enriching..." : "Start enriching genre tags"}
+              </button>
+
+              {isLastfmEnriching && (
+                <button
+                  className="settings-button settings-button--danger"
+                  type="button"
+                  onClick={handleStopLastfmEnrichment}
+                >
+                  Stop
+                </button>
+              )}
+            </div>
+            
+            {lastfmProgress && (
+              <div className="lastfm-progress-card">
+                <div className="lastfm-progress-card__header">
+                  <span
+                    className={`lastfm-status-pill ${
+                      lastfmProgress.is_stopping
+                        ? "lastfm-status-pill--stopping"
+                        : lastfmProgress.is_running
+                        ? "lastfm-status-pill--running"
+                        : lastfmProgress.is_stopped
+                        ? "lastfm-status-pill--stopped"
+                        : "lastfm-status-pill--idle"
+                    }`}
+                  >
+                    {lastfmProgress.is_stopping
+                      ? "Stopping..."
+                      : lastfmProgress.is_running
+                      ? "Running"
+                      : lastfmProgress.is_stopped
+                      ? "Stopped"
+                      : "Idle"}
+                  </span>
+                    
+                  <span className="lastfm-progress-card__batch">
+                    Batch {lastfmProgress.current_batch || 0}
+                  </span>
+                </div>
+                    
+                <div className="lastfm-progress-card__track">
+                  <span className="lastfm-progress-card__label">Current track</span>
+                    <div className="lastfm-progress-card__value">
+                      {lastfmProgress.current_title
+                        ? `${lastfmProgress.current_index}/${lastfmProgress.current_total} — ${lastfmProgress.current_title}`
+                        : "None"}
+                    </div>
+                </div>
+                    
+                <div className="lastfm-progress-grid">
+                  <div className="lastfm-progress-stat">
+                    <div className="lastfm-progress-stat__label">Processed</div>
+                    <div className="lastfm-progress-stat__value">
+                      {lastfmProgress.total_processed}
+                    </div>
+                  </div>
+                    
+                  <div className="lastfm-progress-stat">
+                    <div className="lastfm-progress-stat__label">Skipped</div>
+                    <div className="lastfm-progress-stat__value">
+                      {lastfmProgress.total_skipped}
+                    </div>
+                  </div>
+                    
+                  <div className="lastfm-progress-stat">
+                    <div className="lastfm-progress-stat__label">Checked</div>
+                    <div className="lastfm-progress-stat__value">
+                      {lastfmProgress.total_checked}
+                    </div>
+                  </div>
+                </div>
+                    
+                <div className="lastfm-progress-card__footer">
+                  <span className="lastfm-progress-card__label">Last result</span>
+                  <span className="lastfm-progress-card__result">
+                    {lastfmProgress.last_result || "None"}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {lastfmEnrichmentSummary && (
+              <div className="lastfm-summary">
+                <span className="lastfm-summary__item">
+                  Processed: {lastfmEnrichmentSummary.total_processed}
+                </span>
+                <span className="lastfm-summary__item">
+                  Skipped: {lastfmEnrichmentSummary.total_skipped}
+                </span>
+                <span className="lastfm-summary__item">
+                  Checked: {lastfmEnrichmentSummary.total_checked}
+                </span>
+              </div>
+            )}
+          </div>
+
           <div className="settings-card__actions">
             <button
               className="settings-button"
               type="button"
               onClick={handleSaveAppSettings}
             >
-              Save schedule settings
+              Save settings
             </button>
           </div>
         </div>
