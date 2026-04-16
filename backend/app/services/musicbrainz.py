@@ -1,11 +1,19 @@
 import requests
 import time
+import os
 from typing import Optional
+from pathlib import Path
+from dotenv import load_dotenv
 
+ROOT_ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
+load_dotenv(ROOT_ENV_PATH)
+
+EMAIL = os.getenv("MUSICBRAINZ_EMAIL", "unknown@example.com")
 
 MUSICBRAINZ_BASE_URL = "https://musicbrainz.org/ws/2"
-USER_AGENT = "Adjacent/1.0 (dawsonhudson1999@yahoo.com)"
+USER_AGENT = f"Adjacent/1.0 ({EMAIL})"
 
+print("MusicBrainz USER_AGENT:", USER_AGENT)
 
 def _normalize(value: Optional[str]) -> str:
     if not value:

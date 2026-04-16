@@ -111,6 +111,11 @@ def run_simple_migrations():
                 text("ALTER TABLE tracks ADD COLUMN musicbrainz_recording_id TEXT")
             )
 
+        if "lastfm_tags_enriched" not in track_column_names:
+            connection.execute(
+                text("ALTER TABLE tracks ADD COLUMN lastfm_tags_enriched BOOLEAN NOT NULL DEFAULT 0")
+            )
+
         job_lock_columns = connection.execute(
             text("PRAGMA table_info(job_locks)")
         ).fetchall()
@@ -119,4 +124,14 @@ def run_simple_migrations():
         if "started_at" not in job_lock_column_names:
             connection.execute(
                 text("ALTER TABLE job_locks ADD COLUMN started_at DATETIME")
+            )
+
+        app_settings_columns = connection.execute(
+            text("PRAGMA table_info(app_settings)")
+        ).fetchall()
+        app_settings_column_names = {column[1] for column in app_settings_columns}
+        
+        if "lastfm_api_key" not in app_settings_column_names:
+            connection.execute(
+                text("ALTER TABLE app_settings ADD COLUMN lastfm_api_key TEXT")
             )

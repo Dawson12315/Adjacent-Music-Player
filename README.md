@@ -41,6 +41,7 @@ services:
     environment:
       - /mnt/media/music=/music
       - FRONTEND_ORIGIN=http://YOUR_IP:5173
+      - MUSICBRAINZ_EMAIL=${MUSICBRAINZ_EMAIL}
     restart: unless-stopped
 
   frontend:

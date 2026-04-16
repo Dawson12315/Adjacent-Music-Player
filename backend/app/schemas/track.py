@@ -15,6 +15,7 @@ class TrackResponse(BaseModel):
     raw_album: Optional[str] = None
     raw_genre: Optional[str] = None
     musicbrainz_recording_id: Optional[str] = None
+    lastfm_tags_enriched: bool = False
 
     class Config:
         from_attributes = True
