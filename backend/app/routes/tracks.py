@@ -20,6 +20,9 @@ from app.models.playback_session import PlaybackSession
 from app.services.metadata_normalizer import normalize_genre_list
 from app.services.musicbrainz import find_recording_mbid
 
+from app.models.app_setting import AppSetting
+from app.services.lastfm import scrobble_track, update_now_playing
+
 router = APIRouter()
 
 
@@ -164,6 +167,72 @@ def fetch_musicbrainz_recording_id(
         lastfm_tags_enriched=track.lastfm_tags_enriched,
         artists=[item.artist_name for item in track.track_artists],
     )
+
+@router.post("/tracks/{track_id}/lastfm/now-playing", tags=["tracks"])
+def update_track_now_playing_on_lastfm(track_id: int, db: Session = Depends(get_db)):
+    settings = db.query(AppSetting).first()
+
+    if not settings:
+        raise HTTPException(status_code=400, detail="App settings not found")
+
+    if not settings.lastfm_api_key or not settings.lastfm_api_secret or not settings.lastfm_session_key:
+        raise HTTPException(status_code=400, detail="Missing Last.fm credentials or session")
+
+    track = db.query(Track).filter(Track.id == track_id).first()
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    if not track.title or not track.artist:
+        raise HTTPException(status_code=400, detail="Track is missing title or artist")
+
+    result = update_now_playing(
+        api_key=settings.lastfm_api_key,
+        api_secret=settings.lastfm_api_secret,
+        session_key=settings.lastfm_session_key,
+        track_name=track.title,
+        artist_name=track.artist,
+        album_name=track.album,
+        mbid=track.musicbrainz_recording_id,
+    )
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"] or "Last.fm now playing failed")
+
+    return result
+
+@router.post("/tracks/{track_id}/lastfm/scrobble", tags=["tracks"])
+def scrobble_track_to_lastfm(track_id: int, db: Session = Depends(get_db)):
+    settings = db.query(AppSetting).first()
+
+    if not settings:
+        raise HTTPException(status_code=400, detail="App settings not found")
+
+    if not settings.lastfm_api_key or not settings.lastfm_api_secret or not settings.lastfm_session_key:
+        raise HTTPException(status_code=400, detail="Missing Last.fm credentials or session")
+
+    track = db.query(Track).filter(Track.id == track_id).first()
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    if not track.title or not track.artist:
+        raise HTTPException(status_code=400, detail="Track is missing title or artist")
+
+    result = scrobble_track(
+        api_key=settings.lastfm_api_key,
+        api_secret=settings.lastfm_api_secret,
+        session_key=settings.lastfm_session_key,
+        track_name=track.title,
+        artist_name=track.artist,
+        album_name=track.album,
+        mbid=track.musicbrainz_recording_id,
+    )
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"] or "Last.fm scrobble failed")
+
+    return result
 
 @router.delete("/tracks/purge", tags=["tracks"])
 def purge_tracks(db: Session = Depends(get_db)):

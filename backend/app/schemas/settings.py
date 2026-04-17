@@ -9,6 +9,9 @@ class AppSettingsResponse(BaseModel):
     scan_enabled: bool
     scan_time: Optional[str] = None
     lastfm_api_key: Optional[str] = None
+    lastfm_api_secret: Optional[str] = None
+    lastfm_username: Optional[str] = None
+    lastfm_session_key: Optional[str] = None
 
 
 class AppSettingsUpdate(BaseModel):
@@ -17,3 +20,6 @@ class AppSettingsUpdate(BaseModel):
     scan_enabled: bool
     scan_time: Optional[str] = None
     lastfm_api_key: Optional[str] = None
+    lastfm_api_secret: Optional[str] = None
+    lastfm_username: Optional[str] = None
+    lastfm_session_key: Optional[str] = None
