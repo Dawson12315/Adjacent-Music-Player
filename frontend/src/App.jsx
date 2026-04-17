@@ -42,6 +42,13 @@ function App() {
     scan_enabled: false,
     scan_time: "",
   });
+  const [lastfmReadiness, setLastfmReadiness] = useState({
+    total_tracks: 0,
+    tracks_with_mbid: 0,
+    tracks_missing_mbid: 0,
+    progress_percent: 0,
+    ready: false,
+  })
   const [tracksPage, setTracksPage] = useState(1);
   const [artistsPage, setArtistsPage] = useState(1);
   const [isScanningLibrary, setIsScanningLibrary] = useState(false);
@@ -73,6 +80,10 @@ function App() {
   const [similarTracks, setSimilarTracks] = useState([]);
   const [similarRefreshKey, setSimilarRefreshKey] = useState(0);
   const [lastfmApiKey, setLastfmApiKey] = useState("");
+  const [lastfmApiSecret, setLastfmApiSecret] = useState("")
+  const [lastfmUsername, setLastfmUsername] = useState("")
+  const [lastfmSessionKey, setLastfmSessionKey] = useState("")
+  const [isLastfmConnecting, setIsLastfmConnecting] = useState(false)
   const [isLastfmEnriching, setIsLastfmEnriching] = useState(false);
   const [lastfmEnrichmentSummary, setLastfmEnrichmentSummary] = useState(null);
   const [lastfmProgress, setLastfmProgress] = useState(null)
@@ -87,6 +98,11 @@ function App() {
   
   const lastfmProgressIntervalRef = useRef(null)
 
+  const lastNowPlayingTrackIdRef = useRef(null)
+  const lastScrobbledTrackIdRef = useRef(null)
+  const listenedSecondsRef = useRef(0)
+  const lastPlaybackTickRef = useRef(null)
+
   useEffect(() =>{
     async function fetchLibraryData() {
       try {
@@ -97,6 +113,7 @@ function App() {
           genresResponse,
           playlistsResponse,
           settingsResponse,
+          lastfmReadinessResponse,
           likedSongsPlaylistResponse
 
         ] = await Promise.all([
@@ -106,6 +123,7 @@ function App() {
           fetch(`${API_BASE_URL}/api/genres`),
           fetch(`${API_BASE_URL}/api/playlists`),
           fetch(`${API_BASE_URL}/api/settings`),
+          fetch(`${API_BASE_URL}/api/settings/lastfm/readiness`),
           fetch(`${API_BASE_URL}/api/playlists/liked-songs`)
         ])
 
@@ -116,6 +134,7 @@ function App() {
           !genresResponse.ok ||
           !playlistsResponse.ok ||
           !settingsResponse.ok ||
+          !lastfmReadinessResponse.ok ||
           !likedSongsPlaylistResponse.ok
         ) {
           throw new Error("Failed to fetch library data");
@@ -126,6 +145,7 @@ function App() {
         const albumsData = await albumsResponse.json();
         const playlistsData = await playlistsResponse.json();
         const settingsData = await settingsResponse.json()
+        const lastfmReadinessData = await lastfmReadinessResponse.json();
         const likedSongsPlaylistData = await likedSongsPlaylistResponse.json();
         const genresData = await genresResponse.json();
 
@@ -146,8 +166,12 @@ function App() {
           scan_enabled: settingsData.scan_enabled,
           scan_time: settingsData.scan_time || "",
         })
+        setLastfmReadiness(lastfmReadinessData);
         setLikedSongsPlaylist(likedSongsPlaylistData);
         setLastfmApiKey(settingsData.lastfm_api_key || "");
+        setLastfmApiSecret(settingsData.lastfm_api_secret || "")
+        setLastfmUsername(settingsData.lastfm_username || "")
+        setLastfmSessionKey(settingsData.lastfm_session_key || "")
 
         // Restore playback state
         const playbackResponse = await fetch(`${API_BASE_URL}/api/playback`);
@@ -244,6 +268,69 @@ function App() {
   }
 
   useEffect(() => {
+    if (!selectedTrack) {
+      lastNowPlayingTrackIdRef.current = null
+      lastScrobbledTrackIdRef.current = null
+      listenedSecondsRef.current = 0
+      lastPlaybackTickRef.current = null
+      return
+    }
+
+    lastNowPlayingTrackIdRef.current = null
+    lastScrobbledTrackIdRef.current = null
+    listenedSecondsRef.current = 0
+    lastPlaybackTickRef.current = null
+  }, [selectedTrack?.id])
+
+  useEffect(() => {
+    async function handleLastfmCallback() {
+      const currentUrl = new URL(window.location.href)
+      const token = currentUrl.searchParams.get("token")
+
+      if (!token) {
+        return
+      }
+
+      if (!window.location.pathname.includes("/settings/lastfm/callback")) {
+        return
+      }
+
+      setIsLastfmConnecting(true)
+
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/settings/lastfm/session?token=${encodeURIComponent(token)}`,
+          {
+            method: "POST",
+          }
+        )
+
+        if (!response.ok) {
+          throw new Error("Failed to create Last.fm session")
+        }
+
+        const data = await response.json()
+
+        setLastfmApiKey(data.lastfm_api_key || "")
+        setLastfmApiSecret(data.lastfm_api_secret || "")
+        setLastfmUsername(data.lastfm_username || "")
+        setLastfmSessionKey(data.lastfm_session_key || "")
+        setSettingsNotice("Last.fm connected successfully.")
+        setActiveView("settings")
+
+        window.history.replaceState({}, "", "/")
+      } catch (error) {
+        console.error(error)
+        setSettingsNotice("Failed to complete Last.fm connection.")
+      } finally {
+        setIsLastfmConnecting(false)
+      }
+    }
+
+    handleLastfmCallback()
+  }, [])
+
+  useEffect(() => {
     if (!settingsNotice) {
       return;
     }
@@ -337,6 +424,37 @@ function App() {
     isShuffle,
     isLoop,
   ]);
+
+  useEffect(() => {
+    if (!selectedTrack) {
+      return
+    }
+
+    if (!isPlaying) {
+      lastPlaybackTickRef.current = null
+      return
+    }
+
+    const intervalId = window.setInterval(() => {
+      const now = Date.now()
+
+      if (lastPlaybackTickRef.current == null) {
+        lastPlaybackTickRef.current = now
+        return
+      }
+
+      const elapsedSeconds = (now - lastPlaybackTickRef.current) / 1000
+      lastPlaybackTickRef.current = now
+
+      if (elapsedSeconds > 0 && elapsedSeconds < 5) {
+        listenedSecondsRef.current += elapsedSeconds
+      }
+    }, 1000)
+
+    return () => {
+      clearInterval(intervalId)
+    }
+  }, [selectedTrack, isPlaying])
 
   useEffect(() => {
     setTracksPage(1);
@@ -990,19 +1108,21 @@ function App() {
 
       const scanResult = await response.json();
 
-      const [tracksResponse, artistsResponse, albumsResponse, playlistsResponse] =
+      const [tracksResponse, artistsResponse, albumsResponse, playlistsResponse, lastfmReadinessResponse] =
         await Promise.all([
           fetch(`${API_BASE_URL}/api/tracks`),
           fetch(`${API_BASE_URL}/api/artists`),
           fetch(`${API_BASE_URL}/api/albums`),
           fetch(`${API_BASE_URL}/api/playlists`),
+          fetch(`${API_BASE_URL}/api/settings/lastfm/readiness`)
         ]);
 
       if (
         !tracksResponse.ok ||
         !artistsResponse.ok ||
         !albumsResponse.ok ||
-        !playlistsResponse.ok
+        !playlistsResponse.ok ||
+        !lastfmReadinessResponse.ok
       ) {
         throw new Error("Failed to refresh library after scan");
       }
@@ -1011,6 +1131,7 @@ function App() {
       const artistsData = await artistsResponse.json();
       const albumsData = await albumsResponse.json();
       const playlistsData = await playlistsResponse.json();
+      const lastfmReadinessData = await lastfmReadinessResponse.json();
 
       setTracks(tracksData);
       setArtists(artistsData);
@@ -1022,7 +1143,7 @@ function App() {
           return a.name.localeCompare(b.name);
         })
       );
-
+      setLastfmReadiness(lastfmReadinessData);
       setSettingsNotice(
         `Library scan completed. Added ${scanResult.added} new tracks${scanResult.added === 1 ? "" : "s"}.`
       )
@@ -1062,6 +1183,9 @@ function App() {
           scan_enabled: appSettings.scan_enabled,
           scan_time: appSettings.scan_time || null,
           lastfm_api_key: lastfmApiKey.trim() || null,
+          lastfm_api_secret: lastfmApiSecret.trim() || null,
+          lastfm_username: lastfmUsername || null,
+          lastfm_session_key: lastfmSessionKey || null,
         }),
       });
 
@@ -1080,6 +1204,9 @@ function App() {
 
       setSettingsNotice("Settings saved successfully.");
       setLastfmApiKey(savedSettings.lastfm_api_key || "");
+      setLastfmApiSecret(savedSettings.lastfm_api_secret || "")
+      setLastfmUsername(savedSettings.lastfm_username || "")
+      setLastfmSessionKey(savedSettings.lastfm_session_key || "")
     } catch (error) {
       console.error(error);
       setSettingsNotice("Failed to save settings.");
@@ -1626,6 +1753,39 @@ function App() {
     }
   }
 
+  async function handleConnectLastfm() {
+    if (!lastfmApiKey.trim()) {
+      setSettingsNotice("Save your Last.fm API key first.")
+      return
+    }
+
+    setIsLastfmConnecting(true)
+
+    try {
+      const callbackUrl = `${window.location.origin}/settings/lastfm/callback`
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/settings/lastfm/auth-url?callback_url=${encodeURIComponent(callbackUrl)}`
+      )
+
+      if (!response.ok) {
+        throw new Error("Failed to get Last.fm auth URL")
+      }
+
+      const data = await response.json()
+
+      if (!data.auth_url) {
+        throw new Error("Missing Last.fm auth URL")
+      }
+
+      window.location.href = data.auth_url
+    } catch (error) {
+      console.error(error)
+      setSettingsNotice("Failed to start Last.fm connection.")
+      setIsLastfmConnecting(false)
+    }
+  }
+
   async function fetchLastfmProgress() {
     try {
       const response = await fetch(
@@ -1662,6 +1822,63 @@ function App() {
       }
     }
   }
+
+  async function sendLastfmNowPlaying(trackId) {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/tracks/${trackId}/lastfm/now-playing`,
+        {
+          method: "POST",
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error("Failed to update Last.fm now playing")
+      }
+
+      const data = await response.json()
+      console.log("Last.fm now playing updated:", data)
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  async function sendLastfmScrobble(trackId) {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/tracks/${trackId}/lastfm/scrobble`,
+        {
+          method: "POST",
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error("Failed to scrobble track to Last.fm")
+      }
+
+      const data = await response.json()
+      console.log("Last.fm scrobbled:", data)
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  useEffect(() => {
+    if (!selectedTrack || !isPlaying) {
+      return
+    }
+
+    if (lastScrobbledTrackIdRef.current === selectedTrack.id) {
+      return
+    }
+
+    if (listenedSecondsRef.current < 40) {
+      return
+    }
+
+    lastScrobbledTrackIdRef.current = selectedTrack.id
+    sendLastfmScrobble(selectedTrack.id)
+  }, [selectedTrack, isPlaying, currentTime])
 
   function startLastfmProgressPolling() {
     if (lastfmProgressIntervalRef.current) {
@@ -1831,6 +2048,19 @@ function App() {
       startLastfmProgressPolling()
     }
   }, [lastfmProgress])
+
+  useEffect(() => {
+    if (!selectedTrack || !isPlaying) {
+      return
+    }
+
+    if (lastNowPlayingTrackIdRef.current === selectedTrack.id) {
+      return
+    }
+
+    lastNowPlayingTrackIdRef.current = selectedTrack.id
+    sendLastfmNowPlaying(selectedTrack.id)
+  }, [selectedTrack, isPlaying])
 
   const visibleArtists = useMemo(() => {
     return artists.filter((artist) =>
@@ -2251,7 +2481,7 @@ function App() {
           <div className="settings-card">
             <div className="settings-card__title">Last.fm Integration</div>
             <div className="settings-card__text">
-              Paste your Last.fm API key to enable genre-tag enrichment from Last.fm.
+              Paste your Last.fm API key and shared secret, press "Save settings", then press "Connect Last.fm", to enable genre-tag enrichment from Last.fm and scrobbling. Only do this, once your library scan import is complete.
             </div>
 
             <label className="settings-field">
@@ -2265,15 +2495,42 @@ function App() {
               />
             </label>
 
+            <label className="settings-field">
+              <span className="settings-field__label">Last.fm API secret</span>
+              <input
+                className="settings-text-input"
+                type="text"
+                value={lastfmApiSecret}
+                onChange={(event) => setLastfmApiSecret(event.target.value)}
+                placeholder="Enter Last.fm API secret"
+              />
+            </label>
+            <div className="settings-card__text">
+              <p></p>
+              {lastfmUsername
+                ? `Connected as ${lastfmUsername}`
+                : "Not connected to Last.fm yet."}
+            </div>
             <div className="settings-card__actions">
               <button
-                className="settings-button"
+                className="settings-button settings-button--secondary"
                 type="button"
-                onClick={handleRunLastfmEnrichment}
-                disabled={isLastfmEnriching || !lastfmApiKey.trim()}
+                onClick={handleConnectLastfm}
+                disabled={isLastfmConnecting || !lastfmApiKey.trim() || !lastfmApiSecret.trim()}
               >
-                {isLastfmEnriching ? "Enriching..." : "Start enriching genre tags"}
+                {isLastfmConnecting ? "Connecting..." : "Connect Last.fm"}
               </button>
+
+              {lastfmReadiness.ready && (
+                <button
+                  className="settings-button"
+                  type="button"
+                  onClick={handleRunLastfmEnrichment}
+                  disabled={isLastfmEnriching || !lastfmApiKey.trim()}
+                >
+                  {isLastfmEnriching ? "Enriching..." : "Start enriching genre tags"}
+                </button>
+              )}
 
               {isLastfmEnriching && (
                 <button
@@ -2285,6 +2542,56 @@ function App() {
                 </button>
               )}
             </div>
+            
+            {!lastfmReadiness.ready && (
+              <div className="lastfm-readiness-card">
+                <div className="lastfm-readiness-card__title">
+                  Waiting for MusicBrainz tagging to finish
+                </div>
+            
+                <div className="lastfm-readiness-card__text">
+                  Last.fm genre enrichment becomes available once every scanned track has been processed for
+                  MusicBrainz recording IDs.
+                </div>
+            
+                <div className="lastfm-readiness-card__bar">
+                  <div
+                    className="lastfm-readiness-card__bar-fill"
+                    style={{ width: `${lastfmReadiness.progress_percent || 0}%` }}
+                  />
+                </div>
+            
+                <div className="lastfm-readiness-card__stats">
+                  <div className="lastfm-readiness-card__stat">
+                    <span className="lastfm-readiness-card__label">Tagged</span>
+                    <span className="lastfm-readiness-card__value">
+                      {lastfmReadiness.tracks_with_mbid}
+                    </span>
+                  </div>
+            
+                  <div className="lastfm-readiness-card__stat">
+                    <span className="lastfm-readiness-card__label">Remaining</span>
+                    <span className="lastfm-readiness-card__value">
+                      {lastfmReadiness.tracks_missing_mbid}
+                    </span>
+                  </div>
+            
+                  <div className="lastfm-readiness-card__stat">
+                    <span className="lastfm-readiness-card__label">Total</span>
+                    <span className="lastfm-readiness-card__value">
+                      {lastfmReadiness.total_tracks}
+                    </span>
+                  </div>
+            
+                  <div className="lastfm-readiness-card__stat">
+                    <span className="lastfm-readiness-card__label">Progress</span>
+                    <span className="lastfm-readiness-card__value">
+                      {lastfmReadiness.progress_percent}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
             
             {lastfmProgress && (
               <div className="lastfm-progress-card">

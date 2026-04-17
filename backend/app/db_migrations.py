@@ -135,3 +135,18 @@ def run_simple_migrations():
             connection.execute(
                 text("ALTER TABLE app_settings ADD COLUMN lastfm_api_key TEXT")
             )
+
+        if "lastfm_api_secret" not in app_settings_column_names:
+            connection.execute(
+                text("ALTER TABLE app_settings ADD COLUMN lastfm_api_secret TEXT")
+            )
+
+        if "lastfm_username" not in app_settings_column_names:
+            connection.execute(
+                text("ALTER TABLE app_settings ADD COLUMN lastfm_username TEXT")
+            )
+
+        if "lastfm_session_key" not in app_settings_column_names:
+            connection.execute(
+                text("ALTER TABLE app_settings ADD COLUMN lastfm_session_key TEXT")
+            )
