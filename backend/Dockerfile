@@ -8,6 +8,10 @@ ENV PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y \
     build-essential \
     sqlite3 \
+    ca-certificates \
+    openssl \
+    curl \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
