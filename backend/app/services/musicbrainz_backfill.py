@@ -7,7 +7,7 @@ from app.services.musicbrainz import find_recording_mbid
 
 
 DEFAULT_BATCH_SIZE = 50
-DEFAULT_REQUEST_DELAY_SECONDS = 1.1
+DEFAULT_REQUEST_DELAY_SECONDS = 1.25
 DEFAULT_BATCH_DELAY_SECONDS = 2.0
 
 
