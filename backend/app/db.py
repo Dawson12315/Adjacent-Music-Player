@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import settings
@@ -9,7 +9,7 @@ engine_kwargs = {}
 if settings.database_url.startswith("sqlite"):
     connect_args = {
         "check_same_thread": False,
-        "timeout": 3,
+        "timeout": 30,
     }
     engine_kwargs = {
         "pool_pre_ping": True,
@@ -20,6 +20,12 @@ engine = create_engine(
     connect_args=connect_args,
     **engine_kwargs,
 )
+
+if settings.database_url.startswith("sqlite"):
+    with engine.begin() as connection:
+        connection.execute(text("PRAGMA journal_mode=WAL;"))
+        connection.execute(text("PRAGMA synchronous=NORMAL;"))
+        connection.execute(text("PRAGMA foreign_keys=ON;"))
 
 SessionLocal = sessionmaker(
     autocommit=False,
