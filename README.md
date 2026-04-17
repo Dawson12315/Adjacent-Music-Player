@@ -33,10 +33,9 @@ services:
   backend:
     image: ghcr.io/dawson12315/adjacent-backend:latest
     container_name: adjacent-backend
-    ports:
-      - "8000:8000"
+    network_mode: "host"
     volumes:
-      - ./adjacent-data:/app/data
+      - /opt/apps/adjacent:/app/data
       - /mnt/media/music:/music:ro
     environment:
       - /mnt/media/music=/music
