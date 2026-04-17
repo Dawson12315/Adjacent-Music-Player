@@ -1,9 +1,11 @@
-import requests
-import time
 import os
-from typing import Optional
+import time
 from pathlib import Path
+from typing import Optional
+
+import requests
 from dotenv import load_dotenv
+
 
 ROOT_ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(ROOT_ENV_PATH)
@@ -13,7 +15,11 @@ EMAIL = os.getenv("MUSICBRAINZ_EMAIL", "unknown@example.com")
 MUSICBRAINZ_BASE_URL = "https://musicbrainz.org/ws/2"
 USER_AGENT = f"Adjacent/1.0 ({EMAIL})"
 
-print("MusicBrainz USER_AGENT:", USER_AGENT)
+session = requests.Session()
+session.headers.update({
+    "User-Agent": USER_AGENT,
+})
+
 
 def _normalize(value: Optional[str]) -> str:
     if not value:
@@ -70,19 +76,16 @@ def _score_recording(recording: dict, title: str, artist: str) -> int:
 
 
 def _search_recordings(query: str) -> list[dict]:
-    attempts = 3
+    attempts = 2
 
     for attempt in range(1, attempts + 1):
         try:
-            response = requests.get(
+            response = session.get(
                 f"{MUSICBRAINZ_BASE_URL}/recording",
                 params={
                     "query": query,
                     "fmt": "json",
                     "limit": 5,
-                },
-                headers={
-                    "User-Agent": USER_AGENT,
                 },
                 timeout=15,
             )
@@ -95,7 +98,7 @@ def _search_recordings(query: str) -> list[dict]:
             print(f"MusicBrainz lookup failed (attempt {attempt}/{attempts}): {error}")
 
             if attempt < attempts:
-                time.sleep(2)
+                time.sleep(1.5 * attempt)
 
     return []
 
@@ -114,23 +117,40 @@ def find_recording_mbid(
     if not normalized_title or not normalized_artist:
         return None
 
-    search_attempts = [
+    raw_query = f'recording:"{raw_title_value}" AND artist:"{raw_artist_value}"'
+    normalized_query = f'recording:"{normalized_title}" AND artist:"{normalized_artist}"'
+    loose_query = f"{normalized_title} {normalized_artist}"
+
+    search_attempts = []
+
+    search_attempts.append(
         {
-            "query": f'recording:"{raw_title_value}" AND artist:"{raw_artist_value}"',
+            "query": raw_query,
             "score_title": raw_title_value,
             "score_artist": raw_artist_value,
-        },
-        {
-            "query": f'recording:"{normalized_title}" AND artist:"{normalized_artist}"',
-            "score_title": normalized_title,
-            "score_artist": normalized_artist,
-        },
-        {
-            "query": f'{normalized_title} {normalized_artist}',
-            "score_title": normalized_title,
-            "score_artist": normalized_artist,
-        },
-    ]
+        }
+    )
+
+    if _normalize(raw_query) != _normalize(normalized_query):
+        search_attempts.append(
+            {
+                "query": normalized_query,
+                "score_title": normalized_title,
+                "score_artist": normalized_artist,
+            }
+        )
+
+    if _normalize(loose_query) not in {
+        _normalize(raw_query),
+        _normalize(normalized_query),
+    }:
+        search_attempts.append(
+            {
+                "query": loose_query,
+                "score_title": normalized_title,
+                "score_artist": normalized_artist,
+            }
+        )
 
     for attempt in search_attempts:
         recordings = _search_recordings(attempt["query"])
