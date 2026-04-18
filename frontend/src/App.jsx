@@ -48,6 +48,8 @@ function App() {
     tracks_missing_mbid: 0,
     progress_percent: 0,
     ready: false,
+    musicbrainz_backfill_running: false,
+    musicbrainz_resume_available: false,
   })
   const [tracksPage, setTracksPage] = useState(1);
   const [artistsPage, setArtistsPage] = useState(1);
@@ -87,6 +89,7 @@ function App() {
   const [isLastfmEnriching, setIsLastfmEnriching] = useState(false);
   const [lastfmEnrichmentSummary, setLastfmEnrichmentSummary] = useState(null);
   const [lastfmProgress, setLastfmProgress] = useState(null)
+  const [isResumingMusicbrainz, setIsResumingMusicbrainz] = useState(false)
 
   const TRACKS_PAGE_SIZE = 50;
   const ARTISTS_PAGE_SIZE = 50;
@@ -102,6 +105,8 @@ function App() {
   const lastScrobbledTrackIdRef = useRef(null)
   const listenedSecondsRef = useRef(0)
   const lastPlaybackTickRef = useRef(null)
+
+  const musicbrainzReadinessIntervalRef = useRef(null)
 
   useEffect(() =>{
     async function fetchLibraryData() {
@@ -1786,6 +1791,62 @@ function App() {
     }
   }
 
+  function startMusicbrainzReadinessPolling() {
+    if (musicbrainzReadinessIntervalRef.current) {
+      return
+    }
+  
+    fetchMusicbrainzReadiness()
+  
+    musicbrainzReadinessIntervalRef.current = window.setInterval(() => {
+      fetchMusicbrainzReadiness()
+    }, 2500)
+  }
+  
+  function stopMusicbrainzReadinessPolling() {
+    if (musicbrainzReadinessIntervalRef.current) {
+      clearInterval(musicbrainzReadinessIntervalRef.current)
+      musicbrainzReadinessIntervalRef.current = null
+    }
+  }
+
+  async function handleResumeMusicbrainzTagging() {
+    try {
+      setIsResumingMusicbrainz(true)
+
+      const response = await fetch(`${API_BASE_URL}/api/settings/musicbrainz/resume`, {
+        method: "POST",
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to resume MusicBrainz tagging")
+      }
+
+      const result = await response.json()
+
+      if (result.reason === "already_running") {
+        setSettingsNotice("MusicBrainz tagging is already running.")
+      } else if (result.reason === "nothing_to_resume") {
+        setSettingsNotice("No unfinished MusicBrainz tagging work was found.")
+      } else if (result.started) {
+        setSettingsNotice("MusicBrainz tagging resumed.")
+        startMusicbrainzReadinessPolling()
+      } else {
+        setSettingsNotice("MusicBrainz tagging could not be resumed.")
+      }
+
+      const readinessResponse = await fetch(`${API_BASE_URL}/api/settings/lastfm/ readiness`)
+      if (readinessResponse.ok) {
+        const readinessData = await readinessResponse.json()
+        setLastfmReadiness(readinessData)
+      }
+    } catch (error) {
+      console.error(error)
+      setSettingsNotice("Failed to resume MusicBrainz tagging.")
+      setIsResumingMusicbrainz(false)
+    }
+  }
+
   async function fetchLastfmProgress() {
     try {
       const response = await fetch(
@@ -1820,6 +1881,36 @@ function App() {
         clearInterval(lastfmProgressIntervalRef.current)
         lastfmProgressIntervalRef.current = null
       }
+    }
+  }
+
+  async function fetchMusicbrainzReadiness() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/settings/lastfm/readiness`, {
+        cache: "no-store",
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch MusicBrainz readiness")
+      }
+
+      const data = await response.json()
+      setLastfmReadiness(data)
+
+      if (!data.musicbrainz_backfill_running && musicbrainzReadinessIntervalRef.current)  {
+        clearInterval(musicbrainzReadinessIntervalRef.current)
+        musicbrainzReadinessIntervalRef.current = null
+        setIsResumingMusicbrainz(false)
+      }
+    } catch (error) {
+      console.error(error)
+
+      if (musicbrainzReadinessIntervalRef.current) {
+        clearInterval(musicbrainzReadinessIntervalRef.current)
+        musicbrainzReadinessIntervalRef.current = null
+      }
+
+      setIsResumingMusicbrainz(false)
     }
   }
 
@@ -2030,6 +2121,7 @@ function App() {
   useEffect(() => {
     return () => {
       stopLastfmProgressPolling()
+      stopMusicbrainzReadinessPolling()
     }
   }, [])
 
@@ -2061,6 +2153,16 @@ function App() {
     lastNowPlayingTrackIdRef.current = selectedTrack.id
     sendLastfmNowPlaying(selectedTrack.id)
   }, [selectedTrack, isPlaying])
+
+  useEffect(() => {
+    if (!lastfmReadiness) {
+      return
+    }
+
+    if (lastfmReadiness.musicbrainz_backfill_running && !musicbrainzReadinessIntervalRef.current) {
+      startMusicbrainzReadinessPolling()
+    }
+  }, [lastfmReadiness])
 
   const visibleArtists = useMemo(() => {
     return artists.filter((artist) =>
@@ -2481,7 +2583,7 @@ function App() {
           <div className="settings-card">
             <div className="settings-card__title">Last.fm Integration</div>
             <div className="settings-card__text">
-              Paste your Last.fm API key and shared secret, press "Save settings", then press "Connect Last.fm", to enable genre-tag enrichment from Last.fm and scrobbling. Only do this, once your library scan import is complete.
+              Paste your Last.fm API key and shared secret, press "Save settings", then press "Connect Last.fm", to enable genre-tag enrichment from Last.fm and scrobbling. Only do this, once your library scan import and Music Brainz tagging is complete.
             </div>
 
             <label className="settings-field">
@@ -2546,7 +2648,9 @@ function App() {
             {!lastfmReadiness.ready && (
               <div className="lastfm-readiness-card">
                 <div className="lastfm-readiness-card__title">
-                  Waiting for MusicBrainz tagging to finish
+                  {lastfmReadiness.musicbrainz_backfill_running
+                    ? "MusicBrainz tagging is running"
+                    : "Waiting for MusicBrainz tagging to finish"}
                 </div>
             
                 <div className="lastfm-readiness-card__text">
@@ -2590,6 +2694,19 @@ function App() {
                     </span>
                   </div>
                 </div>
+              {lastfmReadiness.musicbrainz_resume_available &&
+                !lastfmReadiness.musicbrainz_backfill_running &&
+                !isResumingMusicbrainz && (
+                  <div className="lastfm-readiness-card__actions">
+                    <button
+                      className="settings-button settings-button--secondary"
+                      type="button"
+                      onClick={handleResumeMusicbrainzTagging}
+                    >
+                      Resume MusicBrainz tagging
+                    </button>
+                  </div>
+              )}
               </div>
             )}
             
