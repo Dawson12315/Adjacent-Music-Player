@@ -1062,6 +1062,12 @@ button {
   color: #ffffff;
 }
 
+.lastfm-readiness-card__actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-start;
+}
+
 .settings-text-input:focus {
   border-color: rgba(29, 185, 84, 0.8);
   background: rgba(255, 255, 255, 0.06);

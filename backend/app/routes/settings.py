@@ -16,6 +16,10 @@ from app.services.lastfm_enrichment_runner import (
     is_lastfm_enrichment_running,
     start_lastfm_enrichment_background,
 )
+from app.services.musicbrainz_backfill_runner import (
+    is_musicbrainz_backfill_running,
+    start_musicbrainz_backfill_background,
+)
 
 router = APIRouter()
 
@@ -217,4 +221,34 @@ def get_lastfm_readiness(db: Session = Depends(get_db)):
         "tracks_missing_mbid": tracks_missing_mbid,
         "progress_percent": progress_percent,
         "ready": ready,
+        "musicbrainz_backfill_running": is_musicbrainz_backfill_running(),
+        "musicbrainz_resume_available": tracks_missing_mbid > 0,
+    }
+
+@router.post("/settings/musicbrainz/resume", tags=["settings"])
+def resume_musicbrainz_backfill(db: Session = Depends(get_db)):
+    tracks_missing_mbid = (
+        db.query(func.count(Track.id))
+        .filter(Track.musicbrainz_recording_id.is_(None))
+        .scalar()
+        or 0
+    )
+
+    if tracks_missing_mbid == 0:
+        return {
+            "started": False,
+            "reason": "nothing_to_resume",
+        }
+
+    if is_musicbrainz_backfill_running():
+        return {
+            "started": False,
+            "reason": "already_running",
+        }
+
+    started = start_musicbrainz_backfill_background()
+
+    return {
+        "started": started,
+        "reason": "started" if started else "already_running",
     }
