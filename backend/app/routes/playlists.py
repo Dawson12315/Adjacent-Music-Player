@@ -9,13 +9,18 @@ from app.db import get_db
 from app.models.playlist import Playlist
 from app.models.playlist_track import PlaylistTrack
 from app.models.track import Track
+from app.schemas.track import TrackResponse
 from app.schemas.playlist import (
     PlaylistCreate,
     PlaylistResponse,
     PlaylistRename,
-    PlaylistTrackCreate
+    PlaylistTrackCreate,
 )
-from app.schemas.track import TrackResponse
+
+from app.services.recommendations.playlist_recommender import (
+    get_playlist_recommendations_for_playlist
+)
+
 
 router = APIRouter()
 
@@ -24,6 +29,7 @@ router = APIRouter()
 def list_playlists(db: Session = Depends(get_db)):
     playlists = db.query(Playlist).order_by(Playlist.name.asc()).all()
     return playlists
+
 
 @router.post("/playlists", response_model=PlaylistResponse, tags=["playlists"])
 def create_playlist(payload: PlaylistCreate, db: Session = Depends(get_db)):
@@ -53,6 +59,7 @@ def _get_liked_songs_playlist(db: Session) -> Playlist:
 
     return playlist
 
+
 @router.get("/playlists/liked-songs", response_model=PlaylistResponse, tags=["playlists"])
 def get_liked_songs_playlist(db: Session = Depends(get_db)):
     playlist = (
@@ -65,6 +72,7 @@ def get_liked_songs_playlist(db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Liked Songs playlist not found")
 
     return playlist
+
 
 @router.get("/playlists/liked-songs/tracks/{track_id}", tags=["playlists"])
 def is_track_in_liked_songs(track_id: int, db: Session = Depends(get_db)):
@@ -162,6 +170,7 @@ def remove_track_from_liked_songs(track_id: int, db: Session = Depends(get_db)):
 
     return {"liked": False}
 
+
 @router.post("/playlists/{playlist_id}/artwork", response_model=PlaylistResponse, tags=["playlists"])
 def upload_playlist_artwork(
     playlist_id: int,
@@ -203,6 +212,7 @@ def upload_playlist_artwork(
 
     return playlist
 
+
 @router.post("/playlists/{playlist_id}/tracks", tags=["playlists"])
 def add_track_to_playlist(
     playlist_id: int,
@@ -221,7 +231,7 @@ def add_track_to_playlist(
         db.query(PlaylistTrack)
         .filter(
             PlaylistTrack.playlist_id == playlist_id,
-            PlaylistTrack.track_id == payload.track_id
+            PlaylistTrack.track_id == payload.track_id,
         )
         .first()
     )
@@ -255,6 +265,7 @@ def add_track_to_playlist(
         "position": next_position,
     }
 
+
 @router.get(
     "/playlists/{playlist_id}/tracks",
     response_model=list[TrackResponse],
@@ -273,6 +284,25 @@ def get_playlist_tracks(playlist_id: int, db: Session = Depends(get_db)):
     )
 
     return [playlist_track.track for playlist_track in playlist_tracks]
+
+
+@router.get(
+    "/playlists/{playlist_id}/recommendations",
+    tags=["playlists"],
+)
+def get_playlist_recommendations(
+    playlist_id: int,
+    debug: bool = False,
+    refresh: int = 0,
+    db: Session = Depends(get_db),
+):
+    return get_playlist_recommendations_for_playlist(
+        db=db,
+        playlist_id=playlist_id,
+        debug=debug,
+        refresh=refresh,
+    )
+
 
 @router.delete("/playlists/{playlist_id}/tracks/{track_id}", tags=["playlists"])
 def remove_track_from_playlist(
@@ -323,13 +353,14 @@ def remove_track_from_playlist(
         "track_id": track_id,
     }
 
+
 @router.delete("/playlists/{playlist_id}", tags=["playlists"])
 def delete_playlist(playlist_id: int, db: Session = Depends(get_db)):
     playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
 
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
-    
+
     if playlist.is_system:
         raise HTTPException(status_code=400, detail="System playlists cannot be deleted")
 

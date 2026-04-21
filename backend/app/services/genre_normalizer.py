@@ -21,6 +21,7 @@ def normalize_genre(value):
         "dance": "Dance",
         "house": "House",
         "trap": "Trap",
+        "alternetive": "Alternative",
         "ambient": "Ambient",
         "synthpop": "Synthpop",
         "synthwave": "Synthwave",

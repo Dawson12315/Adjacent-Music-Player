@@ -12,11 +12,13 @@ from app.routes.artists import router as artists_router
 from app.routes.artist_genres import router as artist_genres_router
 from app.routes.genres import router as genres_router
 from app.routes.health import router as health_router
+from app.routes.listening import router as listening_router
 from app.routes.maintenance import router as maintenance_router
 from app.routes.playback import router as playback_router
 from app.routes.playlists import router as playlists_router
 from app.routes.scan import router as scan_router
 from app.routes.settings import router as settings_router
+from app.routes.stats import router as stats_router
 from app.routes.tracks import router as tracks_router
 from app.routes.similar_tracks import router as similar_tracks_router
 from app.services.playback import get_or_create_playback_session
@@ -70,3 +72,5 @@ app.include_router(maintenance_router, prefix="/api")
 app.include_router(artist_edit_router, prefix="/api")
 app.include_router(genres_router, prefix="/api")
 app.include_router(similar_tracks_router, prefix="/api")
+app.include_router(listening_router, prefix="/api")
+app.include_router(stats_router, prefix="/api")

@@ -90,6 +90,13 @@ function App() {
   const [lastfmEnrichmentSummary, setLastfmEnrichmentSummary] = useState(null);
   const [lastfmProgress, setLastfmProgress] = useState(null)
   const [isResumingMusicbrainz, setIsResumingMusicbrainz] = useState(false)
+  const [statsOverview, setStatsOverview] = useState({
+    top_played: [],
+    most_liked: [],
+    most_skipped: [],
+    recently_played: [],
+  });
+  const [isLoadingStatsOverview, setIsLoadingStatsOverview] = useState(false);
 
   const TRACKS_PAGE_SIZE = 50;
   const ARTISTS_PAGE_SIZE = 50;
@@ -98,6 +105,12 @@ function App() {
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
   const pendingSeekRef = useRef(null)
+
+  const playbackSessionIdRef = useRef(null);
+  const playbackEventTrackIdRef = useRef(null);
+  const hasSentPlayStartRef = useRef(false);
+  const hasSentSkipRef = useRef(false);
+  const hasSentCompleteRef = useRef(false);
   
   const lastfmProgressIntervalRef = useRef(null)
 
@@ -107,6 +120,129 @@ function App() {
   const lastPlaybackTickRef = useRef(null)
 
   const musicbrainzReadinessIntervalRef = useRef(null)
+
+  function createPlaybackSessionId() {
+    return `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  function getListeningSource() {
+    if (activeView === "playlist" && selectedPlaylist) {
+      return {
+        source_type: "playlist",
+        source_id: selectedPlaylist.id,
+      };
+    }
+
+    if (selectedAlbum) {
+      return {
+        source_type: "album",
+        source_id: null,
+      };
+    }
+
+    if (selectedArtist) {
+      return {
+        source_type: "artist",
+        source_id: null,
+      };
+    }
+
+    return {
+      source_type: "library",
+      source_id: null,
+    };
+  }
+
+  async function postListeningEvent(trackId, eventPath, overrides = {}) {
+    try {
+      const source = getListeningSource();
+
+      const response = await fetch(`${API_BASE_URL}/api/tracks/${trackId}/${eventPath}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          source_type: source.source_type,
+          source_id: source.source_id,
+          position_seconds: audioRef.current?.currentTime ?? 0,
+          duration_seconds: audioRef.current?.duration || duration || null,
+          session_id: playbackSessionIdRef.current,
+          ...overrides,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed listening event: ${eventPath}`);
+      }
+
+      const data = await response.json();
+      fetchStatsOverview();
+      return data;
+    } catch (error) {
+      console.error(error);
+      return null;
+    }
+  }
+
+  async function sendPlayStartEvent(track) {
+    if (!track) return;
+    if (hasSentPlayStartRef.current && playbackEventTrackIdRef.current === track.id) {
+      return;
+    }
+
+    if (!playbackSessionIdRef.current || playbackEventTrackIdRef.current !== track.id) {
+      playbackSessionIdRef.current = createPlaybackSessionId();
+    }
+
+    playbackEventTrackIdRef.current = track.id;
+    hasSentPlayStartRef.current = true;
+    hasSentSkipRef.current = false;
+    hasSentCompleteRef.current = false;
+
+    await postListeningEvent(track.id, "play-start", {
+      position_seconds: audioRef.current?.currentTime ?? 0,
+      duration_seconds: audioRef.current?.duration || duration || null,
+    });
+  }
+
+  async function sendSkipEvent(track) {
+    if (!track) return;
+    if (hasSentSkipRef.current) {
+      return;
+    }
+
+    hasSentSkipRef.current = true;
+
+    await postListeningEvent(track.id, "skip", {
+      position_seconds: audioRef.current?.currentTime ?? currentTime ?? 0,
+      duration_seconds: audioRef.current?.duration || duration || null,
+    });
+  }
+
+  async function sendPlayCompleteEvent(track) {
+    if (!track) return;
+    if (hasSentCompleteRef.current) {
+      return;
+    }
+
+    hasSentCompleteRef.current = true;
+
+    const finalDuration = audioRef.current?.duration || duration || null;
+
+    await postListeningEvent(track.id, "play-complete", {
+      position_seconds: finalDuration,
+      duration_seconds: finalDuration,
+    });
+  }
+
+  function resetPlaybackEventFlagsForTrack(track) {
+    playbackEventTrackIdRef.current = track?.id ?? null;
+    playbackSessionIdRef.current = track ? createPlaybackSessionId() : null;
+    hasSentPlayStartRef.current = false;
+    hasSentSkipRef.current = false;
+    hasSentCompleteRef.current = false;
+  }
 
   useEffect(() =>{
     async function fetchLibraryData() {
@@ -223,6 +359,7 @@ function App() {
           }
           setIsPlaying(is_playing);
         }
+        await fetchStatsOverview();
       } catch (err) {
         setError("Could not load tracks.");
       } finally {
@@ -278,6 +415,7 @@ function App() {
       lastScrobbledTrackIdRef.current = null
       listenedSecondsRef.current = 0
       lastPlaybackTickRef.current = null
+      resetPlaybackEventFlagsForTrack(null);
       return
     }
 
@@ -285,6 +423,7 @@ function App() {
     lastScrobbledTrackIdRef.current = null
     listenedSecondsRef.current = 0
     lastPlaybackTickRef.current = null
+    resetPlaybackEventFlagsForTrack(selectedTrack);
   }, [selectedTrack?.id])
 
   useEffect(() => {
@@ -582,6 +721,14 @@ function App() {
   }, [selectedArtist]);
 
   function handleTrackClick(track){
+    if (
+      selectedTrack &&
+      selectedTrack.id !== track.id &&
+      audioRef.current &&
+      !audioRef.current.ended
+    ) {
+      sendSkipEvent(selectedTrack);
+    }
     setOpenMenuTrackId(null)
     setSelectedTrack(track);
 
@@ -672,6 +819,10 @@ function App() {
       return;
     }
 
+    if (selectedTrack && audioRef.current && audioRef.current.currentTime > 0 && !audioRef.current.ended) {
+      sendSkipEvent(selectedTrack);
+    }
+
     if (audioRef.current.currentTime > 5) {
       audioRef.current.currentTime = 0
       setCurrentTime(0)
@@ -701,6 +852,11 @@ function App() {
     if (!queue.length || queueIndex === -1) {
       return;
     }
+
+    if (selectedTrack && audioRef.current && !audioRef.current.ended) {
+      sendSkipEvent(selectedTrack);
+    }
+
     if (queueIndex >= queue.length -1) {
       return
     }
@@ -1283,13 +1439,16 @@ function App() {
     if (!selectedTrack) {
       return;
     }
-
+  
+    const track = selectedTrack;
+    const wasLiked = isCurrentTrackLiked;
+  
     try {
       const response = await fetch(
-        isCurrentTrackLiked
-          ? `${API_BASE_URL}/api/playlists/liked-songs/tracks/${selectedTrack.id}`
+        wasLiked
+          ? `${API_BASE_URL}/api/playlists/liked-songs/tracks/${track.id}`
           : `${API_BASE_URL}/api/playlists/liked-songs/tracks`,
-        isCurrentTrackLiked
+        wasLiked
           ? {
               method: "DELETE",
             }
@@ -1298,22 +1457,31 @@ function App() {
               headers: {
                 "Content-Type": "application/json",
               },
-              body: JSON.stringify({ track_id: selectedTrack.id }),
+              body: JSON.stringify({ track_id: track.id }),
             }
       );
-
+    
       if (!response.ok) {
         throw new Error("Failed to toggle liked track");
       }
-
+    
       const data = await response.json();
       setIsCurrentTrackLiked(data.liked);
-
+    
+      await postListeningEvent(
+        track.id,
+        wasLiked ? "unlike" : "like",
+        {
+          position_seconds: audioRef.current?.currentTime ?? currentTime ?? 0,
+          duration_seconds: audioRef.current?.duration || duration || null,
+        }
+      );
+    
       if (selectedPlaylist?.system_key === "liked_songs") {
         const likedSongsResponse = await fetch(
           `${API_BASE_URL}/api/playlists/${selectedPlaylist.id}/tracks`
         );
-
+      
         if (likedSongsResponse.ok) {
           const likedSongsTracks = await likedSongsResponse.json();
           setPlaylistTracks(likedSongsTracks);
@@ -1954,6 +2122,25 @@ function App() {
     }
   }
 
+  async function fetchStatsOverview() {
+    try {
+      setIsLoadingStatsOverview(true);
+
+      const response = await fetch(`${API_BASE_URL}/api/stats/overview`);
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch stats overview");
+      }
+
+      const data = await response.json();
+      setStatsOverview(data);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsLoadingStatsOverview(false);
+    }
+  }
+
   useEffect(() => {
     if (!selectedTrack || !isPlaying) {
       return
@@ -2079,12 +2266,37 @@ function App() {
 
   useEffect(() => {
     async function fetchSimilar() {
-      if (!similarSourceTrack || !shouldShowSimilarSection) {
+      if (!shouldShowSimilarSection) {
         setSimilarTracks([]);
         return;
       }
 
       try {
+        if (activeView === "playlist" && selectedPlaylist) {
+          const res = await fetch(
+            `${API_BASE_URL}/api/playlists/${selectedPlaylist.id}/recommendations?debug=true&refresh=${similarRefreshKey}&_=${Date.now()}`
+          );
+        
+          if (!res.ok) {
+            throw new Error("Failed to fetch playlist recommendations");
+          }
+        
+          const data = await res.json();
+        
+          const recommendations = (data.recommendations || []).map((item) => ({
+            ...item.track,
+            debug: item.debug || {},
+          }));
+        
+          setSimilarTracks(recommendations.slice(0, SIMILAR_TRACK_LIMIT));
+          return;
+        }
+
+        if (!similarSourceTrack) {
+          setSimilarTracks([]);
+          return;
+        }
+
         const res = await fetch(
           `${API_BASE_URL}/api/tracks/${similarSourceTrack.id}/similar`
         );
@@ -2094,15 +2306,7 @@ function App() {
         }
 
         const data = await res.json();
-
-        if (activeView === "playlist") {
-          const playlistTrackIds = new Set(playlistTracks.map((track) => track.id));
-
-          const filtered = data.filter((track) => !playlistTrackIds.has(track.id));
-          setSimilarTracks(filtered.slice(0, SIMILAR_TRACK_LIMIT));
-        } else {
-          setSimilarTracks(data.slice(0, SIMILAR_TRACK_LIMIT));
-        }
+        setSimilarTracks(data.slice(0, SIMILAR_TRACK_LIMIT));
       } catch (error) {
         console.error(error);
         setSimilarTracks([]);
@@ -2114,9 +2318,12 @@ function App() {
     similarSourceTrack,
     shouldShowSimilarSection,
     activeView,
+    selectedPlaylist,
     playlistTracks,
     similarRefreshKey,
   ]);
+
+
 
   useEffect(() => {
     return () => {
@@ -2405,6 +2612,12 @@ function App() {
                         <div className="track-row__meta">
                           {track.artist || "Unknown Artist"} • {track.album || "Unknown Album"}
                         </div>
+                
+                        {track.debug?.reason_summary && (
+                          <div className="track-row__reason">
+                            {track.debug.reason_summary}
+                          </div>
+                        )}
                       </div>
                     </button>
 
@@ -2424,6 +2637,170 @@ function App() {
         </>
       );
     }
+
+    if (activeView === "insights") {
+      const topPlayedCount = statsOverview.top_played.length;
+      const mostLikedCount = statsOverview.most_liked.length;
+      const mostSkippedCount = statsOverview.most_skipped.length;
+      const recentlyPlayedCount = statsOverview.recently_played.length;
+    
+      return (
+        <div className="behavior-insights-page">
+          <div className="behavior-insights-hero">
+            <h2>Behavior Insights</h2>
+            <p>
+              See what you play most, skip most, like most, and listened to recently.
+            </p>
+      
+            <button
+              className="settings-button settings-button--secondary"
+              type="button"
+              onClick={fetchStatsOverview}
+              disabled={isLoadingStatsOverview}
+            >
+              {isLoadingStatsOverview ? "Refreshing..." : "Refresh insights"}
+            </button>
+          </div>
+      
+          <div className="behavior-insights-summary">
+            <div className="behavior-insights-stat">
+              <div className="behavior-insights-stat__label">Top Played</div>
+              <div className="behavior-insights-stat__value">{topPlayedCount}</div>
+            </div>
+      
+            <div className="behavior-insights-stat">
+              <div className="behavior-insights-stat__label">Most Liked</div>
+              <div className="behavior-insights-stat__value">{mostLikedCount}</div>
+            </div>
+      
+            <div className="behavior-insights-stat">
+              <div className="behavior-insights-stat__label">Most Skipped</div>
+              <div className="behavior-insights-stat__value">{mostSkippedCount}</div>
+            </div>
+      
+            <div className="behavior-insights-stat">
+              <div className="behavior-insights-stat__label">Recently Played</div>
+              <div className="behavior-insights-stat__value">{recentlyPlayedCount}</    div>
+            </div>
+          </div>
+      
+          <div className="behavior-insights-grid">
+            <div className="insights-card">
+              <div className="insights-card__header">
+                <h3>Top Played</h3>
+              </div>
+      
+              <div className="insights-card__list">
+                {statsOverview.top_played.length === 0 ? (
+                  <div className="insights-empty">No listening data yet.</div>
+                ) : (
+                  statsOverview.top_played.slice(0, 5).map((track) => (
+                    <button
+                      key={`top-played-${track.id}`}
+                      className="track-row"
+                      type="button"
+                      onClick={() => handleTrackClick(track)}
+                    >
+                      <div className="track-row__content">
+                        <div className="track-row__title">{track.title}</div>
+                        <div className="track-row__meta">
+                          {track.artist || "Unknown Artist"}
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+              
+            <div className="insights-card">
+              <div className="insights-card__header">
+                <h3>Most Liked</h3>
+              </div>
+              
+              <div className="insights-card__list">
+                {statsOverview.most_liked.length === 0 ? (
+                  <div className="insights-empty">No listening data yet.</div>
+                ) : (
+                  statsOverview.most_liked.slice(0, 5).map((track) => (
+                    <button
+                      key={`most-liked-${track.id}`}
+                      className="track-row"
+                      type="button"
+                      onClick={() => handleTrackClick(track)}
+                    >
+                      <div className="track-row__content">
+                        <div className="track-row__title">{track.title}</div>
+                        <div className="track-row__meta">
+                          {track.artist || "Unknown Artist"}
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+              
+            <div className="insights-card">
+              <div className="insights-card__header">
+                <h3>Most Skipped</h3>
+              </div>
+              
+              <div className="insights-card__list">
+                {statsOverview.most_skipped.length === 0 ? (
+                  <div className="insights-empty">No listening data yet.</div>
+                ) : (
+                  statsOverview.most_skipped.slice(0, 5).map((track) => (
+                    <button
+                      key={`most-skipped-${track.id}`}
+                      className="track-row"
+                      type="button"
+                      onClick={() => handleTrackClick(track)}
+                    >
+                      <div className="track-row__content">
+                        <div className="track-row__title">{track.title}</div>
+                        <div className="track-row__meta">
+                          {track.artist || "Unknown Artist"}
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+              
+            <div className="insights-card">
+              <div className="insights-card__header">
+                <h3>Recently Played</h3>
+              </div>
+              
+              <div className="insights-card__list">
+                {statsOverview.recently_played.length === 0 ? (
+                  <div className="insights-empty">No listening data yet.</div>
+                ) : (
+                  statsOverview.recently_played.slice(0, 5).map((track) => (
+                    <button
+                      key={`recently-played-${track.id}`}
+                      className="track-row"
+                      type="button"
+                      onClick={() => handleTrackClick(track)}
+                    >
+                      <div className="track-row__content">
+                        <div className="track-row__title">{track.title}</div>
+                        <div className="track-row__meta">
+                          {track.artist || "Unknown Artist"}
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     if (activeView === "settings") {
       return (
         <div className="settings-page">
@@ -3030,6 +3407,12 @@ function App() {
                     <div className="track-row__meta">
                       {track.artist || "Unknown Artist"} • {track.album || "Unknown Album"}
                     </div>
+
+                    {track.debug?.reason_summary && (
+                      <div className="track-row__reason">
+                        {track.debug.reason_summary}
+                      </div>
+                    )}
                   </div>
                 </button>
               ))}
@@ -3053,6 +3436,9 @@ function App() {
     }
     if (activeView === "playlist" && selectedPlaylist) {
       return selectedPlaylist.name
+    }
+    if (activeView === "insights") {
+      return "Insights";
     }
     if (activeView === "settings") {
       return "Settings";
@@ -3087,6 +3473,9 @@ function App() {
     }
     if (activeView === "playlist" && selectedPlaylist) {
       return `${playlistTracks.length} tracks`;
+    }
+    if (activeView === "insights") {
+      return "Your listening behavior and trends";
     }
     if (activeView === "settings") {
       return "App preferences and playback options";
@@ -3491,6 +3880,48 @@ function App() {
               ))
             )}
           </div>
+
+        <div className="sidebar__section">
+          <div
+            className={`playlist-sidebar-item__main ${
+              activeView === "insights" ? "sidebar__link--active" : ""
+            }`}
+          >
+            <div
+              className="playlist-art-wrapper"
+              onClick={() => {
+                setActiveView("insights");
+                setSearchQuery("");
+                setSelectedArtist(null);
+                setSelectedAlbum(null);
+                setSelectedGenre(null);
+                setSelectedPlaylist(null);
+              }}
+            >
+              <img
+                className="playlist-art"
+                src="/insights.png"
+                alt="Insights"
+              />
+            </div>
+            
+            <button
+              className="playlist-sidebar-item__name-button"
+              onClick={() => {
+                setActiveView("insights");
+                setSearchQuery("");
+                setSelectedArtist(null);
+                setSelectedAlbum(null);
+                setSelectedGenre(null);
+                setSelectedPlaylist(null);
+              }}
+              type="button"
+            >
+              Insights
+            </button>
+          </div>
+        </div>
+
         <div className="sidebar__section">
           <div
             className={`playlist-sidebar-item__main ${
@@ -3607,7 +4038,7 @@ function App() {
                 )}
               </div>
             </header>
-            {activeView !== "settings" && (
+            {activeView !== "settings" && activeView !== "insights" && (
               <div className="search-bar">
                 <input
                   className="search-input"
@@ -3792,18 +4223,29 @@ function App() {
 
         <audio
           ref={audioRef}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          onEnded={() => {
-            setCurrentTime(0);
-            if (isLoop && audioRef.current) {
-              audioRef.current.currentTime = 0
-              audioRef.current.play()
-              setIsPlaying(true)
-              return
+          onPlay={() => {
+            setIsPlaying(true);
+            if (selectedTrack) {
+              sendPlayStartEvent(selectedTrack);
             }
+          }}
+          onPause={() => setIsPlaying(false)}
+          onEnded={async () => {
+            if (selectedTrack) {
+              await sendPlayCompleteEvent(selectedTrack);
+            }
+          
+            setCurrentTime(0);
+          
+            if (isLoop && audioRef.current) {
+              resetPlaybackEventFlagsForTrack(selectedTrack);
+              audioRef.current.currentTime = 0;
+              audioRef.current.play();
+              setIsPlaying(true);
+              return;
+            }
+          
             playNextAvailableTrack();
-
           }}
           onTimeUpdate={() =>{
             if (audioRef.current) {
