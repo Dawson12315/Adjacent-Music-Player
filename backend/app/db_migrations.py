@@ -34,7 +34,7 @@ def run_simple_migrations():
             connection.execute(
                 text("ALTER TABLE tracks ADD COLUMN raw_album TEXT")
             )
-            
+
         if "genre" not in track_column_names:
             connection.execute(
                 text("ALTER TABLE tracks ADD COLUMN genre TEXT")
@@ -106,6 +106,42 @@ def run_simple_migrations():
                 )
             )
 
+        if "track_cooccurrence" not in existing_table_names:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE track_cooccurrence (
+                        id INTEGER PRIMARY KEY,
+                        track_a_id INTEGER NOT NULL,
+                        track_b_id INTEGER NOT NULL,
+                        cooccurrence_count INTEGER NOT NULL DEFAULT 0,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY(track_a_id) REFERENCES tracks(id) ON DELETE CASCADE,
+                        FOREIGN KEY(track_b_id) REFERENCES tracks(id) ON DELETE CASCADE,
+                        CONSTRAINT uq_track_cooccurrence_pair UNIQUE (track_a_id, track_b_id)
+                    )
+                    """
+                )
+            )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_track_cooccurrence_track_a_id
+                ON track_cooccurrence(track_a_id)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_track_cooccurrence_track_b_id
+                ON track_cooccurrence(track_b_id)
+                """
+            )
+        )
+
         if "musicbrainz_recording_id" not in track_column_names:
             connection.execute(
                 text("ALTER TABLE tracks ADD COLUMN musicbrainz_recording_id TEXT")
@@ -120,7 +156,7 @@ def run_simple_migrations():
             text("PRAGMA table_info(job_locks)")
         ).fetchall()
         job_lock_column_names = {column[1] for column in job_lock_columns}
-        
+
         if "started_at" not in job_lock_column_names:
             connection.execute(
                 text("ALTER TABLE job_locks ADD COLUMN started_at DATETIME")
@@ -130,7 +166,7 @@ def run_simple_migrations():
             text("PRAGMA table_info(app_settings)")
         ).fetchall()
         app_settings_column_names = {column[1] for column in app_settings_columns}
-        
+
         if "lastfm_api_key" not in app_settings_column_names:
             connection.execute(
                 text("ALTER TABLE app_settings ADD COLUMN lastfm_api_key TEXT")
@@ -150,3 +186,79 @@ def run_simple_migrations():
             connection.execute(
                 text("ALTER TABLE app_settings ADD COLUMN lastfm_session_key TEXT")
             )
+
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS listening_events (
+                    id INTEGER PRIMARY KEY,
+                    track_id INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    source_type TEXT,
+                    source_id INTEGER,
+                    position_seconds REAL,
+                    duration_seconds REAL,
+                    session_id TEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_listening_events_track_id
+                ON listening_events(track_id)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_listening_events_event_type
+                ON listening_events(event_type)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_listening_events_session_id
+                ON listening_events(session_id)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS track_user_stats (
+                    id INTEGER PRIMARY KEY,
+                    track_id INTEGER NOT NULL UNIQUE,
+                    play_count INTEGER NOT NULL DEFAULT 0,
+                    skip_count INTEGER NOT NULL DEFAULT 0,
+                    completion_count INTEGER NOT NULL DEFAULT 0,
+                    like_count INTEGER NOT NULL DEFAULT 0,
+                    avg_completion_ratio REAL NOT NULL DEFAULT 0,
+                    replay_score REAL NOT NULL DEFAULT 0,
+                    playlist_add_count INTEGER NOT NULL DEFAULT 0,
+                    last_played_at DATETIME,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_track_user_stats_track_id
+                ON track_user_stats(track_id)
+                """
+            )
+        )

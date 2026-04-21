@@ -9,6 +9,7 @@ from app.schemas.playlist import (
 from app.schemas.playback import PlaybackStateResponse, PlaybackStateUpdate
 from app.schemas.track_edit import TrackUpdate
 from app.schemas.artist_edit import ArtistRenameRequest, ArtistTransferRequest
+from app.schemas.listening import ListeningEventCreate, ListeningEventResponse, TrackPlaybackEventBase, TrackListeningEventRequest
 
 __all__ = [
     "TrackResponse",
@@ -21,5 +22,9 @@ __all__ = [
     "PlaybackStateUpdate",
     "TrackUpdate",
     "ArtistRenameRequest",
-    "ArtistTransferRequest"
+    "ArtistTransferRequest",
+    "TrackListeningEventRequest",
+    "TrackPlaybackEventBase",
+    "ListeningEventResponse",
+    "ListeningEventCreate"
 ]
