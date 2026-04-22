@@ -9,16 +9,15 @@ from app.db import get_db
 from app.models.playlist import Playlist
 from app.models.playlist_track import PlaylistTrack
 from app.models.track import Track
-from app.schemas.track import TrackResponse
 from app.schemas.playlist import (
     PlaylistCreate,
-    PlaylistResponse,
     PlaylistRename,
+    PlaylistResponse,
     PlaylistTrackCreate,
 )
-
+from app.schemas.track import TrackResponse
 from app.services.recommendations.playlist_recommender import (
-    get_playlist_recommendations_for_playlist
+    get_playlist_recommendations_for_playlist,
 )
 
 
@@ -58,6 +57,28 @@ def _get_liked_songs_playlist(db: Session) -> Playlist:
         raise HTTPException(status_code=404, detail="Liked Songs playlist not found")
 
     return playlist
+
+
+def _parse_exclude_track_ids(exclude_track_ids: str | None) -> list[int]:
+    if not exclude_track_ids:
+        return []
+
+    parsed_ids: list[int] = []
+
+    for raw_value in exclude_track_ids.split(","):
+        value = raw_value.strip()
+        if not value:
+            continue
+
+        try:
+            parsed_ids.append(int(value))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid exclude_track_ids value: {value}",
+            ) from exc
+
+    return list(dict.fromkeys(parsed_ids))
 
 
 @router.get("/playlists/liked-songs", response_model=PlaylistResponse, tags=["playlists"])
@@ -294,13 +315,19 @@ def get_playlist_recommendations(
     playlist_id: int,
     debug: bool = False,
     refresh: int = 0,
+    limit: int = 20,
+    exclude_track_ids: str | None = None,
     db: Session = Depends(get_db),
 ):
+    parsed_exclude_track_ids = _parse_exclude_track_ids(exclude_track_ids)
+
     return get_playlist_recommendations_for_playlist(
         db=db,
         playlist_id=playlist_id,
         debug=debug,
         refresh=refresh,
+        limit=limit,
+        exclude_track_ids=parsed_exclude_track_ids,
     )
 
 
