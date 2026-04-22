@@ -25,6 +25,8 @@ from app.services.playback import get_or_create_playback_session
 from app.services.playlists import ensure_liked_songs_playlist
 from app.services.scheduler import start_scheduler
 
+from app.routes import recommendation_evaluation
+
 app = FastAPI(
     title=settings.app_name,
     debug=settings.debug,
@@ -74,3 +76,5 @@ app.include_router(genres_router, prefix="/api")
 app.include_router(similar_tracks_router, prefix="/api")
 app.include_router(listening_router, prefix="/api")
 app.include_router(stats_router, prefix="/api")
+
+app.include_router(recommendation_evaluation.router, prefix="/api")

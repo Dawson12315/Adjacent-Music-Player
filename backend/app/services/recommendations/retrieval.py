@@ -1,13 +1,13 @@
-from app.services.recommendations.types import RetrievedCandidate
-from app.services.recommendations.retrievers.genre_retriever import (
-    retrieve_genre_candidates,
+from app.services.recommendations.retrievers.behavior_retriever import (
+    retrieve_behavior_candidates,
 )
 from app.services.recommendations.retrievers.cooccurrence_retriever import (
     retrieve_cooccurrence_candidates,
 )
-from app.services.recommendations.retrievers.behavior_retriever import (
-    retrieve_behavior_candidates,
+from app.services.recommendations.retrievers.genre_retriever import (
+    retrieve_genre_candidates,
 )
+from app.services.recommendations.types import RetrievedCandidate
 
 
 def merge_retrieved_candidates(*candidate_maps):
@@ -27,7 +27,7 @@ def merge_retrieved_candidates(*candidate_maps):
 def retrieve_candidates(
     db,
     playlist_track_ids,
-    family_counts,
+    playlist_profile,
     limit: int = 400,
     refresh: int = 0,
     playlist_id: int | None = None,
@@ -35,7 +35,7 @@ def retrieve_candidates(
     genre_candidates = retrieve_genre_candidates(
         db=db,
         playlist_track_ids=playlist_track_ids,
-        family_counts=family_counts,
+        playlist_profile=playlist_profile,
         limit=limit,
         refresh=refresh,
         playlist_id=playlist_id,
@@ -50,7 +50,8 @@ def retrieve_candidates(
     behavior_candidates = retrieve_behavior_candidates(
         db=db,
         playlist_track_ids=playlist_track_ids,
-        limit=limit,
+        playlist_profile=playlist_profile,
+        limit=max(limit, 150),
     )
 
     merged = merge_retrieved_candidates(

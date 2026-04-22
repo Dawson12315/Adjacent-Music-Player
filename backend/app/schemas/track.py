@@ -1,5 +1,6 @@
-from pydantic import BaseModel
 from typing import List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class TrackResponse(BaseModel):
@@ -8,7 +9,8 @@ class TrackResponse(BaseModel):
     artist: Optional[str] = None
     album: Optional[str] = None
     genre: Optional[str] = None
-    genres: List[str] = []
+    genres: List[str] = Field(default_factory=list)
+    artists: List[str] = Field(default_factory=list)
     file_path: str
     raw_title: Optional[str] = None
     raw_artist: Optional[str] = None
