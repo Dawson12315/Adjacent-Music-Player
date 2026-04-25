@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from urllib.parse import urlencode
 
 from app.db import get_db
 from app.models.app_setting import AppSetting
@@ -132,13 +133,16 @@ def get_lastfm_auth_url(
     settings = get_or_create_settings(db)
 
     if not settings.lastfm_api_key:
-        return {"error": "missing_api_key"}
+        raise HTTPException(status_code=400, detail="Missing Last.fm API key")
 
-    auth_url = (
-        "http://www.last.fm/api/auth/"
-        f"?api_key={settings.lastfm_api_key}"
-        f"&cb={callback_url}"
+    query = urlencode(
+        {
+            "api_key": settings.lastfm_api_key,
+            "cb": callback_url,
+        }
     )
+
+    auth_url = f"https://www.last.fm/api/auth/?{query}"
 
     return {"auth_url": auth_url}
 
