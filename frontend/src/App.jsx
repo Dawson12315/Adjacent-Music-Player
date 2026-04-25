@@ -100,7 +100,7 @@ function App() {
 
   const TRACKS_PAGE_SIZE = 50;
   const ARTISTS_PAGE_SIZE = 50;
-  const SIMILAR_TRACK_LIMIT = 5;
+  const SIMILAR_TRACK_LIMIT = 10;
 
   const audioRef = useRef(null);
   const progressBarRef = useRef(null)
@@ -2167,7 +2167,7 @@ function App() {
   
     lastfmProgressIntervalRef.current = window.setInterval(() => {
       fetchLastfmProgress()
-    }, 1000)
+    }, 4000)
   }
 
   function stopLastfmProgressPolling() {

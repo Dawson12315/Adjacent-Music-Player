@@ -6,6 +6,7 @@ def summarize_recommendation_reason(candidate_debug: dict) -> str:
     has_cooccurrence = retrieval_sources.get("cooccurrence", 0) > 0
     has_genre = retrieval_sources.get("genre", 0) > 0
     has_lastfm_artist = retrieval_sources.get("lastfm_artist", 0) > 0
+    has_lastfm_track = retrieval_sources.get("lastfm_track", 0) > 0
 
     metadata_sparse = candidate_debug.get("metadata_sparse", False)
     strong_lastfm_artist_alignment = candidate_debug.get(
@@ -15,6 +16,15 @@ def summarize_recommendation_reason(candidate_debug: dict) -> str:
 
     if shared_families:
         family = shared_families[0].replace("_", " ")
+
+        if has_lastfm_track and has_behavior:
+            return f"Similar to songs in this playlist, fits your {family} taste, and matches your recent listening"
+
+        if has_lastfm_track and has_cooccurrence:
+            return f"Similar to songs in this playlist, fits your {family} vibe, and connects to nearby tracks"
+
+        if has_lastfm_track:
+            return f"Similar to songs already in this playlist and fits your {family} vibe"
 
         if has_lastfm_artist and has_behavior:
             return f"Similar artist match for this playlist, fits your {family} taste, and matches your recent listening"
@@ -36,6 +46,12 @@ def summarize_recommendation_reason(candidate_debug: dict) -> str:
 
         if has_genre:
             return f"Matches your playlist’s {family} vibe"
+
+    if has_lastfm_track:
+        if metadata_sparse:
+            return "Recommended from Last.fm similar tracks because playlist genre data is limited"
+
+        return "Similar to songs already in this playlist"
 
     if has_lastfm_artist:
         if strong_lastfm_artist_alignment:
