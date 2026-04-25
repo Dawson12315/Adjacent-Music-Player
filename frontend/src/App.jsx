@@ -2003,7 +2003,7 @@ function App() {
         setSettingsNotice("MusicBrainz tagging could not be resumed.")
       }
 
-      const readinessResponse = await fetch(`${API_BASE_URL}/api/settings/lastfm/ readiness`)
+      const readinessResponse = await fetch(`${API_BASE_URL}/api/settings/lastfm/readiness`)
       if (readinessResponse.ok) {
         const readinessData = await readinessResponse.json()
         setLastfmReadiness(readinessData)
