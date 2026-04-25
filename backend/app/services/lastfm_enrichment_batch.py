@@ -14,12 +14,14 @@ from app.services.lastfm_enrichment_progress import (
     start_progress,
     update_progress,
 )
+from app.services.lastfm_track_similarity import ingest_similar_tracks_for_track
 from app.utils.artist_normalization import normalize_artist_name
 
 
 BATCH_SIZE = 25
 BATCH_DELAY_SECONDS = 2.0
 SIMILAR_ARTIST_LIMIT = 25
+SIMILAR_TRACK_LIMIT = 25
 
 
 def _collect_track_artists(db, track: Track) -> list[str]:
@@ -61,6 +63,8 @@ def run_lastfm_enrichment() -> Dict:
     total_skipped = 0
     total_artist_similarity_ingested = 0
     total_artist_similarity_skipped = 0
+    total_track_similarity_ingested = 0
+    total_track_similarity_skipped = 0
     batch_number = 0
     attempted_track_ids = set()
     attempted_artist_keys = set()
@@ -104,6 +108,8 @@ def run_lastfm_enrichment() -> Dict:
                         "total_skipped": total_skipped,
                         "total_artist_similarity_ingested": total_artist_similarity_ingested,
                         "total_artist_similarity_skipped": total_artist_similarity_skipped,
+                        "total_track_similarity_ingested": total_track_similarity_ingested,
+                        "total_track_similarity_skipped": total_track_similarity_skipped,
                     }
                     mark_stopped()
                     return summary
@@ -118,6 +124,29 @@ def run_lastfm_enrichment() -> Dict:
                     total_processed += 1
                 else:
                     total_skipped += 1
+
+                track_similarity_result = ingest_similar_tracks_for_track(
+                    db=db,
+                    track_id=track.id,
+                    limit=SIMILAR_TRACK_LIMIT,
+                )
+
+                if track_similarity_result["success"]:
+                    total_track_similarity_ingested += 1
+                    print(
+                        f"[lastfm track similarity] "
+                        f"id={track.id} | "
+                        f"title={track.title} | "
+                        f"stored={track_similarity_result.get('stored_count', 0)}"
+                    )
+                else:
+                    total_track_similarity_skipped += 1
+                    print(
+                        f"[lastfm track similarity] "
+                        f"id={track.id} | "
+                        f"title={track.title} | "
+                        f"result={track_similarity_result.get('reason', 'failed')}"
+                    )
 
                 track_artists = _collect_track_artists(db, track)
 
@@ -185,6 +214,8 @@ def run_lastfm_enrichment() -> Dict:
             "total_skipped": total_skipped,
             "total_artist_similarity_ingested": total_artist_similarity_ingested,
             "total_artist_similarity_skipped": total_artist_similarity_skipped,
+            "total_track_similarity_ingested": total_track_similarity_ingested,
+            "total_track_similarity_skipped": total_track_similarity_skipped,
         }
 
         print("\n=== LAST.FM FINAL SUMMARY ===")

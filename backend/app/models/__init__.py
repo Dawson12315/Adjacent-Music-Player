@@ -11,6 +11,7 @@ from app.models.track_cooccurrence import TrackCooccurrence
 from app.models.listening_event import ListeningEvent
 from app.models.track_user_stats import TrackUserStats
 from app.models.artist_lastfm_similarity import ArtistLastfmSimilarity
+from app.models.track_lastfm_similarity import TrackLastfmSimilarity
 
 __all__ = [
     "Track",
@@ -25,5 +26,6 @@ __all__ = [
     "TrackCooccurrence",
     "ListeningEvent",
     "TrackUserStats",
-    "ArtistLastfmSimilarity"
+    "ArtistLastfmSimilarity",
+    "TrackLastfmSimilarity"
     ]

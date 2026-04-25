@@ -300,3 +300,65 @@ def run_simple_migrations():
                 """
             )
         )
+
+        if "track_lastfm_similarity" not in existing_table_names:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE track_lastfm_similarity (
+                        id INTEGER PRIMARY KEY,
+                        source_track_id INTEGER NOT NULL,
+                        similar_track_id INTEGER,
+                        source_track_name TEXT NOT NULL,
+                        source_artist_name TEXT NOT NULL,
+                        similar_track_name TEXT NOT NULL,
+                        similar_artist_name TEXT NOT NULL,
+                        source_track_key TEXT NOT NULL,
+                        similar_track_key TEXT NOT NULL,
+                        match_score REAL,
+                        source_mbid TEXT,
+                        similar_mbid TEXT,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY(source_track_id) REFERENCES tracks(id) ON DELETE CASCADE,
+                        FOREIGN KEY(similar_track_id) REFERENCES tracks(id) ON DELETE SET NULL,
+                        CONSTRAINT uq_track_similarity_pair UNIQUE (source_track_id, similar_track_key)
+                    )
+                    """
+                )
+            )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_track_similarity_source_track_id
+                ON track_lastfm_similarity(source_track_id)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_track_similarity_similar_track_id
+                ON track_lastfm_similarity(similar_track_id)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_track_similarity_source_key
+                ON track_lastfm_similarity(source_track_key)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_track_similarity_similar_key
+                ON track_lastfm_similarity(similar_track_key)
+                """
+            )
+        )

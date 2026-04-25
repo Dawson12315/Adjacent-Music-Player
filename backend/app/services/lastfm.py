@@ -126,6 +126,74 @@ def _request_lastfm_similar_artists(params: dict) -> Dict[str, Any]:
     }
 
 
+def _request_lastfm_similar_tracks(params: dict) -> Dict[str, Any]:
+    try:
+        _respect_lastfm_rate_limit()
+        response = requests.get(
+            LASTFM_BASE_URL,
+            params=params,
+            timeout=10,
+        )
+        data = response.json()
+    except requests.RequestException as error:
+        print(f"Last.fm similar track lookup failed: {error}")
+        return {"success": False, "tracks": [], "error": "request_failed"}
+    except ValueError:
+        print("Last.fm similar track lookup failed: response was not valid JSON")
+        return {"success": False, "tracks": [], "error": "invalid_json"}
+
+    if "error" in data:
+        print(f"Last.fm API error {data.get('error')}: {data.get('message')}")
+        return {
+            "success": False,
+            "tracks": [],
+            "error": data.get("message", "api_error"),
+        }
+
+    raw_tracks = data.get("similartracks", {}).get("track", [])
+
+    if isinstance(raw_tracks, dict):
+        raw_tracks = [raw_tracks]
+
+    tracks = []
+
+    for track in raw_tracks:
+        if not isinstance(track, dict):
+            continue
+
+        track_name = track.get("name")
+        artist = track.get("artist") or {}
+
+        if isinstance(artist, dict):
+            artist_name = artist.get("name")
+        else:
+            artist_name = None
+
+        if not track_name or not artist_name:
+            continue
+
+        match_value = track.get("match")
+        try:
+            match_score = float(match_value) if match_value is not None else None
+        except (TypeError, ValueError):
+            match_score = None
+
+        tracks.append(
+            {
+                "name": track_name,
+                "artist": artist_name,
+                "mbid": track.get("mbid") or None,
+                "match_score": match_score,
+            }
+        )
+
+    return {
+        "success": True,
+        "tracks": tracks,
+        "error": None,
+    }
+
+
 def get_track_top_tags(
     mbid: Optional[str],
     api_key: str,
@@ -214,6 +282,28 @@ def get_similar_artists(
     return _request_lastfm_similar_artists(
         {
             "method": "artist.getSimilar",
+            "artist": artist_name,
+            "autocorrect": 1,
+            "limit": limit,
+            "api_key": api_key,
+            "format": "json",
+        }
+    )
+
+
+def get_similar_tracks(
+    track_name: Optional[str],
+    artist_name: Optional[str],
+    api_key: str,
+    limit: int = 25,
+) -> Dict[str, Any]:
+    if not api_key or not track_name or not artist_name:
+        return {"success": True, "tracks": [], "error": None}
+
+    return _request_lastfm_similar_tracks(
+        {
+            "method": "track.getSimilar",
+            "track": track_name,
             "artist": artist_name,
             "autocorrect": 1,
             "limit": limit,

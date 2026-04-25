@@ -10,6 +10,9 @@ from app.services.recommendations.retrievers.genre_retriever import (
 from app.services.recommendations.retrievers.lastfm_artist_retriever import (
     retrieve_lastfm_artist_candidates,
 )
+from app.services.recommendations.retrievers.lastfm_track_retriever import (
+    retrieve_lastfm_track_candidates,
+)
 from app.services.recommendations.types import RetrievedCandidate
 
 
@@ -66,11 +69,18 @@ def retrieve_candidates(
         playlist_id=playlist_id,
     )
 
+    lastfm_track_candidates = retrieve_lastfm_track_candidates(
+        db=db,
+        playlist_track_ids=playlist_track_ids,
+        limit=min(max(limit, 200), 300),
+    )
+
     merged = merge_retrieved_candidates(
         genre_candidates,
         cooccurrence_candidates,
         behavior_candidates,
         lastfm_artist_candidates,
+        lastfm_track_candidates,
     )
 
     sorted_candidates = sorted(
@@ -78,6 +88,12 @@ def retrieve_candidates(
         key=lambda item: item[1].total_retrieval_score,
         reverse=True,
     )
+
+    protected_lastfm_track = [
+        item
+        for item in sorted_candidates
+        if "lastfm_track" in item[1].source_scores
+    ][:100]
 
     protected_lastfm = [
         item
@@ -94,7 +110,12 @@ def retrieve_candidates(
     final_items = []
     seen_track_ids = set()
 
-    for track_id, candidate in protected_lastfm + protected_behavior + sorted_candidates:
+    for track_id, candidate in (
+        protected_lastfm_track
+        + protected_lastfm
+        + protected_behavior
+        + sorted_candidates
+    ):
         if track_id in seen_track_ids:
             continue
 
