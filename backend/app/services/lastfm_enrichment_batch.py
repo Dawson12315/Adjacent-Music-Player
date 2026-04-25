@@ -3,8 +3,9 @@ from typing import Dict
 
 from app.db import SessionLocal
 from app.models.track import Track
+from app.models.track_artist import TrackArtist
+from app.services.lastfm_artist_similarity import ingest_similar_artists_for_artist
 from app.services.lastfm_enrichment import enrich_track_lastfm_tags
-from app.services.lastfm_enrichment_control import should_stop, reset_stop
 from app.services.lastfm_enrichment_control import should_stop, reset_stop
 from app.services.lastfm_enrichment_progress import (
     finish_progress,
@@ -13,11 +14,43 @@ from app.services.lastfm_enrichment_progress import (
     start_progress,
     update_progress,
 )
+from app.utils.artist_normalization import normalize_artist_name
 
 
 BATCH_SIZE = 25
-REQUEST_DELAY_SECONDS = 1.1
 BATCH_DELAY_SECONDS = 2.0
+SIMILAR_ARTIST_LIMIT = 25
+
+
+def _collect_track_artists(db, track: Track) -> list[str]:
+    artist_names: list[str] = []
+
+    if track.artist and track.artist.strip():
+        artist_names.append(track.artist.strip())
+
+    track_artist_rows = (
+        db.query(TrackArtist)
+        .filter(TrackArtist.track_id == track.id)
+        .order_by(TrackArtist.position.asc())
+        .all()
+    )
+
+    for row in track_artist_rows:
+        if row.artist_name and row.artist_name.strip():
+            artist_names.append(row.artist_name.strip())
+
+    deduped: list[str] = []
+    seen_keys: set[str] = set()
+
+    for artist_name in artist_names:
+        normalized_key = normalize_artist_name(artist_name)
+        if not normalized_key or normalized_key in seen_keys:
+            continue
+
+        seen_keys.add(normalized_key)
+        deduped.append(artist_name)
+
+    return deduped
 
 
 def run_lastfm_enrichment() -> Dict:
@@ -26,8 +59,11 @@ def run_lastfm_enrichment() -> Dict:
     total_checked = 0
     total_processed = 0
     total_skipped = 0
+    total_artist_similarity_ingested = 0
+    total_artist_similarity_skipped = 0
     batch_number = 0
     attempted_track_ids = set()
+    attempted_artist_keys = set()
 
     reset_stop()
     start_progress()
@@ -66,6 +102,8 @@ def run_lastfm_enrichment() -> Dict:
                         "total_checked": total_checked,
                         "total_processed": total_processed,
                         "total_skipped": total_skipped,
+                        "total_artist_similarity_ingested": total_artist_similarity_ingested,
+                        "total_artist_similarity_skipped": total_artist_similarity_skipped,
                     }
                     mark_stopped()
                     return summary
@@ -80,6 +118,41 @@ def run_lastfm_enrichment() -> Dict:
                     total_processed += 1
                 else:
                     total_skipped += 1
+
+                track_artists = _collect_track_artists(db, track)
+
+                for artist_name in track_artists:
+                    normalized_artist_key = normalize_artist_name(artist_name)
+                    if not normalized_artist_key:
+                        total_artist_similarity_skipped += 1
+                        continue
+
+                    if normalized_artist_key in attempted_artist_keys:
+                        total_artist_similarity_skipped += 1
+                        continue
+
+                    attempted_artist_keys.add(normalized_artist_key)
+
+                    similarity_result = ingest_similar_artists_for_artist(
+                        db=db,
+                        artist_name=artist_name,
+                        limit=SIMILAR_ARTIST_LIMIT,
+                    )
+
+                    if similarity_result["success"]:
+                        total_artist_similarity_ingested += 1
+                        print(
+                            f"[lastfm artist similarity] "
+                            f"artist={artist_name} | "
+                            f"stored={similarity_result.get('stored_count', 0)}"
+                        )
+                    else:
+                        total_artist_similarity_skipped += 1
+                        print(
+                            f"[lastfm artist similarity] "
+                            f"artist={artist_name} | "
+                            f"result={similarity_result.get('reason', 'failed')}"
+                        )
 
                 update_progress(
                     current_batch=batch_number,
@@ -102,8 +175,6 @@ def run_lastfm_enrichment() -> Dict:
                     f"added={len(result.get('added_genres', []))}"
                 )
 
-                time.sleep(REQUEST_DELAY_SECONDS)
-
             time.sleep(BATCH_DELAY_SECONDS)
 
         summary = {
@@ -112,6 +183,8 @@ def run_lastfm_enrichment() -> Dict:
             "total_checked": total_checked,
             "total_processed": total_processed,
             "total_skipped": total_skipped,
+            "total_artist_similarity_ingested": total_artist_similarity_ingested,
+            "total_artist_similarity_skipped": total_artist_similarity_skipped,
         }
 
         print("\n=== LAST.FM FINAL SUMMARY ===")

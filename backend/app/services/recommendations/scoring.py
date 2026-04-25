@@ -3,6 +3,9 @@ from typing import Tuple
 from app.models.track import Track
 
 
+STRONG_LASTFM_ARTIST_BRIDGE_THRESHOLD = 1.20
+
+
 def score_candidate(
     track: Track,
     candidate_families: list[str],
@@ -10,13 +13,20 @@ def score_candidate(
     cooccurrence_scores: dict,
     playlist_artist_counts: dict,
     playlist_album_counts: dict,
+    retrieved_source_scores: dict | None = None,
 ) -> Tuple[float, dict]:
     score = 0.0
     reasons: list[str] = []
+    retrieved_source_scores = retrieved_source_scores or {}
 
     shared_families = [
         family for family in candidate_families if family in family_counts
     ]
+
+    lastfm_artist_score = float(retrieved_source_scores.get("lastfm_artist", 0.0) or 0.0)
+    strong_lastfm_artist_bridge = (
+        lastfm_artist_score >= STRONG_LASTFM_ARTIST_BRIDGE_THRESHOLD
+    )
 
     family_score = 0.0
     for family in shared_families:
@@ -58,13 +68,18 @@ def score_candidate(
         reasons.append(f"multi_family_bonus:+{multi_family_bonus:.2f}")
 
     bridge_bonus = 0.0
-    if not shared_families and co_score > 0:
-        bridge_bonus = 1.5
-        score += bridge_bonus
-        reasons.append(f"cooccurrence_bridge_bonus:+{bridge_bonus:.2f}")
+    if not shared_families:
+        if co_score > 0:
+            bridge_bonus = 1.5
+            score += bridge_bonus
+            reasons.append(f"cooccurrence_bridge_bonus:+{bridge_bonus:.2f}")
+        elif strong_lastfm_artist_bridge:
+            bridge_bonus = 2.25
+            score += bridge_bonus
+            reasons.append(f"lastfm_artist_bridge_bonus:+{bridge_bonus:.2f}")
 
     no_alignment_penalty = 0.0
-    if not shared_families and co_score <= 0:
+    if not shared_families and co_score <= 0 and not strong_lastfm_artist_bridge:
         no_alignment_penalty = 2.5
         score -= no_alignment_penalty
         reasons.append(f"no_alignment_penalty:-{no_alignment_penalty:.2f}")
@@ -75,6 +90,8 @@ def score_candidate(
         "artist": track.artist,
         "candidate_families": candidate_families,
         "shared_families": shared_families,
+        "lastfm_artist_score": lastfm_artist_score,
+        "strong_lastfm_artist_bridge": strong_lastfm_artist_bridge,
         "family_score": family_score,
         "cooccurrence_count": co_score,
         "cooccurrence_boost": co_boost,

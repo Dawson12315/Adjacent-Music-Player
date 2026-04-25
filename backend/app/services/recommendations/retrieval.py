@@ -7,6 +7,9 @@ from app.services.recommendations.retrievers.cooccurrence_retriever import (
 from app.services.recommendations.retrievers.genre_retriever import (
     retrieve_genre_candidates,
 )
+from app.services.recommendations.retrievers.lastfm_artist_retriever import (
+    retrieve_lastfm_artist_candidates,
+)
 from app.services.recommendations.types import RetrievedCandidate
 
 
@@ -54,10 +57,20 @@ def retrieve_candidates(
         limit=max(limit, 150),
     )
 
+    lastfm_artist_candidates = retrieve_lastfm_artist_candidates(
+        db=db,
+        playlist_track_ids=playlist_track_ids,
+        playlist_profile=playlist_profile,
+        limit=min(max(limit, 200), 300),
+        refresh=refresh,
+        playlist_id=playlist_id,
+    )
+
     merged = merge_retrieved_candidates(
         genre_candidates,
         cooccurrence_candidates,
         behavior_candidates,
+        lastfm_artist_candidates,
     )
 
     sorted_candidates = sorted(
@@ -66,4 +79,29 @@ def retrieve_candidates(
         reverse=True,
     )
 
-    return dict(sorted_candidates[:limit])
+    protected_lastfm = [
+        item
+        for item in sorted_candidates
+        if "lastfm_artist" in item[1].source_scores
+    ][:100]
+
+    protected_behavior = [
+        item
+        for item in sorted_candidates
+        if "behavior" in item[1].source_scores
+    ][:100]
+
+    final_items = []
+    seen_track_ids = set()
+
+    for track_id, candidate in protected_lastfm + protected_behavior + sorted_candidates:
+        if track_id in seen_track_ids:
+            continue
+
+        final_items.append((track_id, candidate))
+        seen_track_ids.add(track_id)
+
+        if len(final_items) >= limit:
+            break
+
+    return dict(final_items)

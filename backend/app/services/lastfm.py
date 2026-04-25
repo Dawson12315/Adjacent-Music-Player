@@ -1,9 +1,27 @@
 import hashlib
 import requests
 import time
-from typing import Dict, Optional
+import threading
+from typing import Dict, Optional, Any
 
 LASTFM_BASE_URL = "http://ws.audioscrobbler.com/2.0/"
+LASTFM_MIN_REQUEST_INTERVAL_SECONDS = 1.05
+
+_lastfm_rate_limit_lock = threading.Lock()
+_lastfm_last_request_at = 0.0
+
+
+def _respect_lastfm_rate_limit() -> None:
+    global _lastfm_last_request_at
+
+    with _lastfm_rate_limit_lock:
+        now = time.monotonic()
+        elapsed = now - _lastfm_last_request_at
+
+        if elapsed < LASTFM_MIN_REQUEST_INTERVAL_SECONDS:
+            time.sleep(LASTFM_MIN_REQUEST_INTERVAL_SECONDS - elapsed)
+
+        _lastfm_last_request_at = time.monotonic()
 
 
 def build_lastfm_api_sig(params: dict, api_secret: str) -> str:
@@ -23,6 +41,7 @@ def build_lastfm_api_sig(params: dict, api_secret: str) -> str:
 
 def _request_lastfm(params: dict) -> Dict:
     try:
+        _respect_lastfm_rate_limit()
         response = requests.get(
             LASTFM_BASE_URL,
             params=params,
@@ -44,6 +63,66 @@ def _request_lastfm(params: dict) -> Dict:
     return {
         "success": True,
         "tags": [tag.get("name") for tag in tags if tag.get("name")],
+    }
+
+
+def _request_lastfm_similar_artists(params: dict) -> Dict[str, Any]:
+    try:
+        _respect_lastfm_rate_limit()
+        response = requests.get(
+            LASTFM_BASE_URL,
+            params=params,
+            timeout=10,
+        )
+        data = response.json()
+    except requests.RequestException as error:
+        print(f"Last.fm similar artist lookup failed: {error}")
+        return {"success": False, "artists": [], "error": "request_failed"}
+    except ValueError:
+        print("Last.fm similar artist lookup failed: response was not valid JSON")
+        return {"success": False, "artists": [], "error": "invalid_json"}
+
+    if "error" in data:
+        print(f"Last.fm API error {data.get('error')}: {data.get('message')}")
+        return {
+            "success": False,
+            "artists": [],
+            "error": data.get("message", "api_error"),
+        }
+
+    raw_artists = data.get("similarartists", {}).get("artist", [])
+
+    if isinstance(raw_artists, dict):
+        raw_artists = [raw_artists]
+
+    artists = []
+
+    for artist in raw_artists:
+        if not isinstance(artist, dict):
+            continue
+
+        name = artist.get("name")
+        if not name:
+            continue
+
+        match_value = artist.get("match")
+        try:
+            match_score = float(match_value) if match_value is not None else None
+        except (TypeError, ValueError):
+            match_score = None
+
+        artists.append(
+            {
+                "name": name,
+                "mbid": artist.get("mbid") or None,
+                "match_score": match_score,
+            }
+        )
+
+    return {
+        "success": True,
+        "artists": artists,
+        "error": None,
     }
 
 
@@ -124,6 +203,26 @@ def get_artist_top_tags(
     )
 
 
+def get_similar_artists(
+    artist_name: Optional[str],
+    api_key: str,
+    limit: int = 25,
+) -> Dict[str, Any]:
+    if not api_key or not artist_name:
+        return {"success": True, "artists": [], "error": None}
+
+    return _request_lastfm_similar_artists(
+        {
+            "method": "artist.getSimilar",
+            "artist": artist_name,
+            "autocorrect": 1,
+            "limit": limit,
+            "api_key": api_key,
+            "format": "json",
+        }
+    )
+
+
 def get_lastfm_session(
     token: str,
     api_key: str,
@@ -147,6 +246,7 @@ def get_lastfm_session(
     api_sig = build_lastfm_api_sig(params, api_secret)
 
     try:
+        _respect_lastfm_rate_limit()
         response = requests.get(
             LASTFM_BASE_URL,
             params={
@@ -222,6 +322,7 @@ def update_now_playing(
     api_sig = build_lastfm_api_sig(params, api_secret)
 
     try:
+        _respect_lastfm_rate_limit()
         response = requests.post(
             LASTFM_BASE_URL,
             data={
@@ -278,6 +379,7 @@ def scrobble_track(
     api_sig = build_lastfm_api_sig(params, api_secret)
 
     try:
+        _respect_lastfm_rate_limit()
         response = requests.post(
             LASTFM_BASE_URL,
             data={
