@@ -72,7 +72,9 @@ function App() {
   const [transferArtistTarget, setTransferArtistTarget] = useState("");
   const [isEditArtistModalOpen, setIsEditArtistModalOpen] = useState(false);
   const [isTransferArtistMenuOpen, setIsTransferArtistMenuOpen] = useState(false);
-  const API_BASE_URL = window.APP_CONFIG?.API_BASE_URL || "http://127.0.0.1:8000";
+  const API_BASE_URL =
+    window.APP_CONFIG?.API_BASE_URL ||
+    `${window.location.protocol}//${window.location.hostname}:8000`;
   const [artworkPlaylist, setArtworkPlaylist] = useState(null);
   const [artworkFile, setArtworkFile] = useState(null);
   const [artworkPreviewUrl, setArtworkPreviewUrl] = useState("");

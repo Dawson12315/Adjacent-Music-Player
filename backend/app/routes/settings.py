@@ -143,7 +143,7 @@ def get_lastfm_auth_url(
     )
 
     auth_url = f"https://www.last.fm/api/auth/?{query}"
-
+    
     return {"auth_url": auth_url}
 
 @router.post("/settings/lastfm/session", response_model=AppSettingsResponse, tags=["settings"])
