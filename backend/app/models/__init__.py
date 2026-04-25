@@ -10,6 +10,7 @@ from app.models.job_lock import JobLock
 from app.models.track_cooccurrence import TrackCooccurrence
 from app.models.listening_event import ListeningEvent
 from app.models.track_user_stats import TrackUserStats
+from app.models.artist_lastfm_similarity import ArtistLastfmSimilarity
 
 __all__ = [
     "Track",
@@ -23,5 +24,6 @@ __all__ = [
     "JobLock",
     "TrackCooccurrence",
     "ListeningEvent",
-    "TrackUserStats"
+    "TrackUserStats",
+    "ArtistLastfmSimilarity"
     ]

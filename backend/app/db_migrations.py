@@ -262,3 +262,41 @@ def run_simple_migrations():
                 """
             )
         )
+
+        if "artist_lastfm_similarity" not in existing_table_names:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE artist_lastfm_similarity (
+                        id INTEGER PRIMARY KEY,
+                        source_artist_name TEXT NOT NULL,
+                        source_artist_key TEXT NOT NULL,
+                        similar_artist_name TEXT NOT NULL,
+                        similar_artist_key TEXT NOT NULL,
+                        match_score REAL,
+                        source_mbid TEXT,
+                        similar_mbid TEXT,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        CONSTRAINT uq_artist_similarity_pair UNIQUE (source_artist_key, similar_artist_key)
+                    )
+                    """
+                )
+            )
+        
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_artist_similarity_source_key
+                ON artist_lastfm_similarity(source_artist_key)
+                """
+            )
+        )
+        
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_artist_similarity_similar_key
+                ON artist_lastfm_similarity(similar_artist_key)
+                """
+            )
+        )

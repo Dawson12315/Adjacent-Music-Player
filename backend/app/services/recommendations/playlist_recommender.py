@@ -252,11 +252,9 @@ def _merge_clustered_candidates(
             existing["track"] = track
 
         existing["meta"]["cluster_families"].update(meta.get("cluster_families", []))
-        if existing["meta"].get("candidate_origin") != "cluster":
-            existing["meta"]["candidate_origin"] = meta.get(
-                "candidate_origin",
-                existing["meta"].get("candidate_origin", "global"),
-            )
+
+        if meta.get("candidate_origin") == "cluster":
+            existing["meta"]["candidate_origin"] = "cluster"
 
     for score, track in global_scored_candidates:
         _upsert(
@@ -305,6 +303,35 @@ def _merge_clustered_candidates(
     return merged_rows
 
 
+def _fallback_debug_for_track(track: Track, meta: dict | None = None) -> dict:
+    meta = meta or {}
+
+    return {
+        "track_id": track.id,
+        "title": track.title,
+        "artist": track.artist,
+        "candidate_families": get_track_families(track),
+        "shared_families": [],
+        "retrieval_sources": {},
+        "has_alignment": False,
+        "metadata_sparse": False,
+        "focused_playlist": False,
+        "unique_family_count": 0,
+        "is_multi_cluster": False,
+        "strong_lastfm_artist_alignment": False,
+        "content_fit_score": 0.0,
+        "user_affinity_score": 0.0,
+        "cluster_survival_bonus": 0.0,
+        "refresh_exploration_bonus": 0.0,
+        "retrieval_weighted_score": 0.0,
+        "tie_break_jitter": 0.0,
+        "final_score": 0.0,
+        "reason_summary": "Recommended for this playlist",
+        "cluster_families": meta.get("cluster_families", []),
+        "candidate_origin": meta.get("candidate_origin", "unknown"),
+    }
+
+
 def get_playlist_recommendations_from_track_ids(
     db: Session,
     seed_track_ids: list[int],
@@ -345,6 +372,8 @@ def get_playlist_recommendations_from_track_ids(
         )
     )
 
+    all_debug_by_track_id = dict(global_debug_by_track_id)
+
     cluster_debug = []
     cluster_candidate_groups = []
 
@@ -365,6 +394,10 @@ def get_playlist_recommendations_from_track_ids(
                     retrieval_limit=max(limit * 10, 100),
                 )
             )
+
+            for track_id, track_debug in cluster_debug_by_track_id.items():
+                if track_id not in all_debug_by_track_id:
+                    all_debug_by_track_id[track_id] = track_debug
 
             if not cluster_scored_candidates:
                 cluster_debug.append(
@@ -447,6 +480,11 @@ def get_playlist_recommendations_from_track_ids(
             }
         return []
 
+    meta_by_track_id = {
+        track.id: meta or {}
+        for _score, track, meta in filtered_scored_candidates
+    }
+
     top_tracks = diversify_tracks(
         scored_candidates=filtered_scored_candidates,
         playlist_profile=playlist_profile,
@@ -467,19 +505,24 @@ def get_playlist_recommendations_from_track_ids(
 
     if debug:
         recommendation_payload = []
+
         for track in top_tracks:
-            track_debug = dict(global_debug_by_track_id.get(track.id, {}))
-            merged_meta = next(
-                (
-                    meta
-                    for _score, candidate_track, meta in filtered_scored_candidates
-                    if candidate_track.id == track.id
-                ),
-                {},
-            )
-            if merged_meta:
-                track_debug["cluster_families"] = merged_meta.get("cluster_families", [])
-                track_debug["candidate_origin"] = merged_meta.get("candidate_origin", "global")
+            merged_meta = meta_by_track_id.get(track.id, {})
+            track_debug = dict(all_debug_by_track_id.get(track.id, {}))
+
+            if not track_debug:
+                track_debug = _fallback_debug_for_track(track, merged_meta)
+
+            track_debug.setdefault("track_id", track.id)
+            track_debug.setdefault("title", track.title)
+            track_debug.setdefault("artist", track.artist)
+            track_debug.setdefault("candidate_families", get_track_families(track))
+            track_debug.setdefault("shared_families", [])
+            track_debug.setdefault("retrieval_sources", {})
+            track_debug.setdefault("reason_summary", "Recommended for this playlist")
+
+            track_debug["cluster_families"] = merged_meta.get("cluster_families", [])
+            track_debug["candidate_origin"] = merged_meta.get("candidate_origin", "global")
 
             recommendation_payload.append(
                 {

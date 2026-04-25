@@ -27,8 +27,8 @@ def diversify_tracks(
     track_count = max(int(playlist_profile.get("track_count", 0)), 1)
 
     focused_playlist = unique_family_count <= 2 or track_count <= 8
-    base_max_artist_repeat = 3 if focused_playlist else 2
-    base_max_album_repeat = 2 if focused_playlist else 1
+    base_max_artist_repeat = 2 if focused_playlist else 1
+    base_max_album_repeat = 1
     base_max_family_repeat = 5 if focused_playlist else 3
 
     rng = random.Random(f"diversify:{playlist_id}:{refresh}")
@@ -242,7 +242,18 @@ def diversify_tracks(
         if selected_entry is None:
             break
 
+        if selected_entry is None:
+            break
+
         _selected_score, best_candidate, best_candidate_meta = selected_entry
-        add(best_candidate, best_candidate_meta or {})
+
+        if best_candidate_meta is None:
+            best_candidate_meta = {}
+
+        best_candidate_meta.setdefault("retrieval_sources", {})
+        best_candidate_meta.setdefault("reason_summary", "Recommended for this playlist")
+        best_candidate_meta.setdefault("candidate_origin", "diversification")
+
+        add(best_candidate, best_candidate_meta)
 
     return results

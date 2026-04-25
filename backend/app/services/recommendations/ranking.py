@@ -7,9 +7,12 @@ from app.services.recommendations.scoring import score_candidate
 
 RETRIEVAL_SOURCE_WEIGHTS = {
     "genre": 0.60,
-    "cooccurrence": 0.85,
+    "cooccurrence": 1.25,
     "behavior": 0.45,
+    "lastfm_artist": 1.35,
 }
+
+FOCUSED_PLAYLIST_LASTFM_ALIGNMENT_THRESHOLD = 1.20
 
 
 def rank_candidates(
@@ -38,6 +41,9 @@ def rank_candidates(
     for track in candidate_tracks:
         candidate_families = get_track_families(track)
 
+        retrieved = retrieved_candidates.get(track.id)
+        retrieval_sources = dict(retrieved.source_scores) if retrieved else {}
+
         base_score, candidate_debug = score_candidate(
             track=track,
             candidate_families=candidate_families,
@@ -45,18 +51,22 @@ def rank_candidates(
             cooccurrence_scores=cooccurrence_scores,
             playlist_artist_counts=playlist_artist_counts,
             playlist_album_counts=playlist_album_counts,
+            retrieved_source_scores=retrieval_sources,
         )
-
-        retrieved = retrieved_candidates.get(track.id)
-        retrieval_sources = dict(retrieved.source_scores) if retrieved else {}
 
         genre_source_score = retrieval_sources.get("genre", 0.0)
         cooccurrence_source_score = retrieval_sources.get("cooccurrence", 0.0)
         behavior_source_score = retrieval_sources.get("behavior", 0.0)
+        lastfm_artist_source_score = retrieval_sources.get("lastfm_artist", 0.0)
+
+        strong_lastfm_artist_alignment = (
+            lastfm_artist_source_score >= FOCUSED_PLAYLIST_LASTFM_ALIGNMENT_THRESHOLD
+        )
 
         content_fit_score = (
             genre_source_score * RETRIEVAL_SOURCE_WEIGHTS["genre"]
             + cooccurrence_source_score * RETRIEVAL_SOURCE_WEIGHTS["cooccurrence"]
+            + lastfm_artist_source_score * RETRIEVAL_SOURCE_WEIGHTS["lastfm_artist"]
         )
         user_affinity_score = (
             behavior_source_score * RETRIEVAL_SOURCE_WEIGHTS["behavior"]
@@ -66,7 +76,13 @@ def rank_candidates(
         has_shared_family = len(shared_families) > 0
         has_cooccurrence = cooccurrence_source_score > 0
         has_genre_signal = genre_source_score > 0
-        has_alignment = has_shared_family or has_cooccurrence or has_genre_signal
+        has_lastfm_artist_signal = lastfm_artist_source_score > 0
+        has_alignment = (
+            has_shared_family
+            or has_cooccurrence
+            or has_genre_signal
+            or has_lastfm_artist_signal
+        )
 
         candidate_debug["base_score"] = base_score
         candidate_debug["retrieval_sources"] = retrieval_sources
@@ -76,29 +92,42 @@ def rank_candidates(
         candidate_debug["focused_playlist"] = focused_playlist
         candidate_debug["unique_family_count"] = unique_family_count
         candidate_debug["is_multi_cluster"] = is_multi_cluster
+        candidate_debug["strong_lastfm_artist_alignment"] = strong_lastfm_artist_alignment
 
         if focused_playlist and not metadata_sparse and not has_shared_family:
-            candidate_debug.setdefault("reasons", []).append(
-                "focused_playlist_family_hard_gate"
-            )
-            candidate_debug["content_fit_score"] = 0.0
-            candidate_debug["user_affinity_score"] = 0.0
-            candidate_debug["retrieval_weighted_score"] = 0.0
-            candidate_debug["refresh_exploration_bonus"] = 0.0
-            candidate_debug["tie_break_jitter"] = 0.0
-            candidate_debug["final_score"] = float("-inf")
-            candidate_debug["reason_summary"] = summarize_recommendation_reason(candidate_debug)
-            continue
+            if strong_lastfm_artist_alignment:
+                candidate_debug.setdefault("reasons", []).append(
+                    "focused_playlist_lastfm_alignment_override"
+                )
+                content_fit_score *= 0.65
+            else:
+                candidate_debug.setdefault("reasons", []).append(
+                    "focused_playlist_family_hard_gate"
+                )
+                candidate_debug["content_fit_score"] = 0.0
+                candidate_debug["user_affinity_score"] = 0.0
+                candidate_debug["retrieval_weighted_score"] = 0.0
+                candidate_debug["refresh_exploration_bonus"] = 0.0
+                candidate_debug["tie_break_jitter"] = 0.0
+                candidate_debug["final_score"] = float("-inf")
+                candidate_debug["reason_summary"] = summarize_recommendation_reason(candidate_debug)
+                continue
 
         if not has_shared_family:
             if focused_playlist:
                 if user_affinity_score > 0:
                     user_affinity_score *= 0.05
-                if content_fit_score > 0:
-                    content_fit_score *= 0.10
-                candidate_debug.setdefault("reasons", []).append(
-                    "focused_playlist_genre_strict_penalty"
-                )
+
+                if strong_lastfm_artist_alignment:
+                    candidate_debug.setdefault("reasons", []).append(
+                        "focused_playlist_lastfm_soft_penalty"
+                    )
+                else:
+                    if content_fit_score > 0:
+                        content_fit_score *= 0.10
+                    candidate_debug.setdefault("reasons", []).append(
+                        "focused_playlist_genre_strict_penalty"
+                    )
             else:
                 if not has_alignment and user_affinity_score > 0:
                     if is_multi_cluster:
