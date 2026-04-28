@@ -1867,7 +1867,7 @@ function App() {
 
   async function handleRunLastfmEnrichment() {
     setLastfmEnrichmentSummary(null)
-    setSettingsNotice("Starting Last.fm genre enrichment...")
+    setSettingsNotice("Starting Last.fm enrichment...")
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/settings/lastfm/enrich`, {
@@ -1882,7 +1882,7 @@ function App() {
       const result = await response.json()
 
       if (result.reason === "already_running") {
-        setSettingsNotice("Last.fm genre enrichment is already running.")
+        setSettingsNotice("Last.fm enrichment is already running.")
         startLastfmProgressPolling()
         await fetchLastfmProgress()
         return
@@ -1892,12 +1892,12 @@ function App() {
         throw new Error("Last.fm enrichment did not start")
       }
 
-      setSettingsNotice("Last.fm genre enrichment started.")
+      setSettingsNotice("Last.fm enrichment started.")
       startLastfmProgressPolling()
       await fetchLastfmProgress()
     } catch (error) {
       console.error(error)
-      setSettingsNotice("Failed to start Last.fm genre enrichment.")
+      setSettingsNotice("Failed to start Last.fm enrichment.")
     }
   }
 
@@ -3009,7 +3009,7 @@ function App() {
                   onClick={handleRunLastfmEnrichment}
                   disabled={isLastfmEnriching || !lastfmApiKey.trim()}
                 >
-                  {isLastfmEnriching ? "Enriching..." : "Start enriching genre tags"}
+                  {isLastfmEnriching ? "Enriching..." : "Start Last.fm enrichment"}
                 </button>
               )}
 
@@ -3088,9 +3088,9 @@ function App() {
               )}
               </div>
             )}
-            
+
             {lastfmProgress && (
-              <div className="lastfm-progress-card">
+              <div className="lastfm-readiness-card">
                 <div className="lastfm-progress-card__header">
                   <span
                     className={`lastfm-status-pill ${
@@ -3117,34 +3117,83 @@ function App() {
                   </span>
                 </div>
                     
+                <div className="lastfm-readiness-card__title">
+                  Last.fm enrichment progress
+                </div>
+                    
+                <div className="lastfm-readiness-card__text">
+                  Pulling genre tags, similar tracks, and similar artists from Last.fm.
+                </div>
+                    
+                <div className="lastfm-readiness-card__bar">
+                  <div
+                    className="lastfm-readiness-card__bar-fill"
+                    style={{ width: `${getLastfmProgressPercent()}%` }}
+                  />
+                </div>
+                    
+                <div className="lastfm-readiness-card__stats">
+                  <div className="lastfm-readiness-card__stat">
+                    <span className="lastfm-readiness-card__label">Processed</span>
+                    <span className="lastfm-readiness-card__value">
+                      {lastfmProgress.processed_tracks || 0}
+                    </span>
+                  </div>
+                    
+                  <div className="lastfm-readiness-card__stat">
+                    <span className="lastfm-readiness-card__label">Remaining</span>
+                    <span className="lastfm-readiness-card__value">
+                      {Math.max(
+                        (lastfmProgress.total_tracks || 0) -
+                          (lastfmProgress.processed_tracks || 0),
+                        0
+                      )}
+                    </span>
+                  </div>
+                    
+                  <div className="lastfm-readiness-card__stat">
+                    <span className="lastfm-readiness-card__label">Total</span>
+                    <span className="lastfm-readiness-card__value">
+                      {lastfmProgress.total_tracks || 0}
+                    </span>
+                  </div>
+                    
+                  <div className="lastfm-readiness-card__stat">
+                    <span className="lastfm-readiness-card__label">Progress</span>
+                    <span className="lastfm-readiness-card__value">
+                      {getLastfmProgressPercent()}%
+                    </span>
+                  </div>
+                </div>
+                    
                 <div className="lastfm-progress-card__track">
                   <span className="lastfm-progress-card__label">Current track</span>
-                    <div className="lastfm-progress-card__value">
-                      {lastfmProgress.current_title
-                        ? `${lastfmProgress.current_index}/${lastfmProgress.current_total} — ${lastfmProgress.current_title}`
-                        : "None"}
-                    </div>
+                  <div className="lastfm-progress-card__value">
+                    {lastfmProgress.current_title
+                      ? `${lastfmProgress.current_index}/${lastfmProgress.current_total} — ${lastfmProgress.            current_title}`
+                      : "None"}
+                  </div>
                 </div>
                     
                 <div className="lastfm-progress-grid">
                   <div className="lastfm-progress-stat">
-                    <div className="lastfm-progress-stat__label">Processed</div>
+                    <div className="lastfm-progress-stat__label">Tagged</div>
                     <div className="lastfm-progress-stat__value">
-                      {lastfmProgress.total_processed}
+                      {lastfmProgress.total_processed || 0}
                     </div>
                   </div>
                     
                   <div className="lastfm-progress-stat">
                     <div className="lastfm-progress-stat__label">Skipped</div>
                     <div className="lastfm-progress-stat__value">
-                      {lastfmProgress.total_skipped}
+                      {lastfmProgress.total_skipped || 0}
                     </div>
                   </div>
                     
                   <div className="lastfm-progress-stat">
                     <div className="lastfm-progress-stat__label">Checked</div>
                     <div className="lastfm-progress-stat__value">
-                      {lastfmProgress.total_checked}
+                      {lastfmProgress.total_checked || 0}
                     </div>
                   </div>
                 </div>
@@ -3495,6 +3544,9 @@ function App() {
     }
 
     return `${visibleTracks.length} tracks`;
+  }
+  function getLastfmProgressPercent() {
+    return Math.max(0, Math.min(lastfmProgress?.progress_percent || 0, 100));
   }
 
   function formatTime(timeInSeconds) {

@@ -11,10 +11,17 @@ def ensure_liked_songs_playlist(db: Session) -> Playlist:
     )
 
     if liked_songs:
+        # Rename existing playlist if still using old name
+        if liked_songs.name == "Liked Songs":
+            liked_songs.name = "Loved Songs"
+            db.commit()
+            db.refresh(liked_songs)
+
         return liked_songs
 
+    # New installs
     liked_songs = Playlist(
-        name="Liked Songs",
+        name="Loved Songs",
         is_system=True,
         system_key="liked_songs",
     )
