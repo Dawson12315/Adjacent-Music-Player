@@ -16,3 +16,8 @@ venv/
 # Node (future frontend)
 node_modules/
 dist/
+
+# SQLite database
+*.db
+*.db-shm
+*.db-wal
