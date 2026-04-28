@@ -98,8 +98,17 @@ def run_lastfm_enrichment() -> Dict:
     attempted_track_ids = set()
     attempted_artist_keys = set()
 
+    total_tracks_to_process = (
+        db.query(Track)
+        .filter(
+            Track.musicbrainz_recording_id.isnot(None),
+            Track.lastfm_tags_enriched.is_(False),
+        )
+        .count()
+    )
+    
     reset_stop()
-    start_progress()
+    start_progress(total_tracks=total_tracks_to_process)
 
     try:
         while True:
@@ -272,6 +281,8 @@ def run_lastfm_enrichment() -> Dict:
                     current_batch=batch_number,
                     current_index=index,
                     current_total=len(tracks),
+                    total_tracks=total_tracks_to_process,
+                    processed_tracks=total_checked,
                     total_checked=total_checked,
                     total_processed=total_processed,
                     total_skipped=total_skipped,

@@ -1287,6 +1287,7 @@ button {
 }
 
 .lastfm-progress-card__track {
+  margin-top: 15px;
   margin-bottom: 14px;
 }
 

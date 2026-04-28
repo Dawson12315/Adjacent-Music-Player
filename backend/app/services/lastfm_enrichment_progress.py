@@ -5,6 +5,9 @@ _PROGRESS = {
     "current_batch": 0,
     "current_index": 0,
     "current_total": 0,
+    "total_tracks": 0,
+    "processed_tracks": 0,
+    "progress_percent": 0,
     "total_checked": 0,
     "total_processed": 0,
     "total_skipped": 0,
@@ -12,6 +15,14 @@ _PROGRESS = {
     "current_title": None,
     "last_result": None,
 }
+
+
+def _calculate_progress_percent(processed_tracks: int, total_tracks: int) -> int:
+    if total_tracks <= 0:
+        return 0
+
+    percent = round((processed_tracks / total_tracks) * 100)
+    return max(0, min(percent, 100))
 
 
 def get_progress():
@@ -27,6 +38,9 @@ def reset_progress():
         "current_batch": 0,
         "current_index": 0,
         "current_total": 0,
+        "total_tracks": 0,
+        "processed_tracks": 0,
+        "progress_percent": 0,
         "total_checked": 0,
         "total_processed": 0,
         "total_skipped": 0,
@@ -36,9 +50,12 @@ def reset_progress():
     }
 
 
-def start_progress():
+def start_progress(total_tracks: int = 0):
     reset_progress()
     _PROGRESS["is_running"] = True
+    _PROGRESS["total_tracks"] = total_tracks
+    _PROGRESS["processed_tracks"] = 0
+    _PROGRESS["progress_percent"] = 0
     _PROGRESS["last_result"] = "started"
 
 
@@ -61,6 +78,8 @@ def update_progress(
     current_batch: int,
     current_index: int,
     current_total: int,
+    total_tracks: int,
+    processed_tracks: int,
     total_checked: int,
     total_processed: int,
     total_skipped: int,
@@ -71,6 +90,12 @@ def update_progress(
     _PROGRESS["current_batch"] = current_batch
     _PROGRESS["current_index"] = current_index
     _PROGRESS["current_total"] = current_total
+    _PROGRESS["total_tracks"] = total_tracks
+    _PROGRESS["processed_tracks"] = processed_tracks
+    _PROGRESS["progress_percent"] = _calculate_progress_percent(
+        processed_tracks=processed_tracks,
+        total_tracks=total_tracks,
+    )
     _PROGRESS["total_checked"] = total_checked
     _PROGRESS["total_processed"] = total_processed
     _PROGRESS["total_skipped"] = total_skipped
@@ -85,5 +110,10 @@ def finish_progress():
     _PROGRESS["is_stopped"] = False
     _PROGRESS["current_track_id"] = None
     _PROGRESS["current_title"] = None
+
+    if _PROGRESS["total_tracks"] > 0:
+        _PROGRESS["processed_tracks"] = _PROGRESS["total_tracks"]
+        _PROGRESS["progress_percent"] = 100
+
     if _PROGRESS["last_result"] in (None, "started", "stop_requested"):
         _PROGRESS["last_result"] = "finished"
