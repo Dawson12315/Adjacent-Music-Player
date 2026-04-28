@@ -1,6 +1,7 @@
 import re
 from typing import Dict, Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.app_setting import AppSetting
@@ -31,7 +32,6 @@ def clean_lastfm_track_lookup_title(title: str) -> str:
     )
 
     cleaned = re.sub(r"\s+", " ", cleaned)
-
     return cleaned.strip()
 
 
@@ -40,7 +40,6 @@ def ingest_similar_tracks_for_track(
     track_id: int,
     limit: int = 25,
 ) -> Dict[str, Any]:
-
     track = db.query(Track).filter(Track.id == track_id).first()
 
     if not track:
@@ -73,10 +72,7 @@ def ingest_similar_tracks_for_track(
             "tracks_returned": [],
         }
 
-    lookup_title = clean_lastfm_track_lookup_title(track.title)
-    if not lookup_title:
-        lookup_title = track.title
-
+    lookup_title = clean_lastfm_track_lookup_title(track.title) or track.title
     source_key = build_track_key(track.artist, track.title)
 
     lastfm_result = get_similar_tracks(
@@ -98,6 +94,19 @@ def ingest_similar_tracks_for_track(
 
     stored_count = 0
     stored_rows = []
+    seen_similar_keys: set[str] = set()
+
+    local_tracks = (
+        db.query(Track)
+        .filter(Track.artist.isnot(None), Track.title.isnot(None))
+        .all()
+    )
+
+    local_track_lookup = {
+        build_track_key(candidate.artist, candidate.title): candidate.id
+        for candidate in local_tracks
+        if candidate.artist and candidate.title
+    }
 
     for item in lastfm_result["tracks"]:
         similar_track_name = item.get("name")
@@ -111,24 +120,12 @@ def ingest_similar_tracks_for_track(
         if similar_key == source_key:
             continue
 
-        normalized_artist = normalize_artist_name(similar_artist_name)
-        normalized_title = normalize_artist_name(similar_track_name)
+        if similar_key in seen_similar_keys:
+            continue
 
-        local_match = (
-            db.query(Track)
-            .filter(Track.artist.isnot(None), Track.title.isnot(None))
-            .all()
-        )
+        seen_similar_keys.add(similar_key)
 
-        matched_track_id = None
-
-        for candidate in local_match:
-            if (
-                normalize_artist_name(candidate.artist) == normalized_artist
-                and normalize_artist_name(candidate.title) == normalized_title
-            ):
-                matched_track_id = candidate.id
-                break
+        matched_track_id = local_track_lookup.get(similar_key)
 
         existing_row = (
             db.query(TrackLastfmSimilarity)
@@ -174,7 +171,32 @@ def ingest_similar_tracks_for_track(
             }
         )
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        return {
+            "success": False,
+            "reason": "duplicate_similar_track_row",
+            "track_id": track.id,
+            "source_title": track.title,
+            "lookup_title": lookup_title,
+            "stored_count": 0,
+            "tracks_returned": [],
+            "error": str(error),
+        }
+    except Exception as error:
+        db.rollback()
+        return {
+            "success": False,
+            "reason": "similar_track_commit_failed",
+            "track_id": track.id,
+            "source_title": track.title,
+            "lookup_title": lookup_title,
+            "stored_count": 0,
+            "tracks_returned": [],
+            "error": str(error),
+        }
 
     return {
         "success": True,

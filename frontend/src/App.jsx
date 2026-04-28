@@ -2671,7 +2671,7 @@ function App() {
             </div>
       
             <div className="behavior-insights-stat">
-              <div className="behavior-insights-stat__label">Most Liked</div>
+              <div className="behavior-insights-stat__label">Most Loved</div>
               <div className="behavior-insights-stat__value">{mostLikedCount}</div>
             </div>
       
@@ -2717,7 +2717,7 @@ function App() {
               
             <div className="insights-card">
               <div className="insights-card__header">
-                <h3>Most Liked</h3>
+                <h3>Most Loved</h3>
               </div>
               
               <div className="insights-card__list">

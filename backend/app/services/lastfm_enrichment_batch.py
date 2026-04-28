@@ -55,6 +55,35 @@ def _collect_track_artists(db, track: Track) -> list[str]:
     return deduped
 
 
+def _stop_summary(
+    batch_number: int,
+    total_checked: int,
+    total_processed: int,
+    total_skipped: int,
+    total_artist_similarity_ingested: int,
+    total_artist_similarity_skipped: int,
+    total_track_similarity_ingested: int,
+    total_track_similarity_skipped: int,
+) -> Dict:
+    mark_stopping()
+    print("\n=== LAST.FM ENRICHMENT STOP REQUESTED ===")
+
+    summary = {
+        "stopped": True,
+        "batches_processed": batch_number,
+        "total_checked": total_checked,
+        "total_processed": total_processed,
+        "total_skipped": total_skipped,
+        "total_artist_similarity_ingested": total_artist_similarity_ingested,
+        "total_artist_similarity_skipped": total_artist_similarity_skipped,
+        "total_track_similarity_ingested": total_track_similarity_ingested,
+        "total_track_similarity_skipped": total_track_similarity_skipped,
+    }
+
+    mark_stopped()
+    return summary
+
+
 def run_lastfm_enrichment() -> Dict:
     db = SessionLocal()
 
@@ -93,30 +122,33 @@ def run_lastfm_enrichment() -> Dict:
                 break
 
             batch_number += 1
-
             print(f"\n=== LAST.FM BATCH {batch_number} ({len(tracks)} tracks) ===\n")
 
             for index, track in enumerate(tracks, start=1):
                 if should_stop():
-                    mark_stopping()
-                    print("\n=== LAST.FM ENRICHMENT STOP REQUESTED ===")
-                    summary = {
-                        "stopped": True,
-                        "batches_processed": batch_number,
-                        "total_checked": total_checked,
-                        "total_processed": total_processed,
-                        "total_skipped": total_skipped,
-                        "total_artist_similarity_ingested": total_artist_similarity_ingested,
-                        "total_artist_similarity_skipped": total_artist_similarity_skipped,
-                        "total_track_similarity_ingested": total_track_similarity_ingested,
-                        "total_track_similarity_skipped": total_track_similarity_skipped,
-                    }
-                    mark_stopped()
-                    return summary
+                    return _stop_summary(
+                        batch_number,
+                        total_checked,
+                        total_processed,
+                        total_skipped,
+                        total_artist_similarity_ingested,
+                        total_artist_similarity_skipped,
+                        total_track_similarity_ingested,
+                        total_track_similarity_skipped,
+                    )
 
                 attempted_track_ids.add(track.id)
 
-                result = enrich_track_lastfm_tags(db, track.id)
+                try:
+                    result = enrich_track_lastfm_tags(db, track.id)
+                except Exception as error:
+                    db.rollback()
+                    result = {
+                        "success": False,
+                        "reason": "lastfm_tag_enrichment_failed",
+                        "error": str(error),
+                        "added_genres": [],
+                    }
 
                 total_checked += 1
 
@@ -125,11 +157,31 @@ def run_lastfm_enrichment() -> Dict:
                 else:
                     total_skipped += 1
 
-                track_similarity_result = ingest_similar_tracks_for_track(
-                    db=db,
-                    track_id=track.id,
-                    limit=SIMILAR_TRACK_LIMIT,
-                )
+                if should_stop():
+                    return _stop_summary(
+                        batch_number,
+                        total_checked,
+                        total_processed,
+                        total_skipped,
+                        total_artist_similarity_ingested,
+                        total_artist_similarity_skipped,
+                        total_track_similarity_ingested,
+                        total_track_similarity_skipped,
+                    )
+
+                try:
+                    track_similarity_result = ingest_similar_tracks_for_track(
+                        db=db,
+                        track_id=track.id,
+                        limit=SIMILAR_TRACK_LIMIT,
+                    )
+                except Exception as error:
+                    db.rollback()
+                    track_similarity_result = {
+                        "success": False,
+                        "reason": "lastfm_track_similarity_failed",
+                        "error": str(error),
+                    }
 
                 if track_similarity_result["success"]:
                     total_track_similarity_ingested += 1
@@ -148,10 +200,35 @@ def run_lastfm_enrichment() -> Dict:
                         f"result={track_similarity_result.get('reason', 'failed')}"
                     )
 
+                if should_stop():
+                    return _stop_summary(
+                        batch_number,
+                        total_checked,
+                        total_processed,
+                        total_skipped,
+                        total_artist_similarity_ingested,
+                        total_artist_similarity_skipped,
+                        total_track_similarity_ingested,
+                        total_track_similarity_skipped,
+                    )
+
                 track_artists = _collect_track_artists(db, track)
 
                 for artist_name in track_artists:
+                    if should_stop():
+                        return _stop_summary(
+                            batch_number,
+                            total_checked,
+                            total_processed,
+                            total_skipped,
+                            total_artist_similarity_ingested,
+                            total_artist_similarity_skipped,
+                            total_track_similarity_ingested,
+                            total_track_similarity_skipped,
+                        )
+
                     normalized_artist_key = normalize_artist_name(artist_name)
+
                     if not normalized_artist_key:
                         total_artist_similarity_skipped += 1
                         continue
@@ -162,11 +239,19 @@ def run_lastfm_enrichment() -> Dict:
 
                     attempted_artist_keys.add(normalized_artist_key)
 
-                    similarity_result = ingest_similar_artists_for_artist(
-                        db=db,
-                        artist_name=artist_name,
-                        limit=SIMILAR_ARTIST_LIMIT,
-                    )
+                    try:
+                        similarity_result = ingest_similar_artists_for_artist(
+                            db=db,
+                            artist_name=artist_name,
+                            limit=SIMILAR_ARTIST_LIMIT,
+                        )
+                    except Exception as error:
+                        db.rollback()
+                        similarity_result = {
+                            "success": False,
+                            "reason": "lastfm_artist_similarity_failed",
+                            "error": str(error),
+                        }
 
                     if similarity_result["success"]:
                         total_artist_similarity_ingested += 1
