@@ -11,6 +11,8 @@ class AppSetting(Base):
     cleanup_time = Column(String, nullable=True)
     scan_enabled = Column(Boolean, nullable=False, default=False)
     scan_time = Column(String, nullable=True)
+    lastfm_enrichment_enabled = Column(Boolean, nullable=False, default=False)
+    lastfm_enrichment_time = Column(String, nullable=True)
     lastfm_api_key = Column(String, nullable=True)
     lastfm_api_secret = Column(String, nullable=True)
     lastfm_username = Column(String, nullable=True)

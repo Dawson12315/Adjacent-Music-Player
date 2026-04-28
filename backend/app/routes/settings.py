@@ -40,6 +40,8 @@ def get_or_create_settings(db: Session) -> AppSetting:
         lastfm_api_secret=None,
         lastfm_username=None,
         lastfm_session_key=None,
+        lastfm_enrichment_enabled=False,
+        lastfm_enrichment_time=None,
     )
 
     db.add(settings)
@@ -62,6 +64,8 @@ def get_settings(db: Session = Depends(get_db)):
         "lastfm_api_secret": settings.lastfm_api_secret,
         "lastfm_username": settings.lastfm_username,
         "lastfm_session_key": settings.lastfm_session_key,
+        "lastfm_enrichment_enabled": settings.lastfm_enrichment_enabled,
+        "lastfm_enrichment_time": settings.lastfm_enrichment_time,
     }
 
 
@@ -77,6 +81,8 @@ def update_settings(payload: AppSettingsUpdate, db: Session = Depends(get_db)):
     settings.lastfm_api_secret = payload.lastfm_api_secret
     settings.lastfm_username = payload.lastfm_username
     settings.lastfm_session_key = payload.lastfm_session_key
+    settings.lastfm_enrichment_enabled = payload.lastfm_enrichment_enabled
+    settings.lastfm_enrichment_time = payload.lastfm_enrichment_time
 
     db.commit()
     db.refresh(settings)
@@ -91,6 +97,8 @@ def update_settings(payload: AppSettingsUpdate, db: Session = Depends(get_db)):
         "lastfm_api_secret": settings.lastfm_api_secret,
         "lastfm_username": settings.lastfm_username,
         "lastfm_session_key": settings.lastfm_session_key,
+        "lastfm_enrichment_enabled": settings.lastfm_enrichment_enabled,
+        "lastfm_enrichment_time": settings.lastfm_enrichment_time,
     }
 
 
