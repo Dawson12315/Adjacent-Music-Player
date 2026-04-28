@@ -186,6 +186,16 @@ def run_simple_migrations():
             connection.execute(
                 text("ALTER TABLE app_settings ADD COLUMN lastfm_session_key TEXT")
             )
+        
+        if "lastfm_enrichment_enabled" not in app_settings_column_names:
+            connection.execute(
+                text("ALTER TABLE app_settings ADD COLUMN lastfm_enrichment_enabled BOOLEAN NOT NULL DEFAULT 0")
+            )
+
+        if "lastfm_enrichment_time" not in app_settings_column_names:
+            connection.execute(
+                text("ALTER TABLE app_settings ADD COLUMN lastfm_enrichment_time TEXT")
+            )
 
         connection.execute(
             text(

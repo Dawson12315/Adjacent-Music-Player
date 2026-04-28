@@ -41,6 +41,8 @@ function App() {
     cleanup_time: "",
     scan_enabled: false,
     scan_time: "",
+    lastfm_enrichment_enabled: false,
+    lastfm_enrichment_time: "",
   });
   const [lastfmReadiness, setLastfmReadiness] = useState({
     total_tracks: 0,
@@ -308,6 +310,8 @@ function App() {
           cleanup_time: settingsData.cleanup_time || "",
           scan_enabled: settingsData.scan_enabled,
           scan_time: settingsData.scan_time || "",
+          lastfm_enrichment_enabled: settingsData.lastfm_enrichment_enabled,
+          lastfm_enrichment_time: settingsData.lastfm_enrichment_time || "",
         })
         setLastfmReadiness(lastfmReadinessData);
         setLikedSongsPlaylist(likedSongsPlaylistData);
@@ -1349,6 +1353,8 @@ function App() {
           lastfm_api_secret: lastfmApiSecret.trim() || null,
           lastfm_username: lastfmUsername || null,
           lastfm_session_key: lastfmSessionKey || null,
+          lastfm_enrichment_enabled: appSettings.lastfm_enrichment_enabled,
+          lastfm_enrichment_time: appSettings.lastfm_enrichment_time || null,
         }),
       });
 
@@ -3220,6 +3226,28 @@ function App() {
                 </span>
               </div>
             )}
+
+            <label className="settings-field settings-field--inline">
+              <input
+                type="checkbox"
+                checked={appSettings.lastfm_enrichment_enabled}
+                onChange={() => handleSettingsToggle("lastfm_enrichment_enabled")}
+              />
+              <span>Enable daily Last.fm enrichment</span>
+            </label>
+
+            <label className="settings-field">
+              <span className="settings-field__label">Run time</span>
+              <input
+                className="settings-time-input"
+                type="time"
+                value={appSettings.lastfm_enrichment_time}
+                onChange={(event) =>
+                  handleSettingsTimeChange("lastfm_enrichment_time", event.target.value)
+                }
+              />
+            </label>
+
           </div>
 
           <div className="settings-card__actions">
