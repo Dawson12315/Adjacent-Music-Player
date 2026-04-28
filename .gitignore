@@ -17,7 +17,13 @@ venv/
 node_modules/
 dist/
 
-# SQLite database
+# Ignore everything in backend data folder
+backend/data/*
+
+# But keep the folder itself
+!backend/data/.gitkeep
+
+# SQLite files (extra safety)
 *.db
 *.db-shm
 *.db-wal
