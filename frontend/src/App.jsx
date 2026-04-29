@@ -82,6 +82,10 @@ function App() {
     window.APP_CONFIG?.API_BASE_URL ||
     `${window.location.protocol}//${window.location.hostname}:8000`;
   const [artworkPlaylist, setArtworkPlaylist] = useState(null);
+  const [albumArtworkMap, setAlbumArtworkMap] = useState({});
+  const [artworkAlbum, setArtworkAlbum] = useState(null);
+  const [albumArtworkFile, setAlbumArtworkFile] = useState(null);
+  const [albumArtworkPreviewUrl, setAlbumArtworkPreviewUrl] = useState("");
   const [artworkFile, setArtworkFile] = useState(null);
   const [artworkPreviewUrl, setArtworkPreviewUrl] = useState("");
   const [genres, setGenres] = useState([]);
@@ -2070,6 +2074,73 @@ function App() {
     }
   }
 
+  function handleOpenChangeAlbumArtwork(albumName) {
+    setArtworkAlbum(albumName);
+    setAlbumArtworkFile(null);
+
+    const currentArtwork = albumArtworkMap[albumName];
+
+    setAlbumArtworkPreviewUrl(
+      currentArtwork ? `${API_BASE_URL}${currentArtwork}` : ""
+    );
+  }
+
+  function handleCloseChangeAlbumArtwork() {
+    setArtworkAlbum(null);
+    setAlbumArtworkFile(null);
+    setAlbumArtworkPreviewUrl("");
+  }
+
+  function handleAlbumArtworkFileChange(event) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setAlbumArtworkFile(file);
+    setAlbumArtworkPreviewUrl(URL.createObjectURL(file));
+  }
+
+  async function handleSaveAlbumArtwork() {
+    if (!artworkAlbum || !albumArtworkFile) {
+      return;
+    }
+
+    const albumBeingEdited = artworkAlbum;
+
+    try {
+      const formData = new FormData();
+      formData.append("file", albumArtworkFile);
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/albums/${encodeURIComponent(albumBeingEdited)}/artwork`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to upload album artwork");
+      }
+
+      const result = await response.json();
+      const nextArtworkPath = result.artwork_path || "";
+
+      setAlbumArtworkMap((prev) => ({
+        ...prev,
+        [getAlbumKey(albumBeingEdited)]: nextArtworkPath
+          ? `${nextArtworkPath}?v=${Date.now()}`
+          : "",
+      }));
+
+      handleCloseChangeAlbumArtwork();
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   async function fetchLastfmProgress() {
     try {
       const response = await fetch(
@@ -2251,6 +2322,27 @@ function App() {
       type: "generated",
       initials: getPlaylistInitials(playlist.name),
       gradientClass: getPlaylistGradientClass(playlist.name),
+    };
+  }
+  function getAlbumKey(albumName) {
+    return (albumName || "").trim();
+  }
+
+  function getAlbumArtwork(albumName) {
+    const albumKey = getAlbumKey(albumName);
+    const artworkPath = albumArtworkMap[albumKey];
+
+    if (artworkPath) {
+      return {
+        type: "image",
+        src: `${API_BASE_URL}${artworkPath}`,
+      };
+    }
+
+    return {
+      type: "generated",
+      initials: getPlaylistInitials(albumName),
+      gradientClass: getPlaylistGradientClass(albumName),
     };
   }
 
@@ -2465,6 +2557,8 @@ function App() {
     );
   }, [albums, searchQuery]);
 
+
+
   const visibleGenres = useMemo(() => {
     return genres.filter((genre) =>
       genre.toLowerCase().includes(searchQuery.trim().toLowerCase())
@@ -2532,6 +2626,71 @@ function App() {
 
     fetchArtistGridArtwork();
   }, [activeView, artistViewMode, paginatedArtists, artistArtworkMap]);
+
+  useEffect(() => {
+    async function fetchAlbumArtwork() {
+      const albumsNeeded = new Set();
+    
+      if (activeView === "albums") {
+        visibleAlbums.slice(0, 80).forEach((album) => {
+          if (album) albumsNeeded.add(getAlbumKey(album));
+        });
+      }
+    
+      if (selectedAlbum) {
+        albumsNeeded.add(getAlbumKey(selectedAlbum));
+      }
+    
+      paginatedTracks.forEach((track) => {
+        if (track.album) albumsNeeded.add(getAlbumKey(track.album));
+      });
+    
+      playlistTracks.forEach((track) => {
+        if (track.album) albumsNeeded.add(getAlbumKey(track.album));
+      });
+    
+      const albumsToFetch = Array.from(albumsNeeded).filter(
+        (album) => album && albumArtworkMap[album] === undefined
+      );
+    
+      if (albumsToFetch.length === 0) return;
+    
+      try {
+        const results = await Promise.all(
+          albumsToFetch.map(async (album) => {
+            const response = await fetch(
+              `${API_BASE_URL}/api/albums/${encodeURIComponent(album)}/artwork`,
+              { cache: "no-store" }
+            );
+          
+            if (!response.ok) {
+              return [album, ""];
+            }
+          
+            const data = await response.json();
+            return [album, data.artwork_path || ""];
+          })
+        );
+      
+        setAlbumArtworkMap((prev) => ({
+          ...prev,
+          ...Object.fromEntries(results),
+        }));
+      } catch (error) {
+        console.error("Failed to fetch album artwork", error);
+      }
+    }
+  
+    fetchAlbumArtwork();
+  }, [
+    activeView,
+    visibleAlbums,
+    selectedAlbum,
+    paginatedTracks,
+    playlistTracks,
+    albumArtworkMap,
+    API_BASE_URL,
+  ]);
 
   const editArtistAlbums = useMemo(() => {
     return albums.filter((album) =>
@@ -2634,6 +2793,17 @@ function App() {
                 type="button"
               >
                 <div className="track-row__index">{index + 1}</div>
+                  {track.album && getAlbumArtwork(track.album).type === "image" ? (
+                    <img
+                      className="track-row__album-art"
+                      src={getAlbumArtwork(track.album).src}
+                      alt={track.album}
+                    />
+                  ) : (
+                    <div className="track-row__album-art track-row__album-art--placeholder">
+                      ♪
+                    </div>
+                  )}
               
                 <div className="track-row__content">
                   <div className="track-row__title">{track.title}</div>
@@ -3477,18 +3647,44 @@ function App() {
     if (activeView === "albums") {
       return (
         <div className="simple-list">
-          {visibleAlbums.map((album) => (
-            <button
-              key = {album}
-              className= "simple-list__row simple-list__row--button"
-              onClick={() => handleAlbumClick(album)}
-              type="button"
-            >
-              {album}
-            </button>
-          ))}
+          {visibleAlbums.map((album) => {
+            const artwork = getAlbumArtwork(album);
+          
+            return (
+              <div key={album} className="album-list-row">
+                <button
+                  className="album-list-row__main"
+                  onClick={() => handleAlbumClick(album)}
+                  type="button"
+                >
+                  {artwork.type === "image" ? (
+                    <img
+                      className="album-list-row__art"
+                      src={artwork.src}
+                      alt={album}
+                    />
+                  ) : (
+                    <div className={`album-list-row__art album-list-row__art--generated ${artwork.    gradientClass}`}>
+                      <span>{artwork.initials}</span>
+                    </div>
+                  )}
+
+                  <span className="album-list-row__name">{album}</span>
+                </button>
+                
+                <button
+                  className="album-list-row__menu-button"
+                  type="button"
+                  onClick={() => handleOpenChangeAlbumArtwork(album)}
+                  aria-label={`Change artwork for ${album}`}
+                >
+                  ⋯
+                </button>
+              </div>
+            );
+          })}
         </div>
-      )
+      );
     }
     if (activeView === "genres") {
       return (
@@ -3537,8 +3733,22 @@ function App() {
             onClick={() => handleTrackClick(track)}
             type="button"
           >
-            <div className="track-row__index">
-              {(tracksPage - 1) * TRACKS_PAGE_SIZE + index + 1}
+            <div className="track-row__index-group">
+              <div className="track-row__index">
+                {(tracksPage - 1) * TRACKS_PAGE_SIZE + index + 1}
+              </div>
+
+              {track.album && getAlbumArtwork(track.album).type === "image" ? (
+                <img
+                  className="track-row__album-art"
+                  src={getAlbumArtwork(track.album).src}
+                  alt={track.album}
+                />
+              ) : (
+                <div className="track-row__album-art track-row__album-art--placeholder">
+                  ♪
+                </div>
+              )}
             </div>
             
             <div className="track-row__content">
@@ -3741,6 +3951,15 @@ function App() {
   }
   function getLastfmProgressPercent() {
     return Math.max(0, Math.min(lastfmProgress?.progress_percent || 0, 100));
+  }
+
+  function getTrackArtwork(track) {
+    if (!track?.album) {
+      return null;
+    }
+
+    const artwork = getAlbumArtwork(track.album);
+    return artwork.type === "image" ? artwork.src : null;
   }
 
   function formatTime(timeInSeconds) {
@@ -4232,6 +4451,15 @@ function App() {
                       <div className="artist-hero-banner__overlay" />
                     </div>
                   )}
+                  {activeView === "tracks" && selectedAlbum && getAlbumArtwork(selectedAlbum).type === "image" && (
+                    <div className="album-hero">
+                      <img
+                        className="album-hero__image"
+                        src={getAlbumArtwork(selectedAlbum).src}
+                        alt={`${selectedAlbum} artwork`}
+                      />
+                    </div>
+                  )}
               <div className="main-content__header-row">
                 <div>
 
@@ -4359,10 +4587,22 @@ function App() {
         <div className="player-bar__left">
           {selectedTrack ? (
             <>
-              <div className="player-bar__title">{selectedTrack.title}</div>
-              <div className="player-bar__meta">
-                {selectedTrack.artist || "Unknown Artist"} •{" "}
-                {selectedTrack.album || "Unknown Album"}
+              {getTrackArtwork(selectedTrack) ? (
+                <img
+                  className="player-bar__art"
+                  src={getTrackArtwork(selectedTrack)}
+                  alt={selectedTrack.album || selectedTrack.title}
+                />
+              ) : (
+                <div className="player-bar__art player-bar__art--placeholder">♪</div>
+              )}
+        
+              <div className="player-bar__track-info">
+                <div className="player-bar__title">{selectedTrack.title}</div>
+                <div className="player-bar__meta">
+                  {selectedTrack.artist || "Unknown Artist"} •{" "}
+                  {selectedTrack.album || "Unknown Album"}
+                </div>
               </div>
             </>
           ) : (
@@ -4968,7 +5208,71 @@ function App() {
           </div>
         </div>
       )}
+    {artworkAlbum && (
+      <div className="modal-overlay" onClick={handleCloseChangeAlbumArtwork}>
+        <div className="modal" onClick={(event) => event.stopPropagation()}>
+          <div className="modal__header">
+            <h2>Change Album Artwork</h2>
+          </div>
 
+          <div className="modal__body">
+            <label className="modal__field">
+              <span className="modal__label">Upload artwork</span>
+
+              <div className="modal__file-row">
+                <label className="modal__file-button">
+                  Choose file
+                  <input
+                    className="modal__file-input"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAlbumArtworkFileChange}
+                  />
+                </label>
+
+                <span className="modal__file-name">
+                  {albumArtworkFile ? albumArtworkFile.name : "No file selected"}
+                </span>
+              </div>
+            </label>
+
+            <div className="modal__field">
+              <span className="modal__label">Preview</span>
+              {albumArtworkPreviewUrl ? (
+                <img
+                  className="playlist-artwork-preview"
+                  src={albumArtworkPreviewUrl}
+                  alt={`${artworkAlbum} artwork preview`}
+                />
+              ) : (
+                <div className="playlist-artwork-preview playlist-artwork-preview--empty">
+                  No artwork selected
+                </div>
+              )}
+            </div>
+          </div>
+            
+          <div className="modal__actions">
+            <button
+              className="settings-button settings-button--secondary"
+              type="button"
+              onClick={handleCloseChangeAlbumArtwork}
+            >
+              Cancel
+            </button>
+            
+            <button
+              className="settings-button"
+              type="button"
+              onClick={handleSaveAlbumArtwork}
+              disabled={!albumArtworkFile}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </div>
   );
 }
