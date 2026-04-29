@@ -2792,19 +2792,20 @@ function App() {
                 onClick={() => handleTrackClick(track)}
                 type="button"
               >
-                <div className="track-row__index">{index + 1}</div>
-                  {track.album && getAlbumArtwork(track.album).type === "image" ? (
-                    <img
-                      className="track-row__album-art"
-                      src={getAlbumArtwork(track.album).src}
-                      alt={track.album}
-                    />
-                  ) : (
-                    <div className="track-row__album-art track-row__album-art--placeholder">
-                      ♪
-                    </div>
-                  )}
-              
+                <div className="track-row__index-group">
+                  <div className="track-row__index">{index + 1}</div>
+                    {track.album && getAlbumArtwork(track.album).type === "image" ? (
+                      <img
+                        className="track-row__album-art"
+                        src={getAlbumArtwork(track.album).src}
+                        alt={track.album}
+                      />
+                    ) : (
+                      <div className="track-row__album-art track-row__album-art--placeholder">
+                        ♪
+                      </div>
+                    )}
+                  </div>
                 <div className="track-row__content">
                   <div className="track-row__title">{track.title}</div>
                   <div className="track-row__meta">
@@ -3734,23 +3735,22 @@ function App() {
             type="button"
           >
             <div className="track-row__index-group">
-              <div className="track-row__index">
-                {(tracksPage - 1) * TRACKS_PAGE_SIZE + index + 1}
-              </div>
+              <div className="track-row__index-group">
+                <div className="track-row__index">{index + 1}</div>
 
-              {track.album && getAlbumArtwork(track.album).type === "image" ? (
-                <img
-                  className="track-row__album-art"
-                  src={getAlbumArtwork(track.album).src}
-                  alt={track.album}
-                />
-              ) : (
-                <div className="track-row__album-art track-row__album-art--placeholder">
-                  ♪
-                </div>
-              )}
+                {track.album && getAlbumArtwork(track.album).type === "image" ? (
+                  <img
+                    className="track-row__album-art"
+                    src={getAlbumArtwork(track.album).src}
+                    alt={track.album}
+                  />
+                ) : (
+                  <div className="track-row__album-art track-row__album-art--placeholder">
+                    ♪
+                  </div>
+                )}
+              </div>
             </div>
-            
             <div className="track-row__content">
               <div className="track-row__title">{track.title}</div>
               <div className="track-row__meta">
