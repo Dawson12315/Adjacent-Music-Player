@@ -30,7 +30,7 @@ from app.services.scheduler import start_scheduler
 from app.routes import recommendation_evaluation
 
 
-UPLOADS_DIR = "uploads"
+UPLOADS_DIR = "data/uploads"
 
 
 app = FastAPI(
@@ -39,8 +39,13 @@ app = FastAPI(
 )
 
 
-os.makedirs(f"{UPLOADS_DIR}/artists", exist_ok=True)
-os.makedirs(f"{UPLOADS_DIR}/albums", exist_ok=True)
+def ensure_upload_dirs():
+    os.makedirs(f"{UPLOADS_DIR}/artists", exist_ok=True)
+    os.makedirs(f"{UPLOADS_DIR}/albums", exist_ok=True)
+    os.makedirs(f"{UPLOADS_DIR}/playlist_artwork", exist_ok=True)
+
+
+ensure_upload_dirs()
 
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
@@ -59,9 +64,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup():
-    os.makedirs(f"{UPLOADS_DIR}/artists", exist_ok=True)
-    os.makedirs(f"{UPLOADS_DIR}/albums", exist_ok=True)
-    os.makedirs(f"{UPLOADS_DIR}/playlists", exist_ok=True)
+    ensure_upload_dirs()
 
     Base.metadata.create_all(bind=engine)
     run_simple_migrations()

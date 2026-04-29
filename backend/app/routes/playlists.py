@@ -23,6 +23,9 @@ from app.services.recommendations.playlist_recommender import (
 
 router = APIRouter()
 
+PLAYLIST_ARTWORK_DIR = "data/uploads/playlist_artwork"
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+
 
 @router.get("/playlists", response_model=list[PlaylistResponse], tags=["playlists"])
 def list_playlists(db: Session = Depends(get_db)):
@@ -209,21 +212,25 @@ def upload_playlist_artwork(
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
-    upload_dir = "app/uploads/playlist_artwork"
-    os.makedirs(upload_dir, exist_ok=True)
+    os.makedirs(PLAYLIST_ARTWORK_DIR, exist_ok=True)
 
-    extension = os.path.splitext(file.filename or "")[1].lower() or ".png"
+    extension = os.path.splitext(file.filename or "")[1].lower()
+    if extension not in ALLOWED_IMAGE_EXTENSIONS:
+        extension = ".png"
+
     filename = f"{uuid4().hex}{extension}"
-    file_path = os.path.join(upload_dir, filename)
+    file_path = os.path.join(PLAYLIST_ARTWORK_DIR, filename)
 
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     if playlist.artwork_path:
-        old_path = playlist.artwork_path.lstrip("/")
-        if os.path.exists(old_path):
+        old_filename = os.path.basename(playlist.artwork_path)
+        old_file_path = os.path.join(PLAYLIST_ARTWORK_DIR, old_filename)
+
+        if os.path.exists(old_file_path):
             try:
-                os.remove(old_path)
+                os.remove(old_file_path)
             except OSError:
                 pass
 

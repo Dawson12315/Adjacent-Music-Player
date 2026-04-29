@@ -3,8 +3,8 @@ import shutil
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models.artist_artwork import ArtistArtwork
@@ -13,7 +13,8 @@ from app.utils.artist_normalization import normalize_artist_name
 
 router = APIRouter()
 
-ARTIST_ARTWORK_DIR = "uploads/artists"
+ARTIST_ARTWORK_DIR = "data/uploads/artists"
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 @router.get("/artists", tags=["artists"])
@@ -63,16 +64,16 @@ def upload_artist_artwork(
     os.makedirs(ARTIST_ARTWORK_DIR, exist_ok=True)
 
     extension = os.path.splitext(file.filename or "")[1].lower()
-    if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
+    if extension not in ALLOWED_IMAGE_EXTENSIONS:
         extension = ".jpg"
 
-    filename = f"{uuid4()}{extension}"
+    filename = f"{uuid4().hex}{extension}"
     file_path = os.path.join(ARTIST_ARTWORK_DIR, filename)
 
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    artwork_path = f"/{file_path}"
+    artwork_path = f"/uploads/artists/{filename}"
 
     artwork = (
         db.query(ArtistArtwork)
@@ -81,6 +82,16 @@ def upload_artist_artwork(
     )
 
     if artwork:
+        if artwork.artwork_path:
+            old_filename = os.path.basename(artwork.artwork_path)
+            old_file_path = os.path.join(ARTIST_ARTWORK_DIR, old_filename)
+
+            if os.path.exists(old_file_path):
+                try:
+                    os.remove(old_file_path)
+                except OSError:
+                    pass
+
         artwork.artist_name = artist_name
         artwork.artwork_path = artwork_path
     else:

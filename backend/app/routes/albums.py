@@ -12,7 +12,8 @@ from app.models.track import Track
 
 router = APIRouter()
 
-ALBUM_ARTWORK_DIR = "uploads/albums"
+ALBUM_ARTWORK_DIR = "data/uploads/albums"
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 def normalize_album_name(album_name: str) -> str:
@@ -65,16 +66,16 @@ def upload_album_artwork(
     os.makedirs(ALBUM_ARTWORK_DIR, exist_ok=True)
 
     extension = os.path.splitext(file.filename or "")[1].lower()
-    if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
+    if extension not in ALLOWED_IMAGE_EXTENSIONS:
         extension = ".jpg"
 
-    filename = f"{uuid4()}{extension}"
+    filename = f"{uuid4().hex}{extension}"
     file_path = os.path.join(ALBUM_ARTWORK_DIR, filename)
 
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    artwork_path = f"/{file_path}"
+    artwork_path = f"/uploads/albums/{filename}"
 
     artwork = (
         db.query(AlbumArtwork)
@@ -83,6 +84,16 @@ def upload_album_artwork(
     )
 
     if artwork:
+        if artwork.artwork_path:
+            old_filename = os.path.basename(artwork.artwork_path)
+            old_file_path = os.path.join(ALBUM_ARTWORK_DIR, old_filename)
+
+            if os.path.exists(old_file_path):
+                try:
+                    os.remove(old_file_path)
+                except OSError:
+                    pass
+
         artwork.album_name = album_name
         artwork.artwork_path = artwork_path
     else:
