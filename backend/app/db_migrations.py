@@ -372,3 +372,25 @@ def run_simple_migrations():
                 """
             )
         )
+
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS artist_artwork (
+                    id INTEGER PRIMARY KEY,
+                    artist_name TEXT NOT NULL,
+                    artist_key TEXT NOT NULL UNIQUE,
+                    artwork_path TEXT
+                )
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_artist_artwork_artist_key
+                ON artist_artwork(artist_key)
+                """
+            )
+        )

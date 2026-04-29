@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,18 +29,27 @@ from app.services.scheduler import start_scheduler
 
 from app.routes import recommendation_evaluation
 
+
+UPLOADS_DIR = "uploads"
+
+
 app = FastAPI(
     title=settings.app_name,
     debug=settings.debug,
 )
 
-app.mount("/uploads", StaticFiles(directory="app/uploads"), name="uploads")
+
+os.makedirs(f"{UPLOADS_DIR}/artists", exist_ok=True)
+os.makedirs(f"{UPLOADS_DIR}/albums", exist_ok=True)
+
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         settings.frontend_origin,
-        "http://localhost:5173"
+        "http://localhost:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -48,6 +59,10 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup():
+    os.makedirs(f"{UPLOADS_DIR}/artists", exist_ok=True)
+    os.makedirs(f"{UPLOADS_DIR}/albums", exist_ok=True)
+    os.makedirs(f"{UPLOADS_DIR}/playlists", exist_ok=True)
+
     Base.metadata.create_all(bind=engine)
     run_simple_migrations()
 

@@ -64,6 +64,10 @@ function App() {
   const [editTrackAlbum, setEditTrackAlbum] = useState("");
   const [editTrackGenres, setEditTrackGenres] = useState("");
   const [isArtistMenuOpen, setIsArtistMenuOpen] = useState(false);
+  const [selectedArtistArtworkPath, setSelectedArtistArtworkPath] = useState("");
+  const [artistArtworkMap, setArtistArtworkMap] = useState({});
+  const [artistArtworkFile, setArtistArtworkFile] = useState(null);
+  const [artistArtworkPreviewUrl, setArtistArtworkPreviewUrl] = useState("");
   const [isCreatingArtist, setIsCreatingArtist] = useState(false);
   const [newArtistName, setNewArtistName] = useState("");
   const [isAlbumMenuOpen, setIsAlbumMenuOpen] = useState(false);
@@ -101,6 +105,7 @@ function App() {
     recently_played: [],
   });
   const [isLoadingStatsOverview, setIsLoadingStatsOverview] = useState(false);
+  const [artistViewMode, setArtistViewMode] = useState("list");
 
   const TRACKS_PAGE_SIZE = 50;
   const ARTISTS_PAGE_SIZE = 50;
@@ -1650,13 +1655,51 @@ function App() {
   function handleOpenEditArtist() {
     if (!selectedArtist) {
       return;
-    }
+    }    
+    setArtistArtworkFile(null);
+    setArtistArtworkPreviewUrl(
+      selectedArtistArtworkPath ? `${API_BASE_URL}${selectedArtistArtworkPath}` : ""
+    );
 
     setEditingArtistName(selectedArtist);
     setTransferArtistTarget("");
     setIsArtistActionsOpen(false);
     setIsEditArtistModalOpen(true);
     setIsTransferArtistMenuOpen(false);
+  }
+
+  function handleArtistArtworkFileChange(event) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setArtistArtworkFile(file);
+    setArtistArtworkPreviewUrl(URL.createObjectURL(file));
+  }
+
+  async function handleSaveArtistArtwork(artistName) {
+    if (!artistName || !artistArtworkFile) {
+      return null;
+    }
+
+    const formData = new FormData();
+    formData.append("file", artistArtworkFile);
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/artists/${encodeURIComponent(artistName)}/artwork`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to upload artist artwork");
+    }
+
+    return response.json();
   }
 
   function handleCloseEditArtist() {
@@ -1760,6 +1803,10 @@ function App() {
       );
 
       setSelectedArtist(currentSourceArtist);
+      if (artistArtworkFile) {
+        const artworkResult = await handleSaveArtistArtwork(currentSourceArtist);
+        setSelectedArtistArtworkPath(artworkResult?.artwork_path || "");
+      }
       handleCloseEditArtist();
     } catch (error) {
       console.error(error);
@@ -2379,6 +2426,33 @@ function App() {
     }
   }, [lastfmReadiness])
 
+  useEffect(() => {
+    async function fetchSelectedArtistArtwork() {
+      if (!selectedArtist) {
+        setSelectedArtistArtworkPath("");
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/artists/${encodeURIComponent(selectedArtist)}/artwork`
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch artist artwork");
+        }
+
+        const data = await response.json();
+        setSelectedArtistArtworkPath(data.artwork_path || "");
+      } catch (error) {
+        console.error(error);
+        setSelectedArtistArtworkPath("");
+      }
+    }
+
+    fetchSelectedArtistArtwork();
+  }, [selectedArtist]);
+
   const visibleArtists = useMemo(() => {
     return artists.filter((artist) =>
       artist.toLowerCase().includes(searchQuery.trim().toLowerCase())
@@ -2416,6 +2490,48 @@ function App() {
     1,
     Math.ceil(visibleArtists.length / ARTISTS_PAGE_SIZE)
   );
+
+  useEffect(() => {
+    if (activeView !== "artists" || artistViewMode !== "grid") {
+      return;
+    }
+
+    async function fetchArtistGridArtwork() {
+      const artistsToFetch = paginatedArtists.filter(
+        (artist) => artistArtworkMap[artist] === undefined
+      );
+
+      if (artistsToFetch.length === 0) {
+        return;
+      }
+
+      try {
+        const results = await Promise.all(
+          artistsToFetch.map(async (artist) => {
+            const response = await fetch(
+              `${API_BASE_URL}/api/artists/${encodeURIComponent(artist)}/artwork`
+            );
+
+            if (!response.ok) {
+              return [artist, ""];
+            }
+
+            const data = await response.json();
+            return [artist, data.artwork_path || ""];
+          })
+        );
+
+        setArtistArtworkMap((prev) => ({
+          ...prev,
+          ...Object.fromEntries(results),
+        }));
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    fetchArtistGridArtwork();
+  }, [activeView, artistViewMode, paginatedArtists, artistArtworkMap]);
 
   const editArtistAlbums = useMemo(() => {
     return albums.filter((album) =>
@@ -3264,47 +3380,97 @@ function App() {
     }
     if (activeView === "artists") {
       return (
-        <div className="simple-list">
-          {paginatedArtists.map((artist) => (
+        <>
+          <div className="view-toggle">
             <button
-              key={artist}
-              className="simple-list__row simple-list__row--button"
-              onClick={() => handleArtistClick(artist)}
+              className={`view-toggle__button ${
+                artistViewMode === "list" ? "view-toggle__button--active" : ""
+              }`}
               type="button"
+              onClick={() => setArtistViewMode("list")}
             >
-              {artist}
+              List
             </button>
-          ))}
+            
+            <button
+              className={`view-toggle__button ${
+                artistViewMode === "grid" ? "view-toggle__button--active" : ""
+              }`}
+              type="button"
+              onClick={() => setArtistViewMode("grid")}
+            >
+              Grid
+            </button>
+          </div>
+            
+          {artistViewMode === "list" ? (
+            <div className="simple-list">
+              {paginatedArtists.map((artist) => (
+                <button
+                  key={artist}
+                  className="simple-list__row simple-list__row--button"
+                  onClick={() => handleArtistClick(artist)}
+                  type="button"
+                >
+                  {artist}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="artist-grid">
+              {paginatedArtists.map((artist) => (
+                <button
+                  key={artist}
+                  className="artist-grid-card"
+                  onClick={() => handleArtistClick(artist)}
+                  type="button"
+                >
+                  <div className="artist-grid-card__image">
+                    {artistArtworkMap[artist] ? (
+                      <img
+                        className="artist-grid-card__img"
+                        src={`${API_BASE_URL}${artistArtworkMap[artist]}`}
+                        alt={artist}
+                      />
+                    ) : (
+                      <span>{artist.slice(0, 1).toUpperCase()}</span>
+                    )}
+                  </div>
+              
+                  <div className="artist-grid-card__name">{artist}</div>
+                </button>
+              ))}
+            </div>
+          )}
 
           {totalArtistPages > 1 && (
-              <div className="pagination">
-                <button
-                  className="pagination__button"
-                  type="button"
-                  onClick={() => setArtistsPage((prev) => Math.max(1, prev - 1))}
-                  disabled={artistsPage === 1}
-                >
-                  Previous
-                </button>
+            <div className="pagination">
+              <button
+                className="pagination__button"
+                type="button"
+                onClick={() => setArtistsPage((prev) => Math.max(1, prev - 1))}
+                disabled={artistsPage === 1}
+              >
+                Previous
+              </button>
           
-                <span className="pagination__label">
-                  Page {artistsPage} of {totalArtistPages}
-                </span>
+              <span className="pagination__label">
+                Page {artistsPage} of {totalArtistPages}
+              </span>
           
-                <button
-                  className="pagination__button"
-                  type="button"
-                  onClick={() =>
-                    setArtistsPage((prev) => Math.min(totalArtistPages, prev + 1))
-                  }
-                  disabled={artistsPage === totalArtistPages}
-                >
-                  Next
-                </button>
-              </div>
-            )}
-          </div>
-
+              <button
+                className="pagination__button"
+                type="button"
+                onClick={() =>
+                  setArtistsPage((prev) => Math.min(totalArtistPages, prev + 1))
+                }
+                disabled={artistsPage === totalArtistPages}
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </>
       );
     }
     
@@ -4056,8 +4222,19 @@ function App() {
         <div className={`content-layout ${isQueueOpen ? "content-layout--queue-open" : ""}`}>
           <div className="content-layout__main">
             <header className="main-content__header">
+                  {activeView === "tracks" && selectedArtist && selectedArtistArtworkPath && (
+                    <div className="artist-hero-banner">
+                      <img
+                        className="artist-hero-banner__image"
+                        src={`${API_BASE_URL}${selectedArtistArtworkPath}`}
+                        alt={`${selectedArtist} banner`}
+                      />
+                      <div className="artist-hero-banner__overlay" />
+                    </div>
+                  )}
               <div className="main-content__header-row">
                 <div>
+
                   <h1>{getHeaderTitle()}</h1>
                   {!loading && !error && (
                     <div className="page-header__meta">
@@ -4632,6 +4809,37 @@ function App() {
             </div>
       
             <div className="modal__body">
+              <div className="modal__raw-metadata">
+                <div className="modal__raw-metadata-title">Artist banner artwork</div>
+
+                {artistArtworkPreviewUrl ? (
+                  <img
+                    className="artist-banner-preview"
+                    src={artistArtworkPreviewUrl}
+                    alt="Artist banner preview"
+                  />
+                ) : (
+                  <div className="artist-banner-preview artist-banner-preview--empty">
+                    No artist artwork selected
+                  </div>
+                )}
+
+                <div className="modal__file-row">
+                  <label className="modal__file-button">
+                    Choose image
+                    <input
+                      className="modal__file-input"
+                      type="file"
+                      accept="image/*"
+                      onChange={handleArtistArtworkFileChange}
+                    />
+                  </label>
+              
+                  <span className="modal__file-name">
+                    {artistArtworkFile ? artistArtworkFile.name : "No file selected"}
+                  </span>
+                </div>
+              </div>
               <label className="modal__field">
                 <span className="modal__label">Rename artist</span>
                 <input
