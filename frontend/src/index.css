@@ -1800,6 +1800,59 @@ button {
   color: #f59e0b;
   margin-bottom: 6px;
 }
+.artist-hero-banner {
+  position: relative;
+  width: 100%;
+  height: 400px;
+  margin-bottom: 28px;
+  border-radius: 0 0 28px 28px;
+  overflow: hidden;
+  background: #181818;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.artist-hero-banner__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 25%;
+  display: block;
+  filter: saturate(0.95) contrast(1.05);
+}
+.artist-hero-banner__overlay {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.05) 0%,
+      rgba(0, 0, 0, 0.35) 55%,
+      rgba(18, 18, 18, 0.95) 100%
+    ),
+    linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.35) 0%,
+      rgba(0, 0, 0, 0.05) 45%,
+      rgba(0, 0, 0, 0.35) 100%
+    );
+  pointer-events: none;
+}
+.artist-banner-preview {
+  width: 100%;
+  height: 160px;
+  border-radius: 14px;
+  object-fit: cover;
+  background: #181818;
+  display: block;
+}
+
+.artist-banner-preview--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #b3b3b3;
+  border: 1px dashed #444;
+}
 .main-content__header-row {
   display: flex;
   align-items: flex-start;
@@ -1850,4 +1903,63 @@ button {
 
 .page-actions__menu-item:hover {
   background: #3a3a3a;
+}
+.view-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.view-toggle__button {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: #242424;
+  color: #b3b3b3;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.view-toggle__button--active {
+  background: #ffffff;
+  color: #000000;
+}
+
+.artist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+  gap: 26px;
+  padding-top: 8px;
+}
+
+.artist-grid-card {
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+  cursor: pointer;
+  text-align: center;
+}
+
+.artist-grid-card__image {
+  width: 132px;
+  height: 132px;
+  margin: 0 auto 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2f2f2f, #111111);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 42px;
+  font-weight: 800;
+}
+
+.artist-grid-card__name {
+  font-size: 14px;
+  font-weight: 700;
+}
+.artist-grid-card__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }

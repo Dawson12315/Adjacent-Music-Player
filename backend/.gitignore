@@ -11,3 +11,10 @@ __pycache__/
 
 # Virtual env
 .venv/
+
+uploads/*
+!uploads/.gitkeep
+!uploads/artists/
+!uploads/artists/.gitkeep
+!uploads/albums/
+!uploads/albums/.gitkeep
