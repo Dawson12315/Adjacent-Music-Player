@@ -32,7 +32,7 @@ def list_albums(db: Session = Depends(get_db)):
     return [album[0] for album in albums if album[0]]
 
 
-@router.get("/albums/{album_name}/artwork", tags=["albums"])
+@router.get("/albums/{album_name:path}/artwork", tags=["albums"])
 def get_album_artwork(album_name: str, db: Session = Depends(get_db)):
     album_key = normalize_album_name(album_name)
 
@@ -49,7 +49,7 @@ def get_album_artwork(album_name: str, db: Session = Depends(get_db)):
     }
 
 
-@router.post("/albums/{album_name}/artwork", tags=["albums"])
+@router.post("/albums/{album_name:path}/artwork", tags=["albums"])
 def upload_album_artwork(
     album_name: str,
     file: UploadFile = File(...),
