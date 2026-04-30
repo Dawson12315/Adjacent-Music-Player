@@ -6,9 +6,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies.auth import get_current_user, require_admin
 from app.models.playlist import Playlist
 from app.models.playlist_track import PlaylistTrack
 from app.models.track import Track
+from app.models.user import User
 from app.schemas.playlist import (
     PlaylistCreate,
     PlaylistRename,
@@ -28,13 +30,20 @@ ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 @router.get("/playlists", response_model=list[PlaylistResponse], tags=["playlists"])
-def list_playlists(db: Session = Depends(get_db)):
+def list_playlists(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     playlists = db.query(Playlist).order_by(Playlist.name.asc()).all()
     return playlists
 
 
 @router.post("/playlists", response_model=PlaylistResponse, tags=["playlists"])
-def create_playlist(payload: PlaylistCreate, db: Session = Depends(get_db)):
+def create_playlist(
+    payload: PlaylistCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     existing = db.query(Playlist).filter(Playlist.name == payload.name).first()
 
     if existing:
@@ -85,7 +94,10 @@ def _parse_exclude_track_ids(exclude_track_ids: str | None) -> list[int]:
 
 
 @router.get("/playlists/liked-songs", response_model=PlaylistResponse, tags=["playlists"])
-def get_liked_songs_playlist(db: Session = Depends(get_db)):
+def get_liked_songs_playlist(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     playlist = (
         db.query(Playlist)
         .filter(Playlist.system_key == "liked_songs")
@@ -99,7 +111,11 @@ def get_liked_songs_playlist(db: Session = Depends(get_db)):
 
 
 @router.get("/playlists/liked-songs/tracks/{track_id}", tags=["playlists"])
-def is_track_in_liked_songs(track_id: int, db: Session = Depends(get_db)):
+def is_track_in_liked_songs(
+    track_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     playlist = _get_liked_songs_playlist(db)
 
     playlist_track = (
@@ -115,7 +131,11 @@ def is_track_in_liked_songs(track_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/playlists/liked-songs/tracks", tags=["playlists"])
-def add_track_to_liked_songs(payload: PlaylistTrackCreate, db: Session = Depends(get_db)):
+def add_track_to_liked_songs(
+    payload: PlaylistTrackCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     playlist = _get_liked_songs_playlist(db)
 
     track = db.query(Track).filter(Track.id == payload.track_id).first()
@@ -156,7 +176,11 @@ def add_track_to_liked_songs(payload: PlaylistTrackCreate, db: Session = Depends
 
 
 @router.delete("/playlists/liked-songs/tracks/{track_id}", tags=["playlists"])
-def remove_track_from_liked_songs(track_id: int, db: Session = Depends(get_db)):
+def remove_track_from_liked_songs(
+    track_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     playlist = _get_liked_songs_playlist(db)
 
     playlist_track = (
@@ -200,6 +224,7 @@ def upload_playlist_artwork(
     playlist_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
 ):
     playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
 
@@ -246,6 +271,7 @@ def add_track_to_playlist(
     playlist_id: int,
     payload: PlaylistTrackCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
     if not playlist:
@@ -299,7 +325,11 @@ def add_track_to_playlist(
     response_model=list[TrackResponse],
     tags=["playlists"],
 )
-def get_playlist_tracks(playlist_id: int, db: Session = Depends(get_db)):
+def get_playlist_tracks(
+    playlist_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
@@ -325,6 +355,7 @@ def get_playlist_recommendations(
     limit: int = 20,
     exclude_track_ids: str | None = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     parsed_exclude_track_ids = _parse_exclude_track_ids(exclude_track_ids)
 
@@ -343,6 +374,7 @@ def remove_track_from_playlist(
     playlist_id: int,
     track_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
     if not playlist:
@@ -389,7 +421,11 @@ def remove_track_from_playlist(
 
 
 @router.delete("/playlists/{playlist_id}", tags=["playlists"])
-def delete_playlist(playlist_id: int, db: Session = Depends(get_db)):
+def delete_playlist(
+    playlist_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
 
     if not playlist:
@@ -412,6 +448,7 @@ def rename_playlist(
     playlist_id: int,
     payload: PlaylistRename,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
 

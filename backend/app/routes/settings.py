@@ -1,16 +1,17 @@
+from urllib.parse import urlencode
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from urllib.parse import urlencode
 
 from app.db import get_db
+from app.dependencies.auth import get_current_user, require_admin
 from app.models.app_setting import AppSetting
 from app.models.track import Track
+from app.models.user import User
 from app.schemas.settings import AppSettingsResponse, AppSettingsUpdate
-from app.services.lastfm import get_lastfm_session
-from app.services.scheduler import refresh_scheduler_jobs
-from app.services.lastfm import scrobble_track
+from app.services.lastfm import get_lastfm_session, scrobble_track
 from app.services.lastfm_enrichment_control import request_stop
 from app.services.lastfm_enrichment_progress import get_progress, mark_stopping
 from app.services.lastfm_enrichment_runner import (
@@ -21,8 +22,24 @@ from app.services.musicbrainz_backfill_runner import (
     is_musicbrainz_backfill_running,
     start_musicbrainz_backfill_background,
 )
+from app.services.scheduler import refresh_scheduler_jobs
 
 router = APIRouter()
+
+
+def settings_response(settings: AppSetting) -> dict:
+    return {
+        "cleanup_enabled": settings.cleanup_enabled,
+        "cleanup_time": settings.cleanup_time,
+        "scan_enabled": settings.scan_enabled,
+        "scan_time": settings.scan_time,
+        "lastfm_api_key": settings.lastfm_api_key,
+        "lastfm_api_secret": settings.lastfm_api_secret,
+        "lastfm_username": settings.lastfm_username,
+        "lastfm_session_key": settings.lastfm_session_key,
+        "lastfm_enrichment_enabled": settings.lastfm_enrichment_enabled,
+        "lastfm_enrichment_time": settings.lastfm_enrichment_time,
+    }
 
 
 def get_or_create_settings(db: Session) -> AppSetting:
@@ -52,25 +69,20 @@ def get_or_create_settings(db: Session) -> AppSetting:
 
 
 @router.get("/settings", response_model=AppSettingsResponse, tags=["settings"])
-def get_settings(db: Session = Depends(get_db)):
+def get_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
     settings = get_or_create_settings(db)
-
-    return {
-        "cleanup_enabled": settings.cleanup_enabled,
-        "cleanup_time": settings.cleanup_time,
-        "scan_enabled": settings.scan_enabled,
-        "scan_time": settings.scan_time,
-        "lastfm_api_key": settings.lastfm_api_key,
-        "lastfm_api_secret": settings.lastfm_api_secret,
-        "lastfm_username": settings.lastfm_username,
-        "lastfm_session_key": settings.lastfm_session_key,
-        "lastfm_enrichment_enabled": settings.lastfm_enrichment_enabled,
-        "lastfm_enrichment_time": settings.lastfm_enrichment_time,
-    }
+    return settings_response(settings)
 
 
 @router.put("/settings", response_model=AppSettingsResponse, tags=["settings"])
-def update_settings(payload: AppSettingsUpdate, db: Session = Depends(get_db)):
+def update_settings(
+    payload: AppSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
     settings = get_or_create_settings(db)
 
     settings.cleanup_enabled = payload.cleanup_enabled
@@ -88,22 +100,13 @@ def update_settings(payload: AppSettingsUpdate, db: Session = Depends(get_db)):
     db.refresh(settings)
     refresh_scheduler_jobs()
 
-    return {
-        "cleanup_enabled": settings.cleanup_enabled,
-        "cleanup_time": settings.cleanup_time,
-        "scan_enabled": settings.scan_enabled,
-        "scan_time": settings.scan_time,
-        "lastfm_api_key": settings.lastfm_api_key,
-        "lastfm_api_secret": settings.lastfm_api_secret,
-        "lastfm_username": settings.lastfm_username,
-        "lastfm_session_key": settings.lastfm_session_key,
-        "lastfm_enrichment_enabled": settings.lastfm_enrichment_enabled,
-        "lastfm_enrichment_time": settings.lastfm_enrichment_time,
-    }
+    return settings_response(settings)
 
 
 @router.post("/settings/lastfm/enrich", tags=["settings"])
-def trigger_lastfm_enrichment():
+def trigger_lastfm_enrichment(
+    current_user: User = Depends(require_admin),
+):
     if is_lastfm_enrichment_running():
         return {
             "started": False,
@@ -119,24 +122,30 @@ def trigger_lastfm_enrichment():
 
 
 @router.post("/settings/lastfm/stop", tags=["settings"])
-def stop_lastfm_enrichment():
+def stop_lastfm_enrichment(
+    current_user: User = Depends(require_admin),
+):
     request_stop()
     mark_stopping()
     return {"status": "stopping"}
 
 
 @router.get("/settings/lastfm/progress", tags=["settings"])
-def get_lastfm_enrichment_progress():
+def get_lastfm_enrichment_progress(
+    current_user: User = Depends(get_current_user),
+):
     response = JSONResponse(content=get_progress())
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
 
+
 @router.get("/settings/lastfm/auth-url", tags=["settings"])
 def get_lastfm_auth_url(
     callback_url: str = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
 ):
     settings = get_or_create_settings(db)
 
@@ -151,13 +160,15 @@ def get_lastfm_auth_url(
     )
 
     auth_url = f"https://www.last.fm/api/auth/?{query}"
-    
+
     return {"auth_url": auth_url}
+
 
 @router.post("/settings/lastfm/session", response_model=AppSettingsResponse, tags=["settings"])
 def create_lastfm_session(
     token: str = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
 ):
     settings = get_or_create_settings(db)
 
@@ -171,7 +182,10 @@ def create_lastfm_session(
     )
 
     if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["error"] or "Failed to create Last.fm session")
+        raise HTTPException(
+            status_code=400,
+            detail=result["error"] or "Failed to create Last.fm session",
+        )
 
     settings.lastfm_session_key = result["session_key"]
     settings.lastfm_username = result["username"]
@@ -179,22 +193,15 @@ def create_lastfm_session(
     db.commit()
     db.refresh(settings)
 
-    return {
-        "cleanup_enabled": settings.cleanup_enabled,
-        "cleanup_time": settings.cleanup_time,
-        "scan_enabled": settings.scan_enabled,
-        "scan_time": settings.scan_time,
-        "lastfm_api_key": settings.lastfm_api_key,
-        "lastfm_api_secret": settings.lastfm_api_secret,
-        "lastfm_username": settings.lastfm_username,
-        "lastfm_session_key": settings.lastfm_session_key,
-    }
+    return settings_response(settings)
+
 
 @router.post("/settings/lastfm/test-scrobble", tags=["settings"])
 def test_lastfm_scrobble(
     track: str,
     artist: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
 ):
     settings = get_or_create_settings(db)
 
@@ -208,8 +215,12 @@ def test_lastfm_scrobble(
 
     return result
 
+
 @router.get("/settings/lastfm/readiness", tags=["settings"])
-def get_lastfm_readiness(db: Session = Depends(get_db)):
+def get_lastfm_readiness(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
     total_tracks = db.query(func.count(Track.id)).scalar() or 0
 
     tracks_missing_mbid = (
@@ -237,8 +248,12 @@ def get_lastfm_readiness(db: Session = Depends(get_db)):
         "musicbrainz_resume_available": tracks_missing_mbid > 0,
     }
 
+
 @router.post("/settings/musicbrainz/resume", tags=["settings"])
-def resume_musicbrainz_backfill(db: Session = Depends(get_db)):
+def resume_musicbrainz_backfill(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
     tracks_missing_mbid = (
         db.query(func.count(Track.id))
         .filter(Track.musicbrainz_recording_id.is_(None))

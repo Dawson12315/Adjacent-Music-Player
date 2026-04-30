@@ -23,6 +23,7 @@ from app.routes.settings import router as settings_router
 from app.routes.stats import router as stats_router
 from app.routes.tracks import router as tracks_router
 from app.routes.similar_tracks import router as similar_tracks_router
+from app.routes.auth import router as auth_router
 from app.services.playback import get_or_create_playback_session
 from app.services.playlists import ensure_liked_songs_playlist
 from app.services.scheduler import start_scheduler
@@ -94,5 +95,5 @@ app.include_router(genres_router, prefix="/api")
 app.include_router(similar_tracks_router, prefix="/api")
 app.include_router(listening_router, prefix="/api")
 app.include_router(stats_router, prefix="/api")
-
+app.include_router(auth_router, prefix="/api")
 app.include_router(recommendation_evaluation.router, prefix="/api")

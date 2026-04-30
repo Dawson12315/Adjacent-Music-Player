@@ -2,14 +2,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies.auth import require_admin
 from app.models.track import Track
+from app.models.user import User
 from app.schemas.artist_edit import ArtistRenameRequest, ArtistTransferRequest
 
 router = APIRouter()
 
 
 @router.patch("/artists/rename", tags=["artists"])
-def rename_artist(payload: ArtistRenameRequest, db: Session = Depends(get_db)):
+def rename_artist(
+    payload: ArtistRenameRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
     current_artist = payload.current_artist.strip()
     new_artist = payload.new_artist.strip()
 
@@ -32,8 +38,13 @@ def rename_artist(payload: ArtistRenameRequest, db: Session = Depends(get_db)):
         "artist": new_artist,
     }
 
+
 @router.patch("/artists/transfer", tags=["artists"])
-def transfer_artist(payload: ArtistTransferRequest, db: Session = Depends(get_db)):
+def transfer_artist(
+    payload: ArtistTransferRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
     source_artist = payload.source_artist.strip()
     target_artist = payload.target_artist.strip()
 

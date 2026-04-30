@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies.auth import require_admin
+from app.models.user import User
 from app.services.recommendations.evaluation import (
     evaluate_all_playlists_leave_one_out,
     evaluate_playlist_leave_one_out,
@@ -22,6 +24,7 @@ def evaluate_all_playlists(
     include_system_playlists: bool = Query(False),
     refresh: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
 ):
     try:
         return evaluate_all_playlists_leave_one_out(
@@ -47,6 +50,7 @@ def evaluate_single_playlist(
     max_holdouts: int | None = Query(None, ge=1, le=1000),
     refresh: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
 ):
     try:
         return evaluate_playlist_leave_one_out(

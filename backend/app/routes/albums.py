@@ -7,8 +7,10 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies.auth import get_current_user, require_admin
 from app.models.album_artwork import AlbumArtwork
 from app.models.track import Track
+from app.models.user import User
 
 router = APIRouter()
 
@@ -21,7 +23,10 @@ def normalize_album_name(album_name: str) -> str:
 
 
 @router.get("/albums", tags=["albums"])
-def list_albums(db: Session = Depends(get_db)):
+def list_albums(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     albums = (
         db.query(Track.album)
         .filter(Track.album.isnot(None))
@@ -33,7 +38,11 @@ def list_albums(db: Session = Depends(get_db)):
 
 
 @router.get("/albums/{album_name:path}/artwork", tags=["albums"])
-def get_album_artwork(album_name: str, db: Session = Depends(get_db)):
+def get_album_artwork(
+    album_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     album_key = normalize_album_name(album_name)
 
     artwork = (
@@ -54,6 +63,7 @@ def upload_album_artwork(
     album_name: str,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
 ):
     album_key = normalize_album_name(album_name)
 

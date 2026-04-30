@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies.auth import require_admin
+from app.models.user import User
 from app.services.job_locking import release_job_lock, try_acquire_job_lock
 from app.services.maintenance import cleanup_missing_tracks
 
@@ -9,7 +11,10 @@ router = APIRouter()
 
 
 @router.post("/maintenance/cleanup", tags=["maintenance"])
-def run_cleanup(db: Session = Depends(get_db)):
+def run_cleanup(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
     if not try_acquire_job_lock(db, "cleanup"):
         return {
             "message": "Cleanup already running",

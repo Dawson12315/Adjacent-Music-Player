@@ -2,11 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies.auth import get_current_user
+from app.models.user import User
 from app.schemas.listening import (
     ListeningEventCreate,
     ListeningEventResponse,
     TrackPlaybackEventBase,
-    TrackListeningEventRequest
+    TrackListeningEventRequest,
 )
 from app.services.listening_service import record_listening_event
 
@@ -21,6 +23,7 @@ router = APIRouter()
 def create_listening_event(
     payload: ListeningEventCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         event = record_listening_event(db, payload)
@@ -38,6 +41,7 @@ def track_play_start(
     track_id: int,
     payload: TrackPlaybackEventBase,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         event = record_listening_event(
@@ -66,6 +70,7 @@ def track_play_complete(
     track_id: int,
     payload: TrackPlaybackEventBase,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         event = record_listening_event(
@@ -94,6 +99,7 @@ def track_skip(
     track_id: int,
     payload: TrackPlaybackEventBase,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         event = record_listening_event(
@@ -111,13 +117,14 @@ def track_skip(
         return event
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    
+
 
 @router.post("/tracks/{track_id}/like", response_model=ListeningEventResponse, tags=["listening"])
 def like_track(
     track_id: int,
     payload: TrackListeningEventRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     event = record_listening_event(
         db,
@@ -139,6 +146,7 @@ def unlike_track(
     track_id: int,
     payload: TrackListeningEventRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     event = record_listening_event(
         db,
