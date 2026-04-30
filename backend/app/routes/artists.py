@@ -30,7 +30,7 @@ def list_artists(db: Session = Depends(get_db)):
     return [artist[0] for artist in artists if artist[0]]
 
 
-@router.get("/artists/{artist_name}/artwork", tags=["artists"])
+@router.get("/artists/{artist_name:path}/artwork", tags=["artists"])
 def get_artist_artwork(artist_name: str, db: Session = Depends(get_db)):
     artist_key = normalize_artist_name(artist_name)
 
@@ -47,7 +47,7 @@ def get_artist_artwork(artist_name: str, db: Session = Depends(get_db)):
     }
 
 
-@router.post("/artists/{artist_name}/artwork", tags=["artists"])
+@router.post("/artists/{artist_name:path}/artwork", tags=["artists"])
 def upload_artist_artwork(
     artist_name: str,
     file: UploadFile = File(...),
