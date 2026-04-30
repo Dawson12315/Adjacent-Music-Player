@@ -1,5 +1,6 @@
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.listening_event import ListeningEvent
@@ -8,23 +9,45 @@ from app.models.track_user_stats import TrackUserStats
 from app.schemas.listening import ListeningEventCreate
 
 
-RATIO_EVENT_TYPES = {"skipped", "play_completed"}
-
-
-def _get_or_create_track_stats(db: Session, track_id: int) -> TrackUserStats:
+def _get_or_create_track_stats(db: Session, user_id: int, track_id: int) -> TrackUserStats:
     stats = (
         db.query(TrackUserStats)
-        .filter(TrackUserStats.track_id == track_id)
+        .filter(
+            TrackUserStats.user_id == user_id,
+            TrackUserStats.track_id == track_id,
+        )
         .first()
     )
 
     if stats:
         return stats
 
-    stats = TrackUserStats(track_id=track_id)
+    stats = TrackUserStats(
+        user_id=user_id,
+        track_id=track_id,
+    )
+
     db.add(stats)
-    db.flush()
-    return stats
+
+    try:
+        db.flush()
+        return stats
+    except IntegrityError:
+        db.rollback()
+
+        stats = (
+            db.query(TrackUserStats)
+            .filter(
+                TrackUserStats.user_id == user_id,
+                TrackUserStats.track_id == track_id,
+            )
+            .first()
+        )
+
+        if not stats:
+            raise
+
+        return stats
 
 
 def _calculate_completion_ratio(
@@ -45,12 +68,17 @@ def _calculate_completion_ratio(
     return max(0.0, min(ratio, 1.0))
 
 
-def record_listening_event(db: Session, payload: ListeningEventCreate) -> ListeningEvent:
+def record_listening_event(
+    db: Session,
+    payload: ListeningEventCreate,
+    user_id: int,
+) -> ListeningEvent:
     track = db.query(Track).filter(Track.id == payload.track_id).first()
     if not track:
         raise ValueError("Track not found")
 
     event = ListeningEvent(
+        user_id=user_id,
         track_id=payload.track_id,
         event_type=payload.event_type,
         source_type=payload.source_type,
@@ -62,7 +90,7 @@ def record_listening_event(db: Session, payload: ListeningEventCreate) -> Listen
 
     db.add(event)
 
-    stats = _get_or_create_track_stats(db, payload.track_id)
+    stats = _get_or_create_track_stats(db, user_id, payload.track_id)
     now = datetime.now(UTC)
 
     ratio_event_count_before = stats.completion_count + stats.skip_count

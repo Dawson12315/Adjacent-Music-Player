@@ -10,6 +10,7 @@ class ListeningEvent(Base):
     __tablename__ = "listening_events"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False, index=True)
     event_type = Column(String, nullable=False, index=True)
     source_type = Column(String, nullable=True)

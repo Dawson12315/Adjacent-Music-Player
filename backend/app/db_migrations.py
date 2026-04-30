@@ -3,17 +3,164 @@ from sqlalchemy import text
 from app.db import engine
 
 
+def _track_user_stats_has_track_id_unique_constraint(connection) -> bool:
+    indexes = connection.execute(
+        text("PRAGMA index_list(track_user_stats)")
+    ).fetchall()
+
+    for index in indexes:
+        index_name = index[1]
+        is_unique = bool(index[2])
+
+        if not is_unique:
+            continue
+
+        index_columns = connection.execute(
+            text(f"PRAGMA index_info({index_name})")
+        ).fetchall()
+
+        column_names = [column[2] for column in index_columns]
+
+        if column_names == ["track_id"]:
+            return True
+
+    return False
+
+
+def _rebuild_track_user_stats_table(connection):
+    connection.execute(text("PRAGMA foreign_keys=off"))
+
+    connection.execute(
+        text(
+            """
+            DROP TABLE IF EXISTS track_user_stats_new
+            """
+        )
+    )
+
+    connection.execute(
+        text(
+            """
+            CREATE TABLE track_user_stats_new (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER,
+                track_id INTEGER NOT NULL,
+                play_count INTEGER NOT NULL DEFAULT 0,
+                skip_count INTEGER NOT NULL DEFAULT 0,
+                completion_count INTEGER NOT NULL DEFAULT 0,
+                like_count INTEGER NOT NULL DEFAULT 0,
+                avg_completion_ratio REAL NOT NULL DEFAULT 0,
+                replay_score REAL NOT NULL DEFAULT 0,
+                playlist_add_count INTEGER NOT NULL DEFAULT 0,
+                last_played_at DATETIME,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+    )
+
+    connection.execute(
+        text(
+            """
+            INSERT INTO track_user_stats_new (
+                id,
+                user_id,
+                track_id,
+                play_count,
+                skip_count,
+                completion_count,
+                like_count,
+                avg_completion_ratio,
+                replay_score,
+                playlist_add_count,
+                last_played_at,
+                updated_at
+            )
+            SELECT
+                id,
+                COALESCE(user_id, 1),
+                track_id,
+                play_count,
+                skip_count,
+                completion_count,
+                like_count,
+                avg_completion_ratio,
+                replay_score,
+                playlist_add_count,
+                last_played_at,
+                updated_at
+            FROM track_user_stats
+            """
+        )
+    )
+
+    connection.execute(text("DROP TABLE track_user_stats"))
+    connection.execute(text("ALTER TABLE track_user_stats_new RENAME TO track_user_stats"))
+
+    connection.execute(text("PRAGMA foreign_keys=on"))
+
+
 def run_simple_migrations():
     with engine.begin() as connection:
+        existing_tables = connection.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table'")
+        ).fetchall()
+        existing_table_names = {table[0] for table in existing_tables}
+
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'user',
+                    is_active BOOLEAN NOT NULL DEFAULT 1,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_users_username
+                ON users(username)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_users_role
+                ON users(role)
+                """
+            )
+        )
+
         playlist_columns = connection.execute(
             text("PRAGMA table_info(playlists)")
         ).fetchall()
         playlist_column_names = {column[1] for column in playlist_columns}
 
+        if "user_id" not in playlist_column_names:
+            connection.execute(text("ALTER TABLE playlists ADD COLUMN user_id INTEGER"))
+
         if "artwork_path" not in playlist_column_names:
-            connection.execute(
-                text("ALTER TABLE playlists ADD COLUMN artwork_path TEXT")
+            connection.execute(text("ALTER TABLE playlists ADD COLUMN artwork_path TEXT"))
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_playlists_user_id
+                ON playlists(user_id)
+                """
             )
+        )
 
         track_columns = connection.execute(
             text("PRAGMA table_info(tracks)")
@@ -21,28 +168,26 @@ def run_simple_migrations():
         track_column_names = {column[1] for column in track_columns}
 
         if "raw_title" not in track_column_names:
-            connection.execute(
-                text("ALTER TABLE tracks ADD COLUMN raw_title TEXT")
-            )
+            connection.execute(text("ALTER TABLE tracks ADD COLUMN raw_title TEXT"))
 
         if "raw_artist" not in track_column_names:
-            connection.execute(
-                text("ALTER TABLE tracks ADD COLUMN raw_artist TEXT")
-            )
+            connection.execute(text("ALTER TABLE tracks ADD COLUMN raw_artist TEXT"))
 
         if "raw_album" not in track_column_names:
-            connection.execute(
-                text("ALTER TABLE tracks ADD COLUMN raw_album TEXT")
-            )
+            connection.execute(text("ALTER TABLE tracks ADD COLUMN raw_album TEXT"))
 
         if "genre" not in track_column_names:
-            connection.execute(
-                text("ALTER TABLE tracks ADD COLUMN genre TEXT")
-            )
+            connection.execute(text("ALTER TABLE tracks ADD COLUMN genre TEXT"))
 
         if "raw_genre" not in track_column_names:
+            connection.execute(text("ALTER TABLE tracks ADD COLUMN raw_genre TEXT"))
+
+        if "musicbrainz_recording_id" not in track_column_names:
+            connection.execute(text("ALTER TABLE tracks ADD COLUMN musicbrainz_recording_id TEXT"))
+
+        if "lastfm_tags_enriched" not in track_column_names:
             connection.execute(
-                text("ALTER TABLE tracks ADD COLUMN raw_genre TEXT")
+                text("ALTER TABLE tracks ADD COLUMN lastfm_tags_enriched BOOLEAN NOT NULL DEFAULT 0")
             )
 
         connection.execute(
@@ -86,43 +231,36 @@ def run_simple_migrations():
             )
         )
 
-        existing_tables = connection.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table'")
-        ).fetchall()
-        existing_table_names = {table[0] for table in existing_tables}
-
-        if "track_genres" not in existing_table_names:
-            connection.execute(
-                text(
-                    """
-                    CREATE TABLE track_genres (
-                        id INTEGER PRIMARY KEY,
-                        track_id INTEGER NOT NULL,
-                        genre TEXT NOT NULL,
-                        FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE,
-                        CONSTRAINT uq_track_genre_pair UNIQUE (track_id, genre)
-                    )
-                    """
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS track_genres (
+                    id INTEGER PRIMARY KEY,
+                    track_id INTEGER NOT NULL,
+                    genre TEXT NOT NULL,
+                    FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE,
+                    CONSTRAINT uq_track_genre_pair UNIQUE (track_id, genre)
                 )
+                """
             )
+        )
 
-        if "track_cooccurrence" not in existing_table_names:
-            connection.execute(
-                text(
-                    """
-                    CREATE TABLE track_cooccurrence (
-                        id INTEGER PRIMARY KEY,
-                        track_a_id INTEGER NOT NULL,
-                        track_b_id INTEGER NOT NULL,
-                        cooccurrence_count INTEGER NOT NULL DEFAULT 0,
-                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY(track_a_id) REFERENCES tracks(id) ON DELETE CASCADE,
-                        FOREIGN KEY(track_b_id) REFERENCES tracks(id) ON DELETE CASCADE,
-                        CONSTRAINT uq_track_cooccurrence_pair UNIQUE (track_a_id, track_b_id)
-                    )
-                    """
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS track_cooccurrence (
+                    id INTEGER PRIMARY KEY,
+                    track_a_id INTEGER NOT NULL,
+                    track_b_id INTEGER NOT NULL,
+                    cooccurrence_count INTEGER NOT NULL DEFAULT 0,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(track_a_id) REFERENCES tracks(id) ON DELETE CASCADE,
+                    FOREIGN KEY(track_b_id) REFERENCES tracks(id) ON DELETE CASCADE,
+                    CONSTRAINT uq_track_cooccurrence_pair UNIQUE (track_a_id, track_b_id)
                 )
+                """
             )
+        )
 
         connection.execute(
             text(
@@ -142,25 +280,13 @@ def run_simple_migrations():
             )
         )
 
-        if "musicbrainz_recording_id" not in track_column_names:
-            connection.execute(
-                text("ALTER TABLE tracks ADD COLUMN musicbrainz_recording_id TEXT")
-            )
-
-        if "lastfm_tags_enriched" not in track_column_names:
-            connection.execute(
-                text("ALTER TABLE tracks ADD COLUMN lastfm_tags_enriched BOOLEAN NOT NULL DEFAULT 0")
-            )
-
         job_lock_columns = connection.execute(
             text("PRAGMA table_info(job_locks)")
         ).fetchall()
         job_lock_column_names = {column[1] for column in job_lock_columns}
 
         if "started_at" not in job_lock_column_names:
-            connection.execute(
-                text("ALTER TABLE job_locks ADD COLUMN started_at DATETIME")
-            )
+            connection.execute(text("ALTER TABLE job_locks ADD COLUMN started_at DATETIME"))
 
         app_settings_columns = connection.execute(
             text("PRAGMA table_info(app_settings)")
@@ -168,40 +294,31 @@ def run_simple_migrations():
         app_settings_column_names = {column[1] for column in app_settings_columns}
 
         if "lastfm_api_key" not in app_settings_column_names:
-            connection.execute(
-                text("ALTER TABLE app_settings ADD COLUMN lastfm_api_key TEXT")
-            )
+            connection.execute(text("ALTER TABLE app_settings ADD COLUMN lastfm_api_key TEXT"))
 
         if "lastfm_api_secret" not in app_settings_column_names:
-            connection.execute(
-                text("ALTER TABLE app_settings ADD COLUMN lastfm_api_secret TEXT")
-            )
+            connection.execute(text("ALTER TABLE app_settings ADD COLUMN lastfm_api_secret TEXT"))
 
         if "lastfm_username" not in app_settings_column_names:
-            connection.execute(
-                text("ALTER TABLE app_settings ADD COLUMN lastfm_username TEXT")
-            )
+            connection.execute(text("ALTER TABLE app_settings ADD COLUMN lastfm_username TEXT"))
 
         if "lastfm_session_key" not in app_settings_column_names:
-            connection.execute(
-                text("ALTER TABLE app_settings ADD COLUMN lastfm_session_key TEXT")
-            )
-        
+            connection.execute(text("ALTER TABLE app_settings ADD COLUMN lastfm_session_key TEXT"))
+
         if "lastfm_enrichment_enabled" not in app_settings_column_names:
             connection.execute(
                 text("ALTER TABLE app_settings ADD COLUMN lastfm_enrichment_enabled BOOLEAN NOT NULL DEFAULT 0")
             )
 
         if "lastfm_enrichment_time" not in app_settings_column_names:
-            connection.execute(
-                text("ALTER TABLE app_settings ADD COLUMN lastfm_enrichment_time TEXT")
-            )
+            connection.execute(text("ALTER TABLE app_settings ADD COLUMN lastfm_enrichment_time TEXT"))
 
         connection.execute(
             text(
                 """
                 CREATE TABLE IF NOT EXISTS listening_events (
                     id INTEGER PRIMARY KEY,
+                    user_id INTEGER,
                     track_id INTEGER NOT NULL,
                     event_type TEXT NOT NULL,
                     source_type TEXT,
@@ -210,8 +327,26 @@ def run_simple_migrations():
                     duration_seconds REAL,
                     session_id TEXT,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
+                    FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE,
+                    FOREIGN KEY(user_id) REFERENCES users(id)
                 )
+                """
+            )
+        )
+
+        listening_event_columns = connection.execute(
+            text("PRAGMA table_info(listening_events)")
+        ).fetchall()
+        listening_event_column_names = {column[1] for column in listening_event_columns}
+
+        if "user_id" not in listening_event_column_names:
+            connection.execute(text("ALTER TABLE listening_events ADD COLUMN user_id INTEGER"))
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_listening_events_track_id
+                ON listening_events(track_id)
                 """
             )
         )
@@ -219,8 +354,8 @@ def run_simple_migrations():
         connection.execute(
             text(
                 """
-                CREATE INDEX IF NOT EXISTS ix_listening_events_track_id
-                ON listening_events(track_id)
+                CREATE INDEX IF NOT EXISTS ix_listening_events_user_id
+                ON listening_events(user_id)
                 """
             )
         )
@@ -248,7 +383,8 @@ def run_simple_migrations():
                 """
                 CREATE TABLE IF NOT EXISTS track_user_stats (
                     id INTEGER PRIMARY KEY,
-                    track_id INTEGER NOT NULL UNIQUE,
+                    user_id INTEGER,
+                    track_id INTEGER NOT NULL,
                     play_count INTEGER NOT NULL DEFAULT 0,
                     skip_count INTEGER NOT NULL DEFAULT 0,
                     completion_count INTEGER NOT NULL DEFAULT 0,
@@ -258,8 +394,29 @@ def run_simple_migrations():
                     playlist_add_count INTEGER NOT NULL DEFAULT 0,
                     last_played_at DATETIME,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
+                    FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE,
+                    FOREIGN KEY(user_id) REFERENCES users(id)
                 )
+                """
+            )
+        )
+
+        track_user_stats_columns = connection.execute(
+            text("PRAGMA table_info(track_user_stats)")
+        ).fetchall()
+        track_user_stats_column_names = {column[1] for column in track_user_stats_columns}
+
+        if "user_id" not in track_user_stats_column_names:
+            connection.execute(text("ALTER TABLE track_user_stats ADD COLUMN user_id INTEGER"))
+
+        if _track_user_stats_has_track_id_unique_constraint(connection):
+            _rebuild_track_user_stats_table(connection)
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_track_user_stats_track_id
+                ON track_user_stats(track_id)
                 """
             )
         )
@@ -267,8 +424,43 @@ def run_simple_migrations():
         connection.execute(
             text(
                 """
-                CREATE INDEX IF NOT EXISTS ix_track_user_stats_track_id
-                ON track_user_stats(track_id)
+                CREATE INDEX IF NOT EXISTS ix_track_user_stats_user_id
+                ON track_user_stats(user_id)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_track_user_stats_user_track
+                ON track_user_stats(user_id, track_id)
+                """
+            )
+        )
+
+        playback_session_columns = connection.execute(
+            text("PRAGMA table_info(playback_sessions)")
+        ).fetchall()
+        playback_session_column_names = {column[1] for column in playback_session_columns}
+
+        if "user_id" not in playback_session_column_names:
+            connection.execute(text("ALTER TABLE playback_sessions ADD COLUMN user_id INTEGER"))
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_playback_sessions_user_id
+                ON playback_sessions(user_id)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_playback_sessions_user_id
+                ON playback_sessions(user_id)
                 """
             )
         )
@@ -292,7 +484,7 @@ def run_simple_migrations():
                     """
                 )
             )
-        
+
         connection.execute(
             text(
                 """
@@ -301,7 +493,7 @@ def run_simple_migrations():
                 """
             )
         )
-        
+
         connection.execute(
             text(
                 """
@@ -413,39 +605,6 @@ def run_simple_migrations():
                 """
                 CREATE INDEX IF NOT EXISTS ix_album_artwork_album_key
                 ON album_artwork(album_key)
-                """
-            )
-        )
-
-        connection.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY,
-                    username TEXT NOT NULL UNIQUE,
-                    password_hash TEXT NOT NULL,
-                    role TEXT NOT NULL DEFAULT 'user',
-                    is_active BOOLEAN NOT NULL DEFAULT 1,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-        )
-
-        connection.execute(
-            text(
-                """
-                CREATE INDEX IF NOT EXISTS ix_users_username
-                ON users(username)
-                """
-            )
-        )
-
-        connection.execute(
-            text(
-                """
-                CREATE INDEX IF NOT EXISTS ix_users_role
-                ON users(role)
                 """
             )
         )

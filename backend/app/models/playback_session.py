@@ -8,6 +8,8 @@ class PlaybackSession(Base):
     __tablename__ = "playback_sessions"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, unique=True, index=True)
+
     current_track_id = Column(Integer, ForeignKey("tracks.id"), nullable=True)
     queue_index = Column(Integer, nullable=False, default=-1)
     current_time_seconds = Column(Integer, nullable=False, default=0)

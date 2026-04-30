@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -10,7 +10,8 @@ class TrackUserStats(Base):
     __tablename__ = "track_user_stats"
 
     id = Column(Integer, primary_key=True, index=True)
-    track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False, index=True)
 
     play_count = Column(Integer, nullable=False, default=0)
     skip_count = Column(Integer, nullable=False, default=0)
@@ -26,3 +27,7 @@ class TrackUserStats(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     track = relationship("Track")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "track_id", name="uq_track_user_stats_user_track"),
+    )
