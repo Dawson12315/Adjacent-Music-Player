@@ -416,3 +416,36 @@ def run_simple_migrations():
                 """
             )
         )
+
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'user',
+                    is_active BOOLEAN NOT NULL DEFAULT 1,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_users_username
+                ON users(username)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_users_role
+                ON users(role)
+                """
+            )
+        )

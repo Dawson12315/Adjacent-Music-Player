@@ -7,33 +7,57 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
+from app.dependencies.auth import get_current_user, require_admin
+from app.models.app_setting import AppSetting
+from app.models.playback_queue_item import PlaybackQueueItem
+from app.models.playback_session import PlaybackSession
+from app.models.playlist_track import PlaylistTrack
 from app.models.track import Track
 from app.models.track_artist import TrackArtist
 from app.models.track_genre import TrackGenre
+from app.models.user import User
 from app.schemas.track import TrackResponse
 from app.schemas.track_edit import TrackUpdate
-
-from app.models.playlist_track import PlaylistTrack
-from app.models.playback_queue_item import PlaybackQueueItem
-from app.models.playback_session import PlaybackSession
-
+from app.services.lastfm import scrobble_track, update_now_playing
 from app.services.metadata_normalizer import normalize_genre_list
 from app.services.musicbrainz import find_recording_mbid
-
-from app.models.app_setting import AppSetting
-from app.services.lastfm import scrobble_track, update_now_playing
 
 router = APIRouter()
 
 
+def build_track_response(track: Track) -> TrackResponse:
+    return TrackResponse(
+        id=track.id,
+        title=track.title,
+        artist=track.artist,
+        album=track.album,
+        genre=track.genre,
+        genres=[item.genre for item in track.track_genres],
+        file_path=track.file_path,
+        raw_title=track.raw_title,
+        raw_artist=track.raw_artist,
+        raw_album=track.raw_album,
+        raw_genre=track.raw_genre,
+        musicbrainz_recording_id=track.musicbrainz_recording_id,
+        lastfm_tags_enriched=track.lastfm_tags_enriched,
+        artists=[item.artist_name for item in track.track_artists],
+    )
+
+
 @router.get("/tracks/count", tags=["tracks"])
-def get_track_count(db: Session = Depends(get_db)):
+def get_track_count(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     count = db.query(func.count(Track.id)).scalar()
     return {"count": count}
 
 
 @router.get("/tracks", response_model=list[TrackResponse], tags=["tracks"])
-def list_tracks(db: Session = Depends(get_db)):
+def list_tracks(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     tracks = (
         db.query(Track)
         .options(
@@ -44,33 +68,15 @@ def list_tracks(db: Session = Depends(get_db)):
         .all()
     )
 
-    response = []
-
-    for track in tracks:
-        response.append(
-            TrackResponse(
-                id=track.id,
-                title=track.title,
-                artist=track.artist,
-                album=track.album,
-                genre=track.genre,
-                genres=[item.genre for item in track.track_genres],
-                file_path=track.file_path,
-                raw_title=track.raw_title,
-                raw_artist=track.raw_artist,
-                raw_album=track.raw_album,
-                raw_genre=track.raw_genre,
-                musicbrainz_recording_id=track.musicbrainz_recording_id,
-                lastfm_tags_enriched=track.lastfm_tags_enriched,
-                artists=[item.artist_name for item in track.track_artists],
-            )
-        )
-
-    return response
+    return [build_track_response(track) for track in tracks]
 
 
 @router.get("/tracks/{track_id}/stream", tags=["tracks"])
-def stream_track(track_id: int, db: Session = Depends(get_db)):
+def stream_track(
+    track_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     track = db.query(Track).filter(Track.id == track_id).first()
 
     if not track:
@@ -91,11 +97,13 @@ def stream_track(track_id: int, db: Session = Depends(get_db)):
         filename=file_path.name,
     )
 
+
 @router.post("/tracks/{track_id}/musicbrainz-recording", response_model=TrackResponse, tags=["tracks"])
 def fetch_musicbrainz_recording_id(
     track_id: int,
     force: bool = Query(False),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
 ):
     track = (
         db.query(Track)
@@ -111,22 +119,7 @@ def fetch_musicbrainz_recording_id(
         raise HTTPException(status_code=404, detail="Track not found")
 
     if track.musicbrainz_recording_id and not force:
-        return TrackResponse(
-            id=track.id,
-            title=track.title,
-            artist=track.artist,
-            album=track.album,
-            genre=track.genre,
-            genres=[item.genre for item in track.track_genres],
-            file_path=track.file_path,
-            raw_title=track.raw_title,
-            raw_artist=track.raw_artist,
-            raw_album=track.raw_album,
-            raw_genre=track.raw_genre,
-            musicbrainz_recording_id=track.musicbrainz_recording_id,
-            lastfm_tags_enriched=track.lastfm_tags_enriched,
-            artists=[item.artist_name for item in track.track_artists],
-        )
+        return build_track_response(track)
 
     mbid = find_recording_mbid(
         track.title,
@@ -151,25 +144,15 @@ def fetch_musicbrainz_recording_id(
         .first()
     )
 
-    return TrackResponse(
-        id=track.id,
-        title=track.title,
-        artist=track.artist,
-        album=track.album,
-        genre=track.genre,
-        genres=[item.genre for item in track.track_genres],
-        file_path=track.file_path,
-        raw_title=track.raw_title,
-        raw_artist=track.raw_artist,
-        raw_album=track.raw_album,
-        raw_genre=track.raw_genre,
-        musicbrainz_recording_id=track.musicbrainz_recording_id,
-        lastfm_tags_enriched=track.lastfm_tags_enriched,
-        artists=[item.artist_name for item in track.track_artists],
-    )
+    return build_track_response(track)
+
 
 @router.post("/tracks/{track_id}/lastfm/now-playing", tags=["tracks"])
-def update_track_now_playing_on_lastfm(track_id: int, db: Session = Depends(get_db)):
+def update_track_now_playing_on_lastfm(
+    track_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     settings = db.query(AppSetting).first()
 
     if not settings:
@@ -201,8 +184,13 @@ def update_track_now_playing_on_lastfm(track_id: int, db: Session = Depends(get_
 
     return result
 
+
 @router.post("/tracks/{track_id}/lastfm/scrobble", tags=["tracks"])
-def scrobble_track_to_lastfm(track_id: int, db: Session = Depends(get_db)):
+def scrobble_track_to_lastfm(
+    track_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     settings = db.query(AppSetting).first()
 
     if not settings:
@@ -234,8 +222,12 @@ def scrobble_track_to_lastfm(track_id: int, db: Session = Depends(get_db)):
 
     return result
 
+
 @router.delete("/tracks/purge", tags=["tracks"])
-def purge_tracks(db: Session = Depends(get_db)):
+def purge_tracks(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
     deleted_tracks = db.query(Track).count()
 
     db.query(PlaylistTrack).delete()
@@ -261,7 +253,12 @@ def purge_tracks(db: Session = Depends(get_db)):
 
 
 @router.patch("/tracks/{track_id}", response_model=TrackResponse, tags=["tracks"])
-def update_track(track_id: int, payload: TrackUpdate, db: Session = Depends(get_db)):
+def update_track(
+    track_id: int,
+    payload: TrackUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
     track = (
         db.query(Track)
         .options(
@@ -281,13 +278,13 @@ def update_track(track_id: int, payload: TrackUpdate, db: Session = Depends(get_
 
     if payload.genres is not None:
         normalized_genres = normalize_genre_list(", ".join(payload.genres))
-    
+
         track.genre = normalized_genres[0] if normalized_genres else None
-    
+
         db.query(TrackGenre).filter(
             TrackGenre.track_id == track.id
         ).delete(synchronize_session=False)
-    
+
         for genre_name in normalized_genres:
             db.add(
                 TrackGenre(
@@ -297,6 +294,7 @@ def update_track(track_id: int, payload: TrackUpdate, db: Session = Depends(get_
             )
 
     db.commit()
+
     track = (
         db.query(Track)
         .options(
@@ -306,21 +304,5 @@ def update_track(track_id: int, payload: TrackUpdate, db: Session = Depends(get_
         .filter(Track.id == track_id)
         .first()
     )
-    db.refresh(track)
 
-    return TrackResponse(
-        id=track.id,
-        title=track.title,
-        artist=track.artist,
-        album=track.album,
-        genre=track.genre,
-        genres=[item.genre for item in track.track_genres],
-        file_path=track.file_path,
-        raw_title=track.raw_title,
-        raw_artist=track.raw_artist,
-        raw_album=track.raw_album,
-        raw_genre=track.raw_genre,
-        musicbrainz_recording_id=track.musicbrainz_recording_id,
-        lastfm_tags_enriched=track.lastfm_tags_enriched,
-        artists=[item.artist_name for item in track.track_artists],
-    )
+    return build_track_response(track)

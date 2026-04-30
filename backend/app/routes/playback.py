@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies.auth import get_current_user
 from app.models.playback_queue_item import PlaybackQueueItem
+from app.models.user import User
 from app.schemas.playback import PlaybackStateResponse, PlaybackStateUpdate
 from app.services.playback import get_or_create_playback_session
 
@@ -10,7 +12,10 @@ router = APIRouter()
 
 
 @router.get("/playback", response_model=PlaybackStateResponse, tags=["playback"])
-def get_playback_state(db: Session = Depends(get_db)):
+def get_playback_state(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     session = get_or_create_playback_session(db)
 
     return {
@@ -23,8 +28,13 @@ def get_playback_state(db: Session = Depends(get_db)):
         "queue_track_ids": [item.track_id for item in session.queue_items],
     }
 
+
 @router.put("/playback", response_model=PlaybackStateResponse, tags=["playback"])
-def update_playback_state(payload: PlaybackStateUpdate, db: Session = Depends(get_db)):
+def update_playback_state(
+    payload: PlaybackStateUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     session = get_or_create_playback_session(db)
 
     session.current_track_id = payload.current_track_id

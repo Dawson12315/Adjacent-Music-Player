@@ -7,8 +7,10 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies.auth import get_current_user, require_admin
 from app.models.artist_artwork import ArtistArtwork
 from app.models.track_artist import TrackArtist
+from app.models.user import User
 from app.utils.artist_normalization import normalize_artist_name
 
 router = APIRouter()
@@ -18,7 +20,10 @@ ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 @router.get("/artists", tags=["artists"])
-def list_artists(db: Session = Depends(get_db)):
+def list_artists(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     artists = (
         db.query(TrackArtist.artist_name)
         .filter(TrackArtist.artist_name.isnot(None))
@@ -31,7 +36,11 @@ def list_artists(db: Session = Depends(get_db)):
 
 
 @router.get("/artists/{artist_name:path}/artwork", tags=["artists"])
-def get_artist_artwork(artist_name: str, db: Session = Depends(get_db)):
+def get_artist_artwork(
+    artist_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     artist_key = normalize_artist_name(artist_name)
 
     artwork = (
@@ -52,6 +61,7 @@ def upload_artist_artwork(
     artist_name: str,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
 ):
     artist_key = normalize_artist_name(artist_name)
 

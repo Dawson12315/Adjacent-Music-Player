@@ -3,13 +3,19 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.expression import func
 
 from app.db import get_db
+from app.dependencies.auth import get_current_user
 from app.models.track import Track
+from app.models.user import User
 
 router = APIRouter()
 
 
 @router.get("/tracks/{track_id}/similar", tags=["tracks"])
-def get_similar_tracks(track_id: int, db: Session = Depends(get_db)):
+def get_similar_tracks(
+    track_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     track = db.query(Track).filter(Track.id == track_id).first()
 
     if not track or not track.genre:
@@ -19,7 +25,7 @@ def get_similar_tracks(track_id: int, db: Session = Depends(get_db)):
         db.query(Track)
         .filter(
             Track.genre == track.genre,
-            Track.id != track.id
+            Track.id != track.id,
         )
         .order_by(func.random())
         .limit(10)

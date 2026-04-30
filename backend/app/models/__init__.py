@@ -14,6 +14,7 @@ from app.models.artist_lastfm_similarity import ArtistLastfmSimilarity
 from app.models.track_lastfm_similarity import TrackLastfmSimilarity
 from app.models.album_artwork import AlbumArtwork
 from app.models.artist_artwork import ArtistArtwork
+from app.models.user import User
 
 __all__ = [
     "Track",
@@ -31,5 +32,6 @@ __all__ = [
     "ArtistLastfmSimilarity",
     "TrackLastfmSimilarity",
     "ArtistArtwork",
-    "AlbumArtwork"
+    "AlbumArtwork",
+    "User"
     ]

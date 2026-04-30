@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { List } from "react-window";
 
 function App() {
+  const [authLoading, setAuthLoading] = useState(true);
+  const [setupRequired, setSetupRequired] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authError, setAuthError] = useState("");
   const [tracks, setTracks] = useState([]);
   const [artists, setArtists] = useState([]);
   const [albums, setAlbums] = useState([]);
@@ -171,6 +175,7 @@ function App() {
       const source = getListeningSource();
 
       const response = await fetch(`${API_BASE_URL}/api/tracks/${trackId}/${eventPath}`, {
+        credentials: "include",
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -257,6 +262,51 @@ function App() {
     hasSentCompleteRef.current = false;
   }
 
+  useEffect(() => {
+    async function loadAuthState() {
+      try {
+        setAuthLoading(true);
+        setAuthError("");
+
+        const setupResponse = await fetch(`${API_BASE_URL}/api/auth/setup-status`, {
+          credentials: "include",
+        });
+
+        if (!setupResponse.ok) {
+          throw new Error("Unable to check setup status");
+        }
+
+        const setupData = await setupResponse.json();
+
+        if (!setupData.admin_exists) {
+          setSetupRequired(true);
+          setCurrentUser(null);
+          return;
+        }
+
+        setSetupRequired(false);
+
+        const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
+          credentials: "include",
+        });
+
+        if (meResponse.ok) {
+          const user = await meResponse.json();
+          setCurrentUser(user);
+        } else {
+          setCurrentUser(null);
+        }
+      } catch (error) {
+        setAuthError(error.message || "Authentication failed");
+        setCurrentUser(null);
+      } finally {
+        setAuthLoading(false);
+      }
+    }
+
+    loadAuthState();
+  }, []);
+
   useEffect(() =>{
     async function fetchLibraryData() {
       try {
@@ -271,14 +321,14 @@ function App() {
           likedSongsPlaylistResponse
 
         ] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/tracks`),
-          fetch(`${API_BASE_URL}/api/artists`),
-          fetch(`${API_BASE_URL}/api/albums`),          
-          fetch(`${API_BASE_URL}/api/genres`),
-          fetch(`${API_BASE_URL}/api/playlists`),
-          fetch(`${API_BASE_URL}/api/settings`),
-          fetch(`${API_BASE_URL}/api/settings/lastfm/readiness`),
-          fetch(`${API_BASE_URL}/api/playlists/liked-songs`)
+          fetch(`${API_BASE_URL}/api/tracks`, { credentials: "include" }),
+          fetch(`${API_BASE_URL}/api/artists`, { credentials: "include" }),
+          fetch(`${API_BASE_URL}/api/albums`, { credentials: "include" }),          
+          fetch(`${API_BASE_URL}/api/genres`, { credentials: "include" }),
+          fetch(`${API_BASE_URL}/api/playlists`, { credentials: "include" }),
+          fetch(`${API_BASE_URL}/api/settings`, { credentials: "include" }),
+          fetch(`${API_BASE_URL}/api/settings/lastfm/readiness`, { credentials: "include" }),
+          fetch(`${API_BASE_URL}/api/playlists/liked-songs`, { credentials: "include" })
         ])
 
         if (
@@ -330,7 +380,9 @@ function App() {
         setLastfmSessionKey(settingsData.lastfm_session_key || "")
 
         // Restore playback state
-        const playbackResponse = await fetch(`${API_BASE_URL}/api/playback`);
+        const playbackResponse = await fetch(`${API_BASE_URL}/api/playback`, {
+          credentials: "include"
+        });
 
         if (playbackResponse.ok) {
           const playbackData = await playbackResponse.json();
@@ -382,8 +434,10 @@ function App() {
         setLoading(false);
       }
     }
+  if (!authLoading && currentUser) {
     fetchLibraryData();
-  }, []);
+  }
+  }, [authLoading, currentUser]);
 
   useEffect(() => {
     if (!selectedTrack || !audioRef.current) {
@@ -460,6 +514,7 @@ function App() {
         const response = await fetch(
           `${API_BASE_URL}/api/settings/lastfm/session?token=${encodeURIComponent(token)}`,
           {
+            credentials: "include",
             method: "POST",
           }
         )
@@ -511,6 +566,7 @@ function App() {
 
       try {
         await fetch(`${API_BASE_URL}/api/playback`, {
+          credentials: "include",
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -553,6 +609,7 @@ function App() {
     async function savePlaybackTime() {
       try {
         await fetch(`${API_BASE_URL}/api/playback`, {
+          credentials: "include",
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -624,6 +681,7 @@ function App() {
   }, [searchQuery, activeView]);
 
   useEffect(() => {
+    if (!currentUser) return;
     async function fetchLikedState() {
       if (!selectedTrack) {
         setIsCurrentTrackLiked(false);
@@ -632,7 +690,9 @@ function App() {
 
       try {
         const response = await fetch(
-          `${API_BASE_URL}/api/playlists/liked-songs/tracks/${selectedTrack.id}`
+          `${API_BASE_URL}/api/playlists/liked-songs/tracks/${selectedTrack.id}`, {
+            credentials: "include"
+          }
         );
 
         if (!response.ok) {
@@ -648,7 +708,7 @@ function App() {
     }
 
     fetchLikedState();
-  }, [selectedTrack]);
+  }, [currentUser, selectedTrack]);
 
   useEffect(() => {
     if (!("mediaSession" in navigator)) {
@@ -709,6 +769,7 @@ function App() {
   }, [selectedTrack]);
 
   useEffect(() => {
+    if (!currentUser) return;
     async function fetchArtistGenres() {
       if (!selectedArtist) {
         setSelectedArtistGenres([]);
@@ -717,7 +778,9 @@ function App() {
 
       try {
         const response = await fetch(
-          `${API_BASE_URL}/api/artists/${encodeURIComponent(selectedArtist)}/genres`
+          `${API_BASE_URL}/api/artists/${encodeURIComponent(selectedArtist)}/genres`, {
+            credentials: "include"
+          }
         );
 
         if (!response.ok) {
@@ -733,7 +796,7 @@ function App() {
     }
 
     fetchArtistGenres();
-  }, [selectedArtist]);
+  }, [currentUser, selectedArtist]);
 
   function handleTrackClick(track){
     if (
@@ -1008,6 +1071,59 @@ function App() {
     audioRef.current.currentTime = newTime;
     setCurrentTime(newTime);
   }
+
+  async function handleSetupAdmin(username, password) {
+    setAuthError("");
+
+    const response = await fetch(`${API_BASE_URL}/api/auth/setup-admin`, {
+      credentials: "include",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ username, password }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.detail || "Unable to create admin account");
+    }
+
+    setSetupRequired(false);
+    setCurrentUser(data.user);
+  }
+
+  async function handleLogin(username, password) {
+    setAuthError("");
+
+    const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      credentials: "include",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ username, password }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.detail || "Unable to sign in");
+    }
+
+    setCurrentUser(data.user);
+  }
+
+  async function handleLogout() {
+    await fetch(`${API_BASE_URL}/api/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    });
+
+    setCurrentUser(null);
+  }
+
   async function handleCreatePlaylist() {
     const trimmedName = newPlaylistName.trim();
 
@@ -1017,6 +1133,7 @@ function App() {
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/playlists`, {
+        credentials: "include",
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1049,6 +1166,7 @@ function App() {
       const response = await fetch(
         `${API_BASE_URL}/api/playlists/${playlistId}/tracks`,
         {
+          credentials: "include",
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1075,6 +1193,7 @@ function App() {
       const response = await fetch(
         `${API_BASE_URL}/api/playlists/${selectedPlaylist.id}/tracks/${trackId}`,
         {
+          credentials: "include",
           method: "DELETE",
         }
       );
@@ -1093,7 +1212,9 @@ function App() {
   async function handlePlayPlaylist(playlist) {
     try {
       const response = await fetch(
-        `${API_BASE_URL}/api/playlists/${playlist.id}/tracks`
+        `${API_BASE_URL}/api/playlists/${playlist.id}/tracks`, {
+          credentials: "include"
+        }
       );
 
       if (!response.ok) {
@@ -1128,7 +1249,9 @@ function App() {
   async function handlePlaylistClick(playlist) {
     try {
       const response = await fetch(
-        `${API_BASE_URL}/api/playlists/${playlist.id}/tracks`
+        `${API_BASE_URL}/api/playlists/${playlist.id}/tracks`,{
+          credentials: "include"
+        }
       );
 
       if (!response.ok) {
@@ -1154,6 +1277,7 @@ function App() {
       const response = await fetch(
         `${API_BASE_URL}/api/playlists/${playlistId}`,
         {
+          credentials: "include",
           method: "DELETE",
         }
       );
@@ -1195,6 +1319,7 @@ function App() {
       const response = await fetch(
         `${API_BASE_URL}/api/playlists/${playlistId}`,
         {
+          credentials: "include",
           method: "PATCH",
           headers: {
             "Content-Type": "application/json"
@@ -1238,6 +1363,7 @@ function App() {
   async function handlePurgeTracks() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/tracks/purge`, {
+        credentials: "include",
         method: "DELETE",
       });
 
@@ -1275,6 +1401,7 @@ function App() {
     setSettingsNotice("Scanning Library...")
     try {
       const response = await fetch(`${API_BASE_URL}/api/scan?limit=100000`, {
+        credentials: "include",
         method: "POST",
       });
 
@@ -1286,11 +1413,11 @@ function App() {
 
       const [tracksResponse, artistsResponse, albumsResponse, playlistsResponse, lastfmReadinessResponse] =
         await Promise.all([
-          fetch(`${API_BASE_URL}/api/tracks`),
-          fetch(`${API_BASE_URL}/api/artists`),
-          fetch(`${API_BASE_URL}/api/albums`),
-          fetch(`${API_BASE_URL}/api/playlists`),
-          fetch(`${API_BASE_URL}/api/settings/lastfm/readiness`)
+          fetch(`${API_BASE_URL}/api/tracks`, { credentials: "include" }),
+          fetch(`${API_BASE_URL}/api/artists`, { credentials: "include" }),
+          fetch(`${API_BASE_URL}/api/albums`, { credentials: "include" }),
+          fetch(`${API_BASE_URL}/api/playlists`, { credentials: "include" }),
+          fetch(`${API_BASE_URL}/api/settings/lastfm/readiness`, { credentials: "include" })
         ]);
 
       if (
@@ -1349,6 +1476,7 @@ function App() {
   async function handleSaveAppSettings() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/settings`, {
+        credentials: "include",
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -1398,6 +1526,7 @@ function App() {
       const cleanupResponse = await fetch(
         `${API_BASE_URL}/api/maintenance/cleanup`,
         {
+          credentials: "include",
           method: "POST",
         }
       );
@@ -1410,10 +1539,10 @@ function App() {
 
       const [tracksResponse, artistsResponse, albumsResponse, playlistsResponse] =
         await Promise.all([
-          fetch(`${API_BASE_URL}/api/tracks`),
-          fetch(`${API_BASE_URL}/api/artists`),
-          fetch(`${API_BASE_URL}/api/albums`),
-          fetch(`${API_BASE_URL}/api/playlists`),
+          fetch(`${API_BASE_URL}/api/tracks`, { credentials: "include" }),
+          fetch(`${API_BASE_URL}/api/artists`, { credentials: "include" }),
+          fetch(`${API_BASE_URL}/api/albums`, { credentials: "include" }),
+          fetch(`${API_BASE_URL}/api/playlists`, { credentials: "include" }),
         ]);
 
       if (
@@ -1467,9 +1596,11 @@ function App() {
           : `${API_BASE_URL}/api/playlists/liked-songs/tracks`,
         wasLiked
           ? {
+              credentials: "include",
               method: "DELETE",
             }
           : {
+              credentials: "include",
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
@@ -1496,7 +1627,9 @@ function App() {
     
       if (selectedPlaylist?.system_key === "liked_songs") {
         const likedSongsResponse = await fetch(
-          `${API_BASE_URL}/api/playlists/${selectedPlaylist.id}/tracks`
+          `${API_BASE_URL}/api/playlists/${selectedPlaylist.id}/tracks`, {
+            credentials: "include"
+          }
         );
       
         if (likedSongsResponse.ok) {
@@ -1580,6 +1713,7 @@ function App() {
       const response = await fetch(
         `${API_BASE_URL}/api/tracks/${editingTrack.id}`,
         {
+          credentials: "include",
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
@@ -1694,6 +1828,7 @@ function App() {
     const response = await fetch(
       `${API_BASE_URL}/api/artists/${encodeURIComponent(artistName)}/artwork`,
       {
+        credentials: "include",
         method: "POST",
         body: formData,
       }
@@ -1729,6 +1864,7 @@ function App() {
         const renameResponse = await fetch(
           `${API_BASE_URL}/api/artists/rename`,
           {
+            credentials: "include",
             method: "PATCH",
             headers: {
               "Content-Type": "application/json",
@@ -1751,6 +1887,7 @@ function App() {
         const transferResponse = await fetch(
           `${API_BASE_URL}/api/artists/transfer`,
           {
+            credentials: "include",
             method: "PATCH",
             headers: {
               "Content-Type": "application/json",
@@ -1775,10 +1912,10 @@ function App() {
         albumsResponse,
         playlistsResponse,
       ] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/tracks`),
-        fetch(`${API_BASE_URL}/api/artists`),
-        fetch(`${API_BASE_URL}/api/albums`),
-        fetch(`${API_BASE_URL}/api/playlists`),
+        fetch(`${API_BASE_URL}/api/tracks`, { credentials: "include" }),
+        fetch(`${API_BASE_URL}/api/artists`, { credentials: "include" }),
+        fetch(`${API_BASE_URL}/api/albums`, { credentials: "include" }),
+        fetch(`${API_BASE_URL}/api/playlists`, { credentials: "include" }),
       ]);
 
       if (
@@ -1857,6 +1994,7 @@ function App() {
       const response = await fetch(
         `${API_BASE_URL}/api/playlists/${artworkPlaylist.id}/artwork`,
         {
+          credentials: "include",
           method: "POST",
           body: formData,
         }
@@ -1903,6 +2041,7 @@ function App() {
       const response = await fetch(
         `${API_BASE_URL}/api/playlists/${selectedPlaylist.id}/tracks`,
         {
+          credentials: "include",
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1928,6 +2067,7 @@ function App() {
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/settings/lastfm/enrich`, {
+        credentials: "include",
         method: "POST",
         cache: "no-store",
       })
@@ -1973,6 +2113,7 @@ function App() {
       )
 
       await fetch(`${API_BASE_URL}/api/settings/lastfm/stop`, {
+        credentials: "include",
         method: "POST",
         cache: "no-store",
       })
@@ -1997,7 +2138,9 @@ function App() {
       const callbackUrl = `${window.location.origin}/settings/lastfm/callback`
 
       const response = await fetch(
-        `${API_BASE_URL}/api/settings/lastfm/auth-url?callback_url=${encodeURIComponent(callbackUrl)}`
+        `${API_BASE_URL}/api/settings/lastfm/auth-url?callback_url=${encodeURIComponent(callbackUrl)}`,{
+          credentials: "include"
+        }
       )
 
       if (!response.ok) {
@@ -2042,6 +2185,7 @@ function App() {
       setIsResumingMusicbrainz(true)
 
       const response = await fetch(`${API_BASE_URL}/api/settings/musicbrainz/resume`, {
+        credentials: "include",
         method: "POST",
       })
 
@@ -2062,7 +2206,9 @@ function App() {
         setSettingsNotice("MusicBrainz tagging could not be resumed.")
       }
 
-      const readinessResponse = await fetch(`${API_BASE_URL}/api/settings/lastfm/readiness`)
+      const readinessResponse = await fetch(`${API_BASE_URL}/api/settings/lastfm/readiness`,{
+        credentials: "include"
+      })
       if (readinessResponse.ok) {
         const readinessData = await readinessResponse.json()
         setLastfmReadiness(readinessData)
@@ -2116,6 +2262,7 @@ function App() {
       const response = await fetch(
         `${API_BASE_URL}/api/albums/${encodeURIComponent(albumBeingEdited)}/artwork`,
         {
+          credentials: "include",
           method: "POST",
           body: formData,
         }
@@ -2146,6 +2293,7 @@ function App() {
       const response = await fetch(
         `${API_BASE_URL}/api/settings/lastfm/progress?_=${Date.now()}`,
         {
+          credentials: "include",
           method: "GET",
           cache: "no-store",
           headers: {
@@ -2181,6 +2329,7 @@ function App() {
   async function fetchMusicbrainzReadiness() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/settings/lastfm/readiness`, {
+        credentials: "include",
         cache: "no-store",
       })
 
@@ -2213,6 +2362,7 @@ function App() {
       const response = await fetch(
         `${API_BASE_URL}/api/tracks/${trackId}/lastfm/now-playing`,
         {
+          credentials: "include",
           method: "POST",
         }
       )
@@ -2233,6 +2383,7 @@ function App() {
       const response = await fetch(
         `${API_BASE_URL}/api/tracks/${trackId}/lastfm/scrobble`,
         {
+          credentials: "include",
           method: "POST",
         }
       )
@@ -2252,7 +2403,9 @@ function App() {
     try {
       setIsLoadingStatsOverview(true);
 
-      const response = await fetch(`${API_BASE_URL}/api/stats/overview`);
+      const response = await fetch(`${API_BASE_URL}/api/stats/overview`,{
+        credentials: "include"
+      });
 
       if (!response.ok) {
         throw new Error("Failed to fetch stats overview");
@@ -2268,6 +2421,7 @@ function App() {
   }
 
   useEffect(() => {
+    if (!currentUser) return;
     if (!selectedTrack || !isPlaying) {
       return
     }
@@ -2282,7 +2436,7 @@ function App() {
 
     lastScrobbledTrackIdRef.current = selectedTrack.id
     sendLastfmScrobble(selectedTrack.id)
-  }, [selectedTrack, isPlaying, currentTime])
+  }, [currentUser, selectedTrack, isPlaying, currentTime])
 
   function startLastfmProgressPolling() {
     if (lastfmProgressIntervalRef.current) {
@@ -2412,6 +2566,7 @@ function App() {
   }, [shouldShowSimilarSection, activeView, playlistTracks, visibleTracks, selectedTrack]);
 
   useEffect(() => {
+    if (!currentUser) return;
     async function fetchSimilar() {
       if (!shouldShowSimilarSection) {
         setSimilarTracks([]);
@@ -2421,7 +2576,9 @@ function App() {
       try {
         if (activeView === "playlist" && selectedPlaylist) {
           const res = await fetch(
-            `${API_BASE_URL}/api/playlists/${selectedPlaylist.id}/recommendations?debug=true&refresh=${similarRefreshKey}&_=${Date.now()}`
+            `${API_BASE_URL}/api/playlists/${selectedPlaylist.id}/recommendations?debug=true&refresh=${similarRefreshKey}&_=${Date.now()}`,{
+              credentials: "include"
+            }
           );
         
           if (!res.ok) {
@@ -2445,7 +2602,9 @@ function App() {
         }
 
         const res = await fetch(
-          `${API_BASE_URL}/api/tracks/${similarSourceTrack.id}/similar`
+          `${API_BASE_URL}/api/tracks/${similarSourceTrack.id}/similar`,{
+            credentials: "include"
+          }
         );
 
         if (!res.ok) {
@@ -2462,6 +2621,7 @@ function App() {
 
     fetchSimilar();
   }, [
+    currentUser,
     similarSourceTrack,
     shouldShowSimilarSection,
     activeView,
@@ -2480,8 +2640,9 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!currentUser) return;
     fetchLastfmProgress()
-  }, [])
+  }, [currentUser])
 
   useEffect(() => {
     if (!lastfmProgress) {
@@ -2496,6 +2657,7 @@ function App() {
   }, [lastfmProgress])
 
   useEffect(() => {
+    if (!currentUser) return;
     if (!selectedTrack || !isPlaying) {
       return
     }
@@ -2506,9 +2668,10 @@ function App() {
 
     lastNowPlayingTrackIdRef.current = selectedTrack.id
     sendLastfmNowPlaying(selectedTrack.id)
-  }, [selectedTrack, isPlaying])
+  }, [currentUser, selectedTrack, isPlaying])
 
   useEffect(() => {
+    if (!currentUser) return;
     if (!lastfmReadiness) {
       return
     }
@@ -2516,9 +2679,10 @@ function App() {
     if (lastfmReadiness.musicbrainz_backfill_running && !musicbrainzReadinessIntervalRef.current) {
       startMusicbrainzReadinessPolling()
     }
-  }, [lastfmReadiness])
+  }, [currentUser, lastfmReadiness])
 
   useEffect(() => {
+    if (!currentUser) return;
     async function fetchSelectedArtistArtwork() {
       if (!selectedArtist) {
         setSelectedArtistArtworkPath("");
@@ -2527,7 +2691,9 @@ function App() {
 
       try {
         const response = await fetch(
-          `${API_BASE_URL}/api/artists/${encodeURIComponent(selectedArtist)}/artwork`
+          `${API_BASE_URL}/api/artists/${encodeURIComponent(selectedArtist)}/artwork`,{
+            credentials: "include"
+          }
         );
 
         if (!response.ok) {
@@ -2543,7 +2709,7 @@ function App() {
     }
 
     fetchSelectedArtistArtwork();
-  }, [selectedArtist]);
+  }, [currentUser, selectedArtist]);
 
   const visibleArtists = useMemo(() => {
     return artists.filter((artist) =>
@@ -2586,6 +2752,7 @@ function App() {
   );
 
   useEffect(() => {
+    if (!currentUser) return;
     if (activeView !== "artists" || artistViewMode !== "grid") {
       return;
     }
@@ -2603,7 +2770,9 @@ function App() {
         const results = await Promise.all(
           artistsToFetch.map(async (artist) => {
             const response = await fetch(
-              `${API_BASE_URL}/api/artists/${encodeURIComponent(artist)}/artwork`
+              `${API_BASE_URL}/api/artists/${encodeURIComponent(artist)}/artwork`,{
+                credentials: "include"
+              }
             );
 
             if (!response.ok) {
@@ -2625,9 +2794,10 @@ function App() {
     }
 
     fetchArtistGridArtwork();
-  }, [activeView, artistViewMode, paginatedArtists, artistArtworkMap]);
+  }, [currentUser, activeView, artistViewMode, paginatedArtists, artistArtworkMap]);
 
   useEffect(() => {
+    if (!currentUser) return;
     async function fetchAlbumArtwork() {
       const albumsNeeded = new Set();
     
@@ -2660,7 +2830,10 @@ function App() {
           albumsToFetch.map(async (album) => {
             const response = await fetch(
               `${API_BASE_URL}/api/albums/${encodeURIComponent(album)}/artwork`,
-              { cache: "no-store" }
+              { 
+                credentials: "include",
+                cache: "no-store"
+               }
             );
           
             if (!response.ok) {
@@ -2683,6 +2856,7 @@ function App() {
   
     fetchAlbumArtwork();
   }, [
+    currentUser,
     activeView,
     visibleAlbums,
     selectedAlbum,
@@ -2975,7 +3149,7 @@ function App() {
       
             <div className="behavior-insights-stat">
               <div className="behavior-insights-stat__label">Recently Played</div>
-              <div className="behavior-insights-stat__value">{recentlyPlayedCount}</    div>
+              <div className="behavior-insights-stat__value">{recentlyPlayedCount}</div>
             </div>
           </div>
       
@@ -3463,7 +3637,7 @@ function App() {
                   <span className="lastfm-progress-card__label">Current track</span>
                   <div className="lastfm-progress-card__value">
                     {lastfmProgress.current_title
-                      ? `${lastfmProgress.current_index}/${lastfmProgress.current_total} — ${lastfmProgress.            current_title}`
+                      ? `${lastfmProgress.current_index}/${lastfmProgress.current_total} — ${lastfmProgress.current_title}`
                       : "None"}
                   </div>
                 </div>
@@ -3544,6 +3718,9 @@ function App() {
               onClick={handleSaveAppSettings}
             >
               Save settings
+            </button>
+            <button className="logout-button" onClick={handleLogout}>
+              Sign out
             </button>
           </div>
         </div>
@@ -4018,6 +4195,37 @@ function App() {
           </button>
         </div>
       </div>
+    );
+  }
+
+  if (authLoading) {
+    return (
+      <div className="auth-page">
+        <div className="auth-card">
+          <h1>Adjacent</h1>
+          <p>Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (setupRequired) {
+    return (
+      <AuthScreen
+        mode="setup"
+        error={authError}
+        onSubmit={handleSetupAdmin}
+      />
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <AuthScreen
+        mode="login"
+        error={authError}
+        onSubmit={handleLogin}
+      />
     );
   }
 
@@ -5273,6 +5481,94 @@ function App() {
         </div>
       </div>
     )}
+    </div>
+  );
+}
+
+function AuthScreen({ mode, error, onSubmit }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [localError, setLocalError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const isSetup = mode === "setup";
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    setLocalError("");
+
+    if (!username.trim()) {
+      setLocalError("Username is required");
+      return;
+    }
+
+    if (!password) {
+      setLocalError("Password is required");
+      return;
+    }
+
+    if (isSetup && password.length < 8) {
+      setLocalError("Password must be at least 8 characters");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await onSubmit(username.trim(), password);
+    } catch (error) {
+      setLocalError(error.message || "Authentication failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="auth-page">
+      <form className="auth-card" onSubmit={handleSubmit}>
+        <div className="auth-logo">Adjacent</div>
+
+        <h1>{isSetup ? "Create admin account" : "Sign in"}</h1>
+
+        <p>
+          {isSetup
+            ? "No admin account exists yet. Create the first admin account to continue."
+            : "Sign in to continue to your music library."}
+        </p>
+
+        {(error || localError) && (
+          <div className="auth-error">{localError || error}</div>
+        )}
+
+        <label>
+          Username
+          <input
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            autoComplete="username"
+            placeholder="admin"
+          />
+        </label>
+
+        <label>
+          Password
+          <input
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete={isSetup ? "new-password" : "current-password"}
+            type="password"
+            placeholder="••••••••"
+          />
+        </label>
+
+        <button type="submit" disabled={submitting}>
+          {submitting
+            ? "Please wait..."
+            : isSetup
+              ? "Create admin"
+              : "Sign in"}
+        </button>
+      </form>
     </div>
   );
 }
