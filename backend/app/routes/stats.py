@@ -23,7 +23,7 @@ def top_played_tracks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    tracks = get_top_played_tracks(db, limit=limit)
+    tracks = get_top_played_tracks(db, current_user.id, limit=limit)
     return [build_track_response(track) for track in tracks]
 
 
@@ -33,7 +33,7 @@ def most_liked_tracks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    tracks = get_most_liked_tracks(db, limit=limit)
+    tracks = get_most_liked_tracks(db, current_user.id, limit=limit)
     return [build_track_response(track) for track in tracks]
 
 
@@ -43,7 +43,7 @@ def recently_played_tracks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    tracks = get_recently_played_tracks(db, limit=limit)
+    tracks = get_recently_played_tracks(db, current_user.id, limit=limit)
     return [build_track_response(track) for track in tracks]
 
 
@@ -60,7 +60,10 @@ def get_most_skipped_tracks(
             selectinload(Track.track_genres),
             selectinload(Track.track_artists),
         )
-        .filter(TrackUserStats.skip_count > 0)
+        .filter(
+            TrackUserStats.user_id == current_user.id,
+            TrackUserStats.skip_count > 0,
+        )
         .order_by(
             TrackUserStats.skip_count.desc(),
             TrackUserStats.updated_at.desc(),
@@ -78,9 +81,9 @@ def stats_overview(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    top_played = get_top_played_tracks(db, limit=limit)
-    most_liked = get_most_liked_tracks(db, limit=limit)
-    recently_played = get_recently_played_tracks(db, limit=limit)
+    top_played = get_top_played_tracks(db, current_user.id, limit=limit)
+    most_liked = get_most_liked_tracks(db, current_user.id, limit=limit)
+    recently_played = get_recently_played_tracks(db, current_user.id, limit=limit)
 
     most_skipped = (
         db.query(Track)
@@ -89,7 +92,10 @@ def stats_overview(
             selectinload(Track.track_genres),
             selectinload(Track.track_artists),
         )
-        .filter(TrackUserStats.skip_count > 0)
+        .filter(
+            TrackUserStats.user_id == current_user.id,
+            TrackUserStats.skip_count > 0,
+        )
         .order_by(
             TrackUserStats.skip_count.desc(),
             TrackUserStats.updated_at.desc(),

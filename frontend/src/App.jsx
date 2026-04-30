@@ -357,13 +357,7 @@ function App() {
         setArtists(artistsData);
         setAlbums(albumsData);
         setGenres(genresData);
-        setPlaylists(
-          [...playlistsData].sort((a, b) => {
-            if (a.system_key === "liked_songs") return -1
-            if (b.system_key === "liked_songs") return 1
-            return a.name.localeCompare(b.name)
-          })
-        )
+        setPlaylists(sortPlaylistsWithSystemFirst(playlistsData))
         setAppSettings({
           cleanup_enabled: settingsData.cleanup_enabled,
           cleanup_time: settingsData.cleanup_time || "",
@@ -1439,13 +1433,7 @@ function App() {
       setTracks(tracksData);
       setArtists(artistsData);
       setAlbums(albumsData);
-      setPlaylists(
-        [...playlistsData].sort((a, b) => {
-          if (a.system_key === "liked_songs") return -1;
-          if (b.system_key === "liked_songs") return 1;
-          return a.name.localeCompare(b.name);
-        })
-      );
+      setPlaylists(sortPlaylistsWithSystemFirst(playlistsData));
       setLastfmReadiness(lastfmReadinessData);
       setSettingsNotice(
         `Library scan completed. Added ${scanResult.added} new tracks${scanResult.added === 1 ? "" : "s"}.`
@@ -1562,13 +1550,7 @@ function App() {
       setTracks(tracksData);
       setArtists(artistsData);
       setAlbums(albumsData);
-      setPlaylists(
-        [...playlistsData].sort((a, b) => {
-          if (a.system_key === "liked_songs") return -1;
-          if (b.system_key === "liked_songs") return 1;
-          return a.name.localeCompare(b.name);
-        })
-      );
+      setPlaylists(sortPlaylistsWithSystemFirst(playlistsData));
 
       setSettingsNotice(
         `Cleanup completed. Removed ${cleanupResult.removed} missing track${
@@ -1625,7 +1607,7 @@ function App() {
         }
       );
     
-      if (selectedPlaylist?.system_key === "liked_songs") {
+      if (isLikedSongsPlaylist(selectedPlaylist)) {
         const likedSongsResponse = await fetch(
           `${API_BASE_URL}/api/playlists/${selectedPlaylist.id}/tracks`, {
             credentials: "include"
@@ -1935,13 +1917,7 @@ function App() {
       setTracks(tracksData);
       setArtists(artistsData);
       setAlbums(albumsData);
-      setPlaylists(
-        [...playlistsData].sort((a, b) => {
-          if (a.system_key === "liked_songs") return -1;
-          if (b.system_key === "liked_songs") return 1;
-          return a.name.localeCompare(b.name);
-        })
-      );
+      setPlaylists(sortPlaylistsWithSystemFirst(playlistsData));
 
       setSelectedArtist(currentSourceArtist);
       if (artistArtworkFile) {
@@ -1955,7 +1931,7 @@ function App() {
   }
 
   function handleOpenChangeArtwork(playlist) {
-    if (playlist.system_key === "liked_songs") {
+    if (isLikedSongsPlaylist(playlist)) {
       return;
     }
 
@@ -2458,7 +2434,7 @@ function App() {
   }
 
   function getPlaylistArtwork(playlist) {
-    if (playlist.system_key === "liked_songs") {
+    if (isLikedSongsPlaylist(playlist)) {
       return {
         type: "image",
         src: "/liked-songs.png",
@@ -2477,6 +2453,22 @@ function App() {
       initials: getPlaylistInitials(playlist.name),
       gradientClass: getPlaylistGradientClass(playlist.name),
     };
+  }
+  function isLikedSongsPlaylist(playlist) {
+    return playlist?.system_key?.startsWith("liked_songs:");
+  }
+
+  function sortPlaylistsWithSystemFirst(items) {
+    return [...items].sort((a, b) => {
+      const aSystem = isLikedSongsPlaylist(a) ? 0 : 1;
+      const bSystem = isLikedSongsPlaylist(b) ? 0 : 1;
+
+      if (aSystem !== bSystem) {
+        return aSystem - bSystem;
+      }
+
+      return a.name.localeCompare(b.name);
+    });
   }
   function getAlbumKey(albumName) {
     return (albumName || "").trim();
@@ -5485,90 +5477,69 @@ function App() {
   );
 }
 
-function AuthScreen({ mode, error, onSubmit }) {
-  const [username, setUsername] = useState("");
+function AuthScreen({ mode, onSubmit, error }) {
+  const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
-  const [localError, setLocalError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
 
   const isSetup = mode === "setup";
 
   async function handleSubmit(event) {
     event.preventDefault();
 
-    setLocalError("");
-
-    if (!username.trim()) {
-      setLocalError("Username is required");
-      return;
-    }
-
-    if (!password) {
-      setLocalError("Password is required");
-      return;
-    }
-
-    if (isSetup && password.length < 8) {
-      setLocalError("Password must be at least 8 characters");
-      return;
-    }
-
     try {
-      setSubmitting(true);
-      await onSubmit(username.trim(), password);
+      await onSubmit(username, password);
     } catch (error) {
-      setLocalError(error.message || "Authentication failed");
-    } finally {
-      setSubmitting(false);
+      console.error(error);
     }
   }
 
   return (
     <div className="auth-page">
-      <form className="auth-card" onSubmit={handleSubmit}>
-        <div className="auth-logo">Adjacent</div>
+      <div className="auth-card">
+        <div className="auth-logo-wrap">
+          <img className="auth-logo" src="/Adjacent.svg" alt="Adjacent logo" />
+        </div>
 
-        <h1>{isSetup ? "Create admin account" : "Sign in"}</h1>
+        <div className="auth-brand">Adjacent</div>
 
-        <p>
+        <h1 className="auth-title">
+          {isSetup ? "Create admin account" : "Welcome back"}
+        </h1>
+
+        <p className="auth-subtitle">
           {isSetup
-            ? "No admin account exists yet. Create the first admin account to continue."
+            ? "Create the first admin account to secure your music library."
             : "Sign in to continue to your music library."}
         </p>
 
-        {(error || localError) && (
-          <div className="auth-error">{localError || error}</div>
-        )}
+        {error && <div className="auth-error">{error}</div>}
 
-        <label>
-          Username
-          <input
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            autoComplete="username"
-            placeholder="admin"
-          />
-        </label>
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <label className="auth-field">
+            <span>Username</span>
+            <input
+              type="text"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              autoComplete="username"
+            />
+          </label>
 
-        <label>
-          Password
-          <input
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete={isSetup ? "new-password" : "current-password"}
-            type="password"
-            placeholder="••••••••"
-          />
-        </label>
+          <label className="auth-field">
+            <span>Password</span>
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete={isSetup ? "new-password" : "current-password"}
+            />
+          </label>
 
-        <button type="submit" disabled={submitting}>
-          {submitting
-            ? "Please wait..."
-            : isSetup
-              ? "Create admin"
-              : "Sign in"}
-        </button>
-      </form>
+          <button className="auth-button" type="submit">
+            {isSetup ? "Create admin" : "Sign in"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

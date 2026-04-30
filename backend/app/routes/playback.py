@@ -16,7 +16,7 @@ def get_playback_state(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    session = get_or_create_playback_session(db)
+    session = get_or_create_playback_session(db, current_user.id)
 
     return {
         "current_track_id": session.current_track_id,
@@ -35,7 +35,7 @@ def update_playback_state(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    session = get_or_create_playback_session(db)
+    session = get_or_create_playback_session(db, current_user.id)
 
     session.current_track_id = payload.current_track_id
     session.queue_index = payload.queue_index

@@ -26,8 +26,7 @@ def create_listening_event(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        event = record_listening_event(db, payload)
-        return event
+        return record_listening_event(db, payload, current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
@@ -44,7 +43,7 @@ def track_play_start(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        event = record_listening_event(
+        return record_listening_event(
             db,
             ListeningEventCreate(
                 track_id=track_id,
@@ -55,8 +54,8 @@ def track_play_start(
                 duration_seconds=payload.duration_seconds,
                 session_id=payload.session_id,
             ),
+            current_user.id,
         )
-        return event
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
@@ -73,7 +72,7 @@ def track_play_complete(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        event = record_listening_event(
+        return record_listening_event(
             db,
             ListeningEventCreate(
                 track_id=track_id,
@@ -84,8 +83,8 @@ def track_play_complete(
                 duration_seconds=payload.duration_seconds,
                 session_id=payload.session_id,
             ),
+            current_user.id,
         )
-        return event
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
@@ -102,7 +101,7 @@ def track_skip(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        event = record_listening_event(
+        return record_listening_event(
             db,
             ListeningEventCreate(
                 track_id=track_id,
@@ -113,8 +112,8 @@ def track_skip(
                 duration_seconds=payload.duration_seconds,
                 session_id=payload.session_id,
             ),
+            current_user.id,
         )
-        return event
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
@@ -126,7 +125,7 @@ def like_track(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    event = record_listening_event(
+    return record_listening_event(
         db,
         ListeningEventCreate(
             track_id=track_id,
@@ -137,8 +136,8 @@ def like_track(
             duration_seconds=payload.duration_seconds,
             session_id=payload.session_id,
         ),
+        current_user.id,
     )
-    return event
 
 
 @router.post("/tracks/{track_id}/unlike", response_model=ListeningEventResponse, tags=["listening"])
@@ -148,7 +147,7 @@ def unlike_track(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    event = record_listening_event(
+    return record_listening_event(
         db,
         ListeningEventCreate(
             track_id=track_id,
@@ -159,5 +158,5 @@ def unlike_track(
             duration_seconds=payload.duration_seconds,
             session_id=payload.session_id,
         ),
+        current_user.id,
     )
-    return event
