@@ -3945,7 +3945,15 @@ function App() {
               <small>artists</small>
             </div>
           </div>
-      
+                    <div className="search-bar">
+                <input
+                  className="search-input"
+                  placeholder={`Search ${activeView}...`}
+                  type="text"
+                  value={searchQuery}
+                  onChange={(event)=> setSearchQuery(event.target.value)}
+                />
+              </div>
           <div className="view-toggle">
             <button
               className={`view-toggle__button ${
@@ -4072,7 +4080,15 @@ function App() {
               <small>albums</small>
             </div>
           </div>
-      
+                    <div className="search-bar">
+                <input
+                  className="search-input"
+                  placeholder={`Search ${activeView}...`}
+                  type="text"
+                  value={searchQuery}
+                  onChange={(event)=> setSearchQuery(event.target.value)}
+                />
+              </div>
           <div className="view-toggle">
             <button
               className={`view-toggle__button ${
@@ -4227,7 +4243,15 @@ function App() {
               </button>
             </div>
           )}
-
+              <div className="search-bar">
+                <input
+                  className="search-input"
+                  placeholder={`Search ${activeView}...`}
+                  type="text"
+                  value={searchQuery}
+                  onChange={(event)=> setSearchQuery(event.target.value)}
+                />
+              </div>
           <div className="genre-grid genre-grid--polished">
             {sortedGenres.map((genre, index) => (
               <button
@@ -4424,14 +4448,14 @@ function App() {
 
   function getHeaderTitle() {
     if (activeView === "artists") {
-      return "Artists";
+      return "";
     }
 
     if (activeView === "albums") {
-      return "Albums";
+      return "";
     }
     if (activeView === "genres") {
-      return "Genres";
+      return "";
     }
     if (activeView === "playlist" && selectedPlaylist) {
       return selectedPlaylist.name
@@ -4462,13 +4486,13 @@ function App() {
       return "";
     }
     if (activeView === "artists") {
-      return `${visibleArtists.length} artists`;
+      return "";
     }
     if (activeView === "albums") {
-      return `${visibleAlbums.length} albums`;
+      return "";
     }
     if (activeView === "genres") {
-      return `${visibleGenres.length} genres`;
+      return "";
     }
     if (activeView === "playlist" && selectedPlaylist) {
       return `${playlistTracks.length} tracks`;
@@ -5100,7 +5124,8 @@ function App() {
                 )}
               </div>
             </header>
-            {activeView !== "settings" && activeView !== "insights" && (
+            
+            {activeView !== "settings" && activeView !== "insights" && activeView !== "albums" && activeView !== "artists" && activeView !== "genres" &&(
               <div className="search-bar">
                 <input
                   className="search-input"
