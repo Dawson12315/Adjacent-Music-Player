@@ -6,6 +6,7 @@ from app.db import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.schemas.auth import (
+    AccountUpdateRequest,
     AdminSetupRequest,
     AuthResponse,
     LoginRequest,
@@ -49,13 +50,15 @@ def setup_admin(
     response: Response,
     db: Session = Depends(get_db),
 ):
+    username = payload.username.strip()
+
     if admin_exists(db):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Admin account already exists",
         )
 
-    existing_user = get_user_by_username(db, payload.username)
+    existing_user = get_user_by_username(db, username)
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -63,7 +66,7 @@ def setup_admin(
         )
 
     user = User(
-        username=payload.username.strip(),
+        username=username,
         password_hash=hash_password(payload.password),
         role="admin",
         is_active=True,
@@ -108,6 +111,55 @@ def login(
 @router.get("/auth/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@router.patch("/auth/me", response_model=AuthResponse)
+def update_me(
+    payload: AccountUpdateRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect",
+        )
+
+    new_username = payload.username.strip() if payload.username else current_user.username
+
+    if new_username != current_user.username:
+        existing_user = get_user_by_username(db, new_username)
+        if existing_user and existing_user.id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already exists",
+            )
+
+        current_user.username = new_username
+
+    if payload.new_password or payload.confirm_password:
+        if not payload.new_password or not payload.confirm_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Enter and confirm the new password",
+            )
+
+        if payload.new_password != payload.confirm_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="New passwords do not match",
+            )
+
+        current_user.password_hash = hash_password(payload.new_password)
+
+    db.commit()
+    db.refresh(current_user)
+
+    token = create_access_token(current_user)
+    set_auth_cookie(response, token)
+
+    return {"user": current_user}
 
 
 @router.post("/auth/logout")

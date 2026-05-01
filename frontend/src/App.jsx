@@ -114,6 +114,15 @@ function App() {
   });
   const [isLoadingStatsOverview, setIsLoadingStatsOverview] = useState(false);
   const [artistViewMode, setArtistViewMode] = useState("list");
+  const [accountUsername, setAccountUsername] = useState("");
+  const [accountCurrentPassword, setAccountCurrentPassword] = useState("");
+  const [accountNewPassword, setAccountNewPassword] = useState("");
+  const [accountConfirmPassword, setAccountConfirmPassword] = useState("");
+  const [accountError, setAccountError] = useState("");
+  const [accountSuccess, setAccountSuccess] = useState("");
+  const [isSavingAccount, setIsSavingAccount] = useState(false);
+  const [albumViewMode, setAlbumViewMode] = useState("grid");
+  const [openMenuDirection, setOpenMenuDirection] = useState("down");
 
   const TRACKS_PAGE_SIZE = 50;
   const ARTISTS_PAGE_SIZE = 50;
@@ -1116,6 +1125,58 @@ function App() {
     });
 
     setCurrentUser(null);
+  }
+
+  async function handleUpdateAccount() {
+    setAccountError("");
+    setAccountSuccess("");
+
+    const trimmedUsername = accountUsername.trim();
+
+    if (!accountCurrentPassword) {
+      setAccountError("Enter your current password to make account changes.");
+      return;
+    }
+
+    if ((accountNewPassword || accountConfirmPassword) && accountNewPassword !== accountConfirmPassword) {
+      setAccountError("New passwords do not match.");
+      return;
+    }
+
+    try {
+      setIsSavingAccount(true);
+
+      const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+        credentials: "include",
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username: trimmedUsername || currentUser.username,
+          current_password: accountCurrentPassword,
+          new_password: accountNewPassword || null,
+          confirm_password: accountConfirmPassword || null,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to update account.");
+      }
+
+      setCurrentUser(data.user);
+      setAccountUsername(data.user.username);
+      setAccountCurrentPassword("");
+      setAccountNewPassword("");
+      setAccountConfirmPassword("");
+      setAccountSuccess("Account updated successfully.");
+    } catch (error) {
+      setAccountError(error.message || "Failed to update account.");
+    } finally {
+      setIsSavingAccount(false);
+    }
   }
 
   async function handleCreatePlaylist() {
@@ -2858,6 +2919,25 @@ function App() {
     API_BASE_URL,
   ]);
 
+  useEffect(() => {
+    if (!accountError && !accountSuccess) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setAccountError("");
+      setAccountSuccess("");
+    }, 5000);
+
+    return () => clearTimeout(timeout);
+  }, [accountError, accountSuccess]);
+
+  useEffect(() => {
+    if (currentUser?.username) {
+      setAccountUsername(currentUser.username);
+    }
+  }, [currentUser?.username]);
+
   const editArtistAlbums = useMemo(() => {
     return albums.filter((album) =>
       tracks.some(
@@ -2987,7 +3067,15 @@ function App() {
                     aria-label="Track actions"
                     onClick={(event) => {
                       event.stopPropagation();
-                      setOpenMenuTrackId((prev) => (prev === track.id ? null : track.id));
+                    
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      const spaceBelow = window.innerHeight - rect.bottom;
+                    
+                      setOpenMenuDirection(spaceBelow < 260 ? "up" : "down");
+                    
+                      setOpenMenuTrackId((prev) =>
+                        prev === track.id ? null : track.id
+                      );
                     }}
                   >
                     ⋯
@@ -2995,8 +3083,13 @@ function App() {
                   
                   {openMenuTrackId === track.id && (
                     <div
-                      className="track-row__menu"
+                      className={`track-row__menu ${
+                        openMenuDirection === "up" ? "track-row__menu--up" : ""
+                      }`}
                       onClick={(event) => event.stopPropagation()}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onMouseEnter={(event) => event.stopPropagation()}
                     >
                       <button
                         className="track-row__menu-item"
@@ -3105,16 +3198,85 @@ function App() {
       const mostSkippedCount = statsOverview.most_skipped.length;
       const recentlyPlayedCount = statsOverview.recently_played.length;
     
+      function renderInsightTrack(track, prefix, index) {
+        const albumArtwork = track.album ? getAlbumArtwork(track.album) : null;
+      
+        return (
+          <button
+            key={`${prefix}-${track.id}`}
+            className="insight-track-row"
+            type="button"
+            onClick={() => handleTrackClick(track)}
+          >
+            <div className="insight-track-row__rank">{index + 1}</div>
+        
+            {albumArtwork?.type === "image" ? (
+              <img
+                className="insight-track-row__art"
+                src={albumArtwork.src}
+                alt={track.album || track.title}
+              />
+            ) : (
+              <div className="insight-track-row__art insight-track-row__art--placeholder">
+                ♪
+              </div>
+            )}
+
+            <div className="insight-track-row__content">
+              <div className="insight-track-row__title">{track.title}</div>
+              <div className="insight-track-row__meta">
+                {track.artist || "Unknown Artist"}
+              </div>
+            </div>
+          </button>
+        );
+      }
+    
+      function renderInsightCard(title, subtitle, icon, tracks, prefix) {
+        return (
+          <div className="insights-card">
+            <div className="insights-card__header">
+              <div className="insights-card__icon">{icon}</div>
+              <div>
+                <h3>{title}</h3>
+                <p>{subtitle}</p>
+              </div>
+            </div>
+        
+            <div className="insights-card__list">
+              {tracks.length === 0 ? (
+                <div className="insights-empty">
+                  <div className="insights-empty__icon">♪</div>
+                  <div>
+                    <div className="insights-empty__title">No listening data yet</div>
+                    <div className="insights-empty__text">
+                      Play, love, or skip more tracks to fill this in.
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                tracks
+                  .slice(0, 5)
+                  .map((track, index) => renderInsightTrack(track, prefix, index))
+              )}
+            </div>
+          </div>
+        );
+      }
+    
       return (
         <div className="behavior-insights-page">
-          <div className="behavior-insights-hero">
-            <h2>Behavior Insights</h2>
-            <p>
-              See what you play most, skip most, like most, and listened to recently.
-            </p>
+          <div className="behavior-insights-hero behavior-insights-hero--polished">
+            <div>
+              <div className="behavior-insights-eyebrow">Listening analytics</div>
+              <h2>Behavior Insights</h2>
+              <p>
+                See what you play most, skip most, love most, and listened to recently.
+              </p>
+            </div>
       
             <button
-              className="settings-button settings-button--secondary"
+              className="settings-button settings-button--secondary behavior-insights-refresh"
               type="button"
               onClick={fetchStatsOverview}
               disabled={isLoadingStatsOverview}
@@ -3124,139 +3286,71 @@ function App() {
           </div>
       
           <div className="behavior-insights-summary">
-            <div className="behavior-insights-stat">
-              <div className="behavior-insights-stat__label">Top Played</div>
-              <div className="behavior-insights-stat__value">{topPlayedCount}</div>
+            <div className="behavior-insights-stat behavior-insights-stat--played">
+              <div className="behavior-insights-stat__icon">▶</div>
+              <div>
+                <div className="behavior-insights-stat__label">Top Played</div>
+                <div className="behavior-insights-stat__value">{topPlayedCount}</div>
+              </div>
             </div>
       
-            <div className="behavior-insights-stat">
-              <div className="behavior-insights-stat__label">Most Loved</div>
-              <div className="behavior-insights-stat__value">{mostLikedCount}</div>
+            <div className="behavior-insights-stat behavior-insights-stat--loved">
+              <div className="behavior-insights-stat__icon">♥</div>
+              <div>
+                <div className="behavior-insights-stat__label">Most Loved</div>
+                <div className="behavior-insights-stat__value">{mostLikedCount}</div>
+              </div>
             </div>
       
-            <div className="behavior-insights-stat">
-              <div className="behavior-insights-stat__label">Most Skipped</div>
-              <div className="behavior-insights-stat__value">{mostSkippedCount}</div>
+            <div className="behavior-insights-stat behavior-insights-stat--skipped">
+              <div className="behavior-insights-stat__icon">↷</div>
+              <div>
+                <div className="behavior-insights-stat__label">Most Skipped</div>
+                <div className="behavior-insights-stat__value">{mostSkippedCount}</div>
+              </div>
             </div>
       
-            <div className="behavior-insights-stat">
-              <div className="behavior-insights-stat__label">Recently Played</div>
-              <div className="behavior-insights-stat__value">{recentlyPlayedCount}</div>
+            <div className="behavior-insights-stat behavior-insights-stat--recent">
+              <div className="behavior-insights-stat__icon">⏱</div>
+              <div>
+                <div className="behavior-insights-stat__label">Recently Played</div>
+                <div className="behavior-insights-stat__value">{recentlyPlayedCount}</div>
+              </div>
             </div>
           </div>
       
           <div className="behavior-insights-grid">
-            <div className="insights-card">
-              <div className="insights-card__header">
-                <h3>Top Played</h3>
-              </div>
-      
-              <div className="insights-card__list">
-                {statsOverview.top_played.length === 0 ? (
-                  <div className="insights-empty">No listening data yet.</div>
-                ) : (
-                  statsOverview.top_played.slice(0, 5).map((track) => (
-                    <button
-                      key={`top-played-${track.id}`}
-                      className="track-row"
-                      type="button"
-                      onClick={() => handleTrackClick(track)}
-                    >
-                      <div className="track-row__content">
-                        <div className="track-row__title">{track.title}</div>
-                        <div className="track-row__meta">
-                          {track.artist || "Unknown Artist"}
-                        </div>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-              
-            <div className="insights-card">
-              <div className="insights-card__header">
-                <h3>Most Loved</h3>
-              </div>
-              
-              <div className="insights-card__list">
-                {statsOverview.most_liked.length === 0 ? (
-                  <div className="insights-empty">No listening data yet.</div>
-                ) : (
-                  statsOverview.most_liked.slice(0, 5).map((track) => (
-                    <button
-                      key={`most-liked-${track.id}`}
-                      className="track-row"
-                      type="button"
-                      onClick={() => handleTrackClick(track)}
-                    >
-                      <div className="track-row__content">
-                        <div className="track-row__title">{track.title}</div>
-                        <div className="track-row__meta">
-                          {track.artist || "Unknown Artist"}
-                        </div>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-              
-            <div className="insights-card">
-              <div className="insights-card__header">
-                <h3>Most Skipped</h3>
-              </div>
-              
-              <div className="insights-card__list">
-                {statsOverview.most_skipped.length === 0 ? (
-                  <div className="insights-empty">No listening data yet.</div>
-                ) : (
-                  statsOverview.most_skipped.slice(0, 5).map((track) => (
-                    <button
-                      key={`most-skipped-${track.id}`}
-                      className="track-row"
-                      type="button"
-                      onClick={() => handleTrackClick(track)}
-                    >
-                      <div className="track-row__content">
-                        <div className="track-row__title">{track.title}</div>
-                        <div className="track-row__meta">
-                          {track.artist || "Unknown Artist"}
-                        </div>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-              
-            <div className="insights-card">
-              <div className="insights-card__header">
-                <h3>Recently Played</h3>
-              </div>
-              
-              <div className="insights-card__list">
-                {statsOverview.recently_played.length === 0 ? (
-                  <div className="insights-empty">No listening data yet.</div>
-                ) : (
-                  statsOverview.recently_played.slice(0, 5).map((track) => (
-                    <button
-                      key={`recently-played-${track.id}`}
-                      className="track-row"
-                      type="button"
-                      onClick={() => handleTrackClick(track)}
-                    >
-                      <div className="track-row__content">
-                        <div className="track-row__title">{track.title}</div>
-                        <div className="track-row__meta">
-                          {track.artist || "Unknown Artist"}
-                        </div>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
+            {renderInsightCard(
+              "Top Played",
+              "Your strongest repeat listens.",
+              "▶",
+              statsOverview.top_played,
+              "top-played"
+            )}
+
+            {renderInsightCard(
+              "Most Loved",
+              "Tracks you keep close.",
+              "♥",
+              statsOverview.most_liked,
+              "most-liked"
+            )}
+
+            {renderInsightCard(
+              "Most Skipped",
+              "Useful negative feedback for recommendations.",
+              "↷",
+              statsOverview.most_skipped,
+              "most-skipped"
+            )}
+
+            {renderInsightCard(
+              "Recently Played",
+              "Your latest listening trail.",
+              "⏱",
+              statsOverview.recently_played,
+              "recently-played"
+            )}
           </div>
         </div>
       );
@@ -3270,440 +3364,560 @@ function App() {
               {settingsNotice}
             </div>
           )}
-          <div className="settings-card settings-card--danger">
-            <div className="settings-card__title">Purge stored tracks</div>
-            <div className="settings-card__text">
-              Warning: Removes all indexed tracks from the database and clears playlist track entries plus playback state. Music files on the volume, will not be deleted.
+    
+          <section className="settings-section">
+            <div className="settings-section__header">
+              <h2>Account</h2>
+              <p>Manage your local Adjacent account.</p>
             </div>
-            {confirmAction === "purge_tracks" ? (
-              <div className="settings-card__actions">
-                <button
-                  className="settings-button settings-button--secondary"
-                  type="button"
-                  onClick={() => setConfirmAction(null)}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="settings-button settings-button--danger"
-                  type="button"
-                  onClick={handlePurgeTracks}
-                >
-                  Go Ahead
-                </button>
+        
+            <div className="settings-card">
+              <div className="settings-card__title">Account credentials</div>
+              <div className="settings-card__text">
+                Update your username or password. Your current password is required for any account change.
               </div>
-            ) : (
-              <div className="settings-card__actions">
-                <button
-                  className="settings-button settings-button--danger"
-                  type="button"
-                  onClick={() => setConfirmAction("purge_tracks")}
-                >
-                  Purge Database Tracks
-                </button>
-              </div>
-            )}
-          </div>
-          <div className="settings-card">
-            <div className="settings-card__title">Scan entire music library</div>
-            <div className="settings-card__text">
-              Scans your full music library for new files and adds any newly found tracks
-              to the database.
-            </div>
-
-            {confirmAction === "scan_library" ? (
-              <div className="settings-card__actions">
-                <button
-                  className="settings-button settings-button--secondary"
-                  type="button"
-                  onClick={() => setConfirmAction(null)}
-                >
-                  Cancel
-                </button>
-            
-                <button
-                  className="settings-button"
-                  type="button"
-                  onClick={handleScanLibrary}
-                  disabled={isScanningLibrary}
-                >
-                  {isScanningLibrary ? "Scanning..." : "Go ahead"}
-                </button>
-              </div>
-            ) : (
-              <div className="settings-card__actions">
-                <button
-                  className="settings-button"
-                  type="button"
-                  onClick={() => setConfirmAction("scan_library")}
-                  disabled={isScanningLibrary}
-                >
-                  {isScanningLibrary ? "Scanning..." : "Scan library now"}
-                </button>
-              </div>
-            )}
-          </div>
-          <div className="settings-card">
-            <div className="settings-card__title">Run cleanup now</div>
-            <div className="settings-card__text">
-              Immediately remove tracks from the database if their music files no longer
-              exist on disk.
-            </div>
-
-            <div className="settings-card__actions">
-              <button
-                className="settings-button"
-                type="button"
-                onClick={handleRunCleanupNow}
-              >
-                Run cleanup now
-              </button>
-            </div>
-          </div>
-          <div className="settings-card">
-            <div className="settings-card__title">Scan library for new files</div>
-            <div className="settings-card__text">
-              Scan the music library on a schedule and add newly discovered tracks to the
-              database.
-            </div>
-              
-            <label className="settings-field settings-field--inline">
-              <input
-                type="checkbox"
-                checked={appSettings.scan_enabled}
-                onChange={() => handleSettingsToggle("scan_enabled")}
-              />
-              <span>Enable daily scan</span>
-            </label>
-              
-            <label className="settings-field">
-              <span className="settings-field__label">Run time</span>
-              <input
-                className="settings-time-input"
-                type="time"
-                value={appSettings.scan_time}
-                onChange={(event) =>
-                  handleSettingsTimeChange("scan_time", event.target.value)
-                }
-              />
-            </label>
-          </div>
-          
-          <div className="settings-card">
-            <div className="settings-card__title">Cleanup missing files</div>
-            <div className="settings-card__text">
-              Check whether indexed music files still exist on disk and remove missing
-              files from the database and track lists.
-            </div>
-
-            <label className="settings-field settings-field--inline">
-              <input
-                type="checkbox"
-                checked={appSettings.cleanup_enabled}
-                onChange={() => handleSettingsToggle("cleanup_enabled")}
-              />
-              <span>Enable daily cleanup</span>
-            </label>
-
-            <label className="settings-field">
-              <span className="settings-field__label">Run time</span>
-              <input
-                className="settings-time-input"
-                type="time"
-                value={appSettings.cleanup_time}
-                onChange={(event) =>
-                  handleSettingsTimeChange("cleanup_time", event.target.value)
-                }
-              />
-            </label>
-          </div>
-
-          <div className="settings-card">
-            <div className="settings-card__title">Last.fm Integration</div>
-            <div className="settings-card__text">
-              Paste your Last.fm API key and shared secret, press "Save settings", then press "Connect Last.fm", to enable genre-tag enrichment from Last.fm and scrobbling. Only do this, once your library scan import and Music Brainz tagging is complete.
-            </div>
-
-            <label className="settings-field">
-              <span className="settings-field__label">Last.fm API key</span>
-              <input
-                className="settings-text-input"
-                type="text"
-                value={lastfmApiKey}
-                onChange={(event) => setLastfmApiKey(event.target.value)}
-                placeholder="Enter Last.fm API key"
-              />
-            </label>
-
-            <label className="settings-field">
-              <span className="settings-field__label">Last.fm API secret</span>
-              <input
-                className="settings-text-input"
-                type="text"
-                value={lastfmApiSecret}
-                onChange={(event) => setLastfmApiSecret(event.target.value)}
-                placeholder="Enter Last.fm API secret"
-              />
-            </label>
-            <div className="settings-card__text">
-              <p></p>
-              {lastfmUsername
-                ? `Connected as ${lastfmUsername}`
-                : "Not connected to Last.fm yet."}
-            </div>
-            <div className="settings-card__actions">
-              <button
-                className="settings-button settings-button--secondary"
-                type="button"
-                onClick={handleConnectLastfm}
-                disabled={isLastfmConnecting || !lastfmApiKey.trim() || !lastfmApiSecret.trim()}
-              >
-                {isLastfmConnecting ? "Connecting..." : "Connect Last.fm"}
-              </button>
-
-              {lastfmReadiness.ready && (
-                <button
-                  className="settings-button"
-                  type="button"
-                  onClick={handleRunLastfmEnrichment}
-                  disabled={isLastfmEnriching || !lastfmApiKey.trim()}
-                >
-                  {isLastfmEnriching ? "Enriching..." : "Start Last.fm enrichment"}
-                </button>
-              )}
-
-              {isLastfmEnriching && (
-                <button
-                  className="settings-button settings-button--danger"
-                  type="button"
-                  onClick={handleStopLastfmEnrichment}
-                >
-                  Stop
-                </button>
-              )}
-            </div>
-            
-            {!lastfmReadiness.ready && (
-              <div className="lastfm-readiness-card">
-                <div className="lastfm-readiness-card__title">
-                  {lastfmReadiness.musicbrainz_backfill_running
-                    ? "MusicBrainz tagging is running"
-                    : "Waiting for MusicBrainz tagging to finish"}
-                </div>
-            
-                <div className="lastfm-readiness-card__text">
-                  Last.fm genre enrichment becomes available once every scanned track has been processed for
-                  MusicBrainz recording IDs.
-                </div>
-            
-                <div className="lastfm-readiness-card__bar">
-                  <div
-                    className="lastfm-readiness-card__bar-fill"
-                    style={{ width: `${lastfmReadiness.progress_percent || 0}%` }}
+        
+              {accountError && <div className="settings-error">{accountError}</div>}
+              {accountSuccess && <div className="settings-success">{accountSuccess}</div>}
+        
+              <div className="account-settings-grid">
+                <label className="settings-field">
+                  <span className="settings-field__label">Username</span>
+                  <input
+                    className="settings-text-input"
+                    type="text"
+                    value={accountUsername}
+                    onChange={(event) => setAccountUsername(event.target.value)}
+                    placeholder="Username"
                   />
+                </label>
+        
+                <label className="settings-field">
+                  <span className="settings-field__label">Current password</span>
+                  <input
+                    className="settings-text-input"
+                    type="password"
+                    value={accountCurrentPassword}
+                    onChange={(event) => setAccountCurrentPassword(event.target.value)}
+                    placeholder="Required"
+                  />
+                </label>
+        
+                <label className="settings-field">
+                  <span className="settings-field__label">New password</span>
+                  <input
+                    className="settings-text-input"
+                    type="password"
+                    value={accountNewPassword}
+                    onChange={(event) => setAccountNewPassword(event.target.value)}
+                    placeholder="Leave blank to keep current password"
+                  />
+                </label>
+        
+                <label className="settings-field">
+                  <span className="settings-field__label">Confirm new password</span>
+                  <input
+                    className="settings-text-input"
+                    type="password"
+                    value={accountConfirmPassword}
+                    onChange={(event) => setAccountConfirmPassword(event.target.value)}
+                    placeholder="Repeat new password"
+                  />
+                </label>
+              </div>
+        
+              <div className="settings-card__actions">
+                <button
+                  className="settings-button"
+                  type="button"
+                  onClick={handleUpdateAccount}
+                  disabled={isSavingAccount}
+                >
+                  {isSavingAccount ? "Saving..." : "Save account"}
+                </button>
+        
+                <button className="logout-button" onClick={handleLogout}>
+                  Sign out
+                </button>
+              </div>
+            </div>
+          </section>
+        
+          <section className="settings-section">
+            <div className="settings-section__header">
+              <h2>Library</h2>
+              <p>Scan, clean, and maintain your indexed music library.</p>
+            </div>
+        
+            <div className="settings-grid settings-grid--two">
+              <div className="settings-card">
+                <div className="settings-card__title">Scan entire music library</div>
+                <div className="settings-card__text">
+                  Scans your full music library for new files and adds any newly found tracks
+                  to the database.
                 </div>
-            
-                <div className="lastfm-readiness-card__stats">
-                  <div className="lastfm-readiness-card__stat">
-                    <span className="lastfm-readiness-card__label">Tagged</span>
-                    <span className="lastfm-readiness-card__value">
-                      {lastfmReadiness.tracks_with_mbid}
-                    </span>
-                  </div>
-            
-                  <div className="lastfm-readiness-card__stat">
-                    <span className="lastfm-readiness-card__label">Remaining</span>
-                    <span className="lastfm-readiness-card__value">
-                      {lastfmReadiness.tracks_missing_mbid}
-                    </span>
-                  </div>
-            
-                  <div className="lastfm-readiness-card__stat">
-                    <span className="lastfm-readiness-card__label">Total</span>
-                    <span className="lastfm-readiness-card__value">
-                      {lastfmReadiness.total_tracks}
-                    </span>
-                  </div>
-            
-                  <div className="lastfm-readiness-card__stat">
-                    <span className="lastfm-readiness-card__label">Progress</span>
-                    <span className="lastfm-readiness-card__value">
-                      {lastfmReadiness.progress_percent}%
-                    </span>
-                  </div>
-                </div>
-              {lastfmReadiness.musicbrainz_resume_available &&
-                !lastfmReadiness.musicbrainz_backfill_running &&
-                !isResumingMusicbrainz && (
-                  <div className="lastfm-readiness-card__actions">
+        
+                {confirmAction === "scan_library" ? (
+                  <div className="settings-card__actions">
                     <button
                       className="settings-button settings-button--secondary"
                       type="button"
-                      onClick={handleResumeMusicbrainzTagging}
+                      onClick={() => setConfirmAction(null)}
                     >
-                      Resume MusicBrainz tagging
+                      Cancel
+                    </button>
+                
+                    <button
+                      className="settings-button"
+                      type="button"
+                      onClick={handleScanLibrary}
+                      disabled={isScanningLibrary}
+                    >
+                      {isScanningLibrary ? "Scanning..." : "Go ahead"}
                     </button>
                   </div>
-              )}
+                ) : (
+                  <div className="settings-card__actions">
+                    <button
+                      className="settings-button"
+                      type="button"
+                      onClick={() => setConfirmAction("scan_library")}
+                      disabled={isScanningLibrary}
+                    >
+                      {isScanningLibrary ? "Scanning..." : "Scan library now"}
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
-
-            {lastfmProgress && (
-              <div className="lastfm-readiness-card">
-                <div className="lastfm-progress-card__header">
-                  <span
-                    className={`lastfm-status-pill ${
-                      lastfmProgress.is_stopping
-                        ? "lastfm-status-pill--stopping"
-                        : lastfmProgress.is_running
-                        ? "lastfm-status-pill--running"
-                        : lastfmProgress.is_stopped
-                        ? "lastfm-status-pill--stopped"
-                        : "lastfm-status-pill--idle"
-                    }`}
+              
+              <div className="settings-card">
+                <div className="settings-card__title">Run cleanup now</div>
+                <div className="settings-card__text">
+                  Immediately remove tracks from the database if their music files no longer
+                  exist on disk.
+                </div>
+              
+                <div className="settings-card__actions">
+                  <button
+                    className="settings-button"
+                    type="button"
+                    onClick={handleRunCleanupNow}
                   >
-                    {lastfmProgress.is_stopping
-                      ? "Stopping..."
-                      : lastfmProgress.is_running
-                      ? "Running"
-                      : lastfmProgress.is_stopped
-                      ? "Stopped"
-                      : "Idle"}
-                  </span>
-                    
-                  <span className="lastfm-progress-card__batch">
-                    Batch {lastfmProgress.current_batch || 0}
-                  </span>
+                    Run cleanup now
+                  </button>
                 </div>
-                    
-                <div className="lastfm-readiness-card__title">
-                  Last.fm enrichment progress
+              </div>
+            </div>
+          </section>
+              
+          <section className="settings-section">
+            <div className="settings-section__header">
+              <h2>Automation</h2>
+              <p>Schedule background maintenance jobs.</p>
+            </div>
+              
+            <div className="settings-grid settings-grid--two">
+              <div className="settings-card">
+                <div className="settings-card__title">Scan library for new files</div>
+                <div className="settings-card__text">
+                  Scan the music library on a schedule and add newly discovered tracks to the
+                  database.
                 </div>
-                    
-                <div className="lastfm-readiness-card__text">
-                  Pulling genre tags, similar tracks, and similar artists from Last.fm.
-                </div>
-                    
-                <div className="lastfm-readiness-card__bar">
-                  <div
-                    className="lastfm-readiness-card__bar-fill"
-                    style={{ width: `${getLastfmProgressPercent()}%` }}
+              
+                <label className="settings-field settings-field--inline">
+                  <input
+                    type="checkbox"
+                    checked={appSettings.scan_enabled}
+                    onChange={() => handleSettingsToggle("scan_enabled")}
                   />
+                  <span>Enable daily scan</span>
+                </label>
+              
+                <label className="settings-field">
+                  <span className="settings-field__label">Run time</span>
+                  <input
+                    className="settings-time-input"
+                    type="time"
+                    value={appSettings.scan_time}
+                    onChange={(event) =>
+                      handleSettingsTimeChange("scan_time", event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+                  
+              <div className="settings-card">
+                <div className="settings-card__title">Cleanup missing files</div>
+                <div className="settings-card__text">
+                  Check whether indexed music files still exist on disk and remove missing
+                  files from the database and track lists.
                 </div>
-                    
-                <div className="lastfm-readiness-card__stats">
-                  <div className="lastfm-readiness-card__stat">
-                    <span className="lastfm-readiness-card__label">Processed</span>
-                    <span className="lastfm-readiness-card__value">
-                      {lastfmProgress.processed_tracks || 0}
-                    </span>
+                  
+                <label className="settings-field settings-field--inline">
+                  <input
+                    type="checkbox"
+                    checked={appSettings.cleanup_enabled}
+                    onChange={() => handleSettingsToggle("cleanup_enabled")}
+                  />
+                  <span>Enable daily cleanup</span>
+                </label>
+                  
+                <label className="settings-field">
+                  <span className="settings-field__label">Run time</span>
+                  <input
+                    className="settings-time-input"
+                    type="time"
+                    value={appSettings.cleanup_time}
+                    onChange={(event) =>
+                      handleSettingsTimeChange("cleanup_time", event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+            </div>
+          </section>
+                  
+          <section className="settings-section">
+            <div className="settings-section__header">
+              <h2>Last.fm</h2>
+              <p>Connect scrobbling, genre enrichment, similar artists, and similar tracks.</p>
+            </div>
+                  
+            <div className="settings-card settings-card--wide">
+              <div className="settings-card__title">Last.fm Integration</div>
+              <div className="settings-card__text">
+                Paste your Last.fm API key and shared secret, press "Save settings", then press "Connect Last.     fm", to enable genre-tag enrichment from Last.fm and scrobbling. Only do this, once your library     scan import and Music Brainz tagging is complete.
+              </div>
+                  
+              <div className="settings-grid settings-grid--two">
+                <label className="settings-field">
+                  <span className="settings-field__label">Last.fm API key</span>
+                  <input
+                    className="settings-text-input"
+                    type="text"
+                    value={lastfmApiKey}
+                    onChange={(event) => setLastfmApiKey(event.target.value)}
+                    placeholder="Enter Last.fm API key"
+                  />
+                </label>
+                  
+                <label className="settings-field">
+                  <span className="settings-field__label">Last.fm API secret</span>
+                  <input
+                    className="settings-text-input"
+                    type="text"
+                    value={lastfmApiSecret}
+                    onChange={(event) => setLastfmApiSecret(event.target.value)}
+                    placeholder="Enter Last.fm API secret"
+                  />
+                </label>
+              </div>
+                  
+              <div className="settings-card__text settings-card__status-text">
+                {lastfmUsername
+                  ? `Connected as ${lastfmUsername}`
+                  : "Not connected to Last.fm yet."}
+              </div>
+                
+              <div className="settings-card__actions">
+                <button
+                  className="settings-button settings-button--secondary"
+                  type="button"
+                  onClick={handleConnectLastfm}
+                  disabled={isLastfmConnecting || !lastfmApiKey.trim() || !lastfmApiSecret.trim()}
+                >
+                  {isLastfmConnecting ? "Connecting..." : "Connect Last.fm"}
+                </button>
+                
+                {lastfmReadiness.ready && (
+                  <button
+                    className="settings-button"
+                    type="button"
+                    onClick={handleRunLastfmEnrichment}
+                    disabled={isLastfmEnriching || !lastfmApiKey.trim()}
+                  >
+                    {isLastfmEnriching ? "Enriching..." : "Start Last.fm enrichment"}
+                  </button>
+                )}
+    
+                {isLastfmEnriching && (
+                  <button
+                    className="settings-button settings-button--danger"
+                    type="button"
+                    onClick={handleStopLastfmEnrichment}
+                  >
+                    Stop
+                  </button>
+                )}
+              </div>
+              
+              {!lastfmReadiness.ready && (
+                <div className="lastfm-readiness-card">
+                  <div className="lastfm-readiness-card__title">
+                    {lastfmReadiness.musicbrainz_backfill_running
+                      ? "MusicBrainz tagging is running"
+                      : "Waiting for MusicBrainz tagging to finish"}
                   </div>
                     
-                  <div className="lastfm-readiness-card__stat">
-                    <span className="lastfm-readiness-card__label">Remaining</span>
-                    <span className="lastfm-readiness-card__value">
-                      {Math.max(
-                        (lastfmProgress.total_tracks || 0) -
-                          (lastfmProgress.processed_tracks || 0),
-                        0
-                      )}
-                    </span>
+                  <div className="lastfm-readiness-card__text">
+                    Last.fm genre enrichment becomes available once every scanned track has been processed for
+                    MusicBrainz recording IDs.
                   </div>
                     
-                  <div className="lastfm-readiness-card__stat">
-                    <span className="lastfm-readiness-card__label">Total</span>
-                    <span className="lastfm-readiness-card__value">
-                      {lastfmProgress.total_tracks || 0}
-                    </span>
+                  <div className="lastfm-readiness-card__bar">
+                    <div
+                      className="lastfm-readiness-card__bar-fill"
+                      style={{ width: `${lastfmReadiness.progress_percent || 0}%` }}
+                    />
                   </div>
                     
-                  <div className="lastfm-readiness-card__stat">
-                    <span className="lastfm-readiness-card__label">Progress</span>
-                    <span className="lastfm-readiness-card__value">
-                      {getLastfmProgressPercent()}%
-                    </span>
-                  </div>
-                </div>
+                  <div className="lastfm-readiness-card__stats">
+                    <div className="lastfm-readiness-card__stat">
+                      <span className="lastfm-readiness-card__label">Tagged</span>
+                      <span className="lastfm-readiness-card__value">
+                        {lastfmReadiness.tracks_with_mbid}
+                      </span>
+                    </div>
                     
-                <div className="lastfm-progress-card__track">
-                  <span className="lastfm-progress-card__label">Current track</span>
-                  <div className="lastfm-progress-card__value">
-                    {lastfmProgress.current_title
-                      ? `${lastfmProgress.current_index}/${lastfmProgress.current_total} — ${lastfmProgress.current_title}`
-                      : "None"}
-                  </div>
-                </div>
+                    <div className="lastfm-readiness-card__stat">
+                      <span className="lastfm-readiness-card__label">Remaining</span>
+                      <span className="lastfm-readiness-card__value">
+                        {lastfmReadiness.tracks_missing_mbid}
+                      </span>
+                    </div>
                     
-                <div className="lastfm-progress-grid">
-                  <div className="lastfm-progress-stat">
-                    <div className="lastfm-progress-stat__label">Tagged</div>
-                    <div className="lastfm-progress-stat__value">
-                      {lastfmProgress.total_processed || 0}
+                    <div className="lastfm-readiness-card__stat">
+                      <span className="lastfm-readiness-card__label">Total</span>
+                      <span className="lastfm-readiness-card__value">
+                        {lastfmReadiness.total_tracks}
+                      </span>
+                    </div>
+                    
+                    <div className="lastfm-readiness-card__stat">
+                      <span className="lastfm-readiness-card__label">Progress</span>
+                      <span className="lastfm-readiness-card__value">
+                        {lastfmReadiness.progress_percent}%
+                      </span>
                     </div>
                   </div>
                     
-                  <div className="lastfm-progress-stat">
-                    <div className="lastfm-progress-stat__label">Skipped</div>
-                    <div className="lastfm-progress-stat__value">
-                      {lastfmProgress.total_skipped || 0}
+                  {lastfmReadiness.musicbrainz_resume_available &&
+                    !lastfmReadiness.musicbrainz_backfill_running &&
+                    !isResumingMusicbrainz && (
+                      <div className="lastfm-readiness-card__actions">
+                        <button
+                          className="settings-button settings-button--secondary"
+                          type="button"
+                          onClick={handleResumeMusicbrainzTagging}
+                        >
+                          Resume MusicBrainz tagging
+                        </button>
+                      </div>
+                  )}
+                </div>
+              )}
+    
+              {lastfmProgress && (
+                <div className="lastfm-readiness-card">
+                  <div className="lastfm-progress-card__header">
+                    <span
+                      className={`lastfm-status-pill ${
+                        lastfmProgress.is_stopping
+                          ? "lastfm-status-pill--stopping"
+                          : lastfmProgress.is_running
+                          ? "lastfm-status-pill--running"
+                          : lastfmProgress.is_stopped
+                          ? "lastfm-status-pill--stopped"
+                          : "lastfm-status-pill--idle"
+                      }`}
+                    >
+                      {lastfmProgress.is_stopping
+                        ? "Stopping..."
+                        : lastfmProgress.is_running
+                        ? "Running"
+                        : lastfmProgress.is_stopped
+                        ? "Stopped"
+                        : "Idle"}
+                    </span>
+                      
+                    <span className="lastfm-progress-card__batch">
+                      Batch {lastfmProgress.current_batch || 0}
+                    </span>
+                  </div>
+                      
+                  <div className="lastfm-readiness-card__title">
+                    Last.fm enrichment progress
+                  </div>
+                      
+                  <div className="lastfm-readiness-card__text">
+                    Pulling genre tags, similar tracks, and similar artists from Last.fm.
+                  </div>
+                      
+                  <div className="lastfm-readiness-card__bar">
+                    <div
+                      className="lastfm-readiness-card__bar-fill"
+                      style={{ width: `${getLastfmProgressPercent()}%` }}
+                    />
+                  </div>
+                      
+                  <div className="lastfm-readiness-card__stats">
+                    <div className="lastfm-readiness-card__stat">
+                      <span className="lastfm-readiness-card__label">Processed</span>
+                      <span className="lastfm-readiness-card__value">
+                        {lastfmProgress.processed_tracks || 0}
+                      </span>
+                    </div>
+                      
+                    <div className="lastfm-readiness-card__stat">
+                      <span className="lastfm-readiness-card__label">Remaining</span>
+                      <span className="lastfm-readiness-card__value">
+                        {Math.max(
+                          (lastfmProgress.total_tracks || 0) -
+                            (lastfmProgress.processed_tracks || 0),
+                          0
+                        )}
+                      </span>
+                    </div>
+                      
+                    <div className="lastfm-readiness-card__stat">
+                      <span className="lastfm-readiness-card__label">Total</span>
+                      <span className="lastfm-readiness-card__value">
+                        {lastfmProgress.total_tracks || 0}
+                      </span>
+                    </div>
+                      
+                    <div className="lastfm-readiness-card__stat">
+                      <span className="lastfm-readiness-card__label">Progress</span>
+                      <span className="lastfm-readiness-card__value">
+                        {getLastfmProgressPercent()}%
+                      </span>
                     </div>
                   </div>
-                    
-                  <div className="lastfm-progress-stat">
-                    <div className="lastfm-progress-stat__label">Checked</div>
-                    <div className="lastfm-progress-stat__value">
-                      {lastfmProgress.total_checked || 0}
+                      
+                  <div className="lastfm-progress-card__track">
+                    <span className="lastfm-progress-card__label">Current track</span>
+                    <div className="lastfm-progress-card__value">
+                      {lastfmProgress.current_title
+                        ? `${lastfmProgress.current_index}/${lastfmProgress.current_total} — ${lastfmProgress.     current_title}`
+                        : "None"}
                     </div>
+                  </div>
+                      
+                  <div className="lastfm-progress-grid">
+                    <div className="lastfm-progress-stat">
+                      <div className="lastfm-progress-stat__label">Tagged</div>
+                      <div className="lastfm-progress-stat__value">
+                        {lastfmProgress.total_processed || 0}
+                      </div>
+                    </div>
+                      
+                    <div className="lastfm-progress-stat">
+                      <div className="lastfm-progress-stat__label">Skipped</div>
+                      <div className="lastfm-progress-stat__value">
+                        {lastfmProgress.total_skipped || 0}
+                      </div>
+                    </div>
+                      
+                    <div className="lastfm-progress-stat">
+                      <div className="lastfm-progress-stat__label">Checked</div>
+                      <div className="lastfm-progress-stat__value">
+                        {lastfmProgress.total_checked || 0}
+                      </div>
+                    </div>
+                  </div>
+                      
+                  <div className="lastfm-progress-card__footer">
+                    <span className="lastfm-progress-card__label">Last result</span>
+                    <span className="lastfm-progress-card__result">
+                      {lastfmProgress.last_result || "None"}
+                    </span>
                   </div>
                 </div>
-                    
-                <div className="lastfm-progress-card__footer">
-                  <span className="lastfm-progress-card__label">Last result</span>
-                  <span className="lastfm-progress-card__result">
-                    {lastfmProgress.last_result || "None"}
+              )}
+    
+              {lastfmEnrichmentSummary && (
+                <div className="lastfm-summary">
+                  <span className="lastfm-summary__item">
+                    Processed: {lastfmEnrichmentSummary.total_processed}
+                  </span>
+                  <span className="lastfm-summary__item">
+                    Skipped: {lastfmEnrichmentSummary.total_skipped}
+                  </span>
+                  <span className="lastfm-summary__item">
+                    Checked: {lastfmEnrichmentSummary.total_checked}
                   </span>
                 </div>
+              )}
+    
+              <div className="settings-grid settings-grid--two">
+                <label className="settings-field settings-field--inline">
+                  <input
+                    type="checkbox"
+                    checked={appSettings.lastfm_enrichment_enabled}
+                    onChange={() => handleSettingsToggle("lastfm_enrichment_enabled")}
+                  />
+                  <span>Enable daily Last.fm enrichment</span>
+                </label>
+            
+                <label className="settings-field">
+                  <span className="settings-field__label">Run time</span>
+                  <input
+                    className="settings-time-input"
+                    type="time"
+                    value={appSettings.lastfm_enrichment_time}
+                    onChange={(event) =>
+                      handleSettingsTimeChange("lastfm_enrichment_time", event.target.value)
+                    }
+                  />
+                </label>
               </div>
-            )}
-
-            {lastfmEnrichmentSummary && (
-              <div className="lastfm-summary">
-                <span className="lastfm-summary__item">
-                  Processed: {lastfmEnrichmentSummary.total_processed}
-                </span>
-                <span className="lastfm-summary__item">
-                  Skipped: {lastfmEnrichmentSummary.total_skipped}
-                </span>
-                <span className="lastfm-summary__item">
-                  Checked: {lastfmEnrichmentSummary.total_checked}
-                </span>
+            </div>
+          </section>
+                  
+          <section className="settings-section">
+            <div className="settings-section__header">
+              <h2>Danger Zone</h2>
+              <p>Destructive actions that affect indexed app data.</p>
+            </div>
+                  
+            <div className="settings-card settings-card--danger">
+              <div className="settings-card__title">Purge stored tracks</div>
+              <div className="settings-card__text">
+                Warning: Removes all indexed tracks from the database and clears playlist track entries plus playback state. Music files on the volume, will not be deleted.
               </div>
-            )}
-
-            <label className="settings-field settings-field--inline">
-              <input
-                type="checkbox"
-                checked={appSettings.lastfm_enrichment_enabled}
-                onChange={() => handleSettingsToggle("lastfm_enrichment_enabled")}
-              />
-              <span>Enable daily Last.fm enrichment</span>
-            </label>
-
-            <label className="settings-field">
-              <span className="settings-field__label">Run time</span>
-              <input
-                className="settings-time-input"
-                type="time"
-                value={appSettings.lastfm_enrichment_time}
-                onChange={(event) =>
-                  handleSettingsTimeChange("lastfm_enrichment_time", event.target.value)
-                }
-              />
-            </label>
-
-          </div>
-
-          <div className="settings-card__actions">
+                  
+              {confirmAction === "purge_tracks" ? (
+                <div className="settings-card__actions">
+                  <button
+                    className="settings-button settings-button--secondary"
+                    type="button"
+                    onClick={() => setConfirmAction(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="settings-button settings-button--danger"
+                    type="button"
+                    onClick={handlePurgeTracks}
+                  >
+                    Go Ahead
+                  </button>
+                </div>
+              ) : (
+                <div className="settings-card__actions">
+                  <button
+                    className="settings-button settings-button--danger"
+                    type="button"
+                    onClick={() => setConfirmAction("purge_tracks")}
+                  >
+                    Purge Database Tracks
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>
+            
+          <div className="settings-card__actions settings-card__actions--footer">
             <button
               className="settings-button"
               type="button"
@@ -3711,16 +3925,27 @@ function App() {
             >
               Save settings
             </button>
-            <button className="logout-button" onClick={handleLogout}>
-              Sign out
-            </button>
           </div>
         </div>
       );
     }
+
     if (activeView === "artists") {
       return (
-        <>
+        <div className="artists-page">
+          <div className="artists-hero">
+            <div>
+              <div className="artists-eyebrow">Library artists</div>
+              <h2>Artists</h2>
+              <p>Browse your collection by artist in list or visual grid view.</p>
+            </div>
+      
+            <div className="artists-hero__stat">
+              <span>{visibleArtists.length}</span>
+              <small>artists</small>
+            </div>
+          </div>
+      
           <div className="view-toggle">
             <button
               className={`view-toggle__button ${
@@ -3744,20 +3969,37 @@ function App() {
           </div>
             
           {artistViewMode === "list" ? (
-            <div className="simple-list">
+            <div className="artist-list">
               {paginatedArtists.map((artist) => (
                 <button
                   key={artist}
-                  className="simple-list__row simple-list__row--button"
+                  className="artist-list-row"
                   onClick={() => handleArtistClick(artist)}
                   type="button"
                 >
-                  {artist}
+                  <div className="artist-list-row__avatar">
+                    {artistArtworkMap[artist] ? (
+                      <img
+                        className="artist-list-row__img"
+                        src={`${API_BASE_URL}${artistArtworkMap[artist]}`}
+                        alt={artist}
+                      />
+                    ) : (
+                      <span>{artist.slice(0, 1).toUpperCase()}</span>
+                    )}
+                  </div>
+                  
+                  <div className="artist-list-row__content">
+                    <div className="artist-list-row__name">{artist}</div>
+                    <div className="artist-list-row__meta">Artist</div>
+                  </div>
+                  
+                  <div className="artist-list-row__arrow">›</div>
                 </button>
               ))}
             </div>
           ) : (
-            <div className="artist-grid">
+            <div className="artist-grid artist-grid--polished">
               {paginatedArtists.map((artist) => (
                 <button
                   key={artist}
@@ -3776,8 +4018,9 @@ function App() {
                       <span>{artist.slice(0, 1).toUpperCase()}</span>
                     )}
                   </div>
-              
+                  
                   <div className="artist-grid-card__name">{artist}</div>
+                  <div className="artist-grid-card__meta">Artist</div>
                 </button>
               ))}
             </div>
@@ -3810,70 +4053,197 @@ function App() {
               </button>
             </div>
           )}
-        </>
+        </div>
       );
     }
     
     if (activeView === "albums") {
       return (
-        <div className="simple-list">
-          {visibleAlbums.map((album) => {
-            const artwork = getAlbumArtwork(album);
-          
-            return (
-              <div key={album} className="album-list-row">
-                <button
-                  className="album-list-row__main"
-                  onClick={() => handleAlbumClick(album)}
-                  type="button"
-                >
-                  {artwork.type === "image" ? (
-                    <img
-                      className="album-list-row__art"
-                      src={artwork.src}
-                      alt={album}
-                    />
-                  ) : (
-                    <div className={`album-list-row__art album-list-row__art--generated ${artwork.    gradientClass}`}>
-                      <span>{artwork.initials}</span>
-                    </div>
-                  )}
-
-                  <span className="album-list-row__name">{album}</span>
-                </button>
-                
-                <button
-                  className="album-list-row__menu-button"
-                  type="button"
-                  onClick={() => handleOpenChangeAlbumArtwork(album)}
-                  aria-label={`Change artwork for ${album}`}
-                >
-                  ⋯
-                </button>
-              </div>
-            );
-          })}
+        <div className="albums-page">
+          <div className="albums-hero">
+            <div>
+              <div className="albums-eyebrow">Library collection</div>
+              <h2>Albums</h2>
+              <p>Browse your albums by artwork or switch to a compact list view.</p>
+            </div>
+      
+            <div className="albums-hero__stat">
+              <span>{visibleAlbums.length}</span>
+              <small>albums</small>
+            </div>
+          </div>
+      
+          <div className="view-toggle">
+            <button
+              className={`view-toggle__button ${
+                albumViewMode === "grid" ? "view-toggle__button--active" : ""
+              }`}
+              type="button"
+              onClick={() => setAlbumViewMode("grid")}
+            >
+              Grid
+            </button>
+            
+            <button
+              className={`view-toggle__button ${
+                albumViewMode === "list" ? "view-toggle__button--active" : ""
+              }`}
+              type="button"
+              onClick={() => setAlbumViewMode("list")}
+            >
+              List
+            </button>
+          </div>
+            
+          {albumViewMode === "grid" ? (
+            <div className="album-grid">
+              {visibleAlbums.map((album) => {
+                const artwork = getAlbumArtwork(album);
+              
+                return (
+                  <div key={album} className="album-card">
+                    <button
+                      className="album-card__main"
+                      onClick={() => handleAlbumClick(album)}
+                      type="button"
+                    >
+                      {artwork.type === "image" ? (
+                        <img
+                          className="album-card__art album-artwork-fixed album-artwork-fixed--grid"
+                          src={artwork.src}
+                          alt={album}
+                        />
+                      ) : (
+                        <div
+                          className={`album-card__art album-card__art--generated album-artwork-fixed    album-artwork-fixed--grid ${artwork.gradientClass}`}
+                        >
+                          <span>{artwork.initials}</span>
+                        </div>
+                      )}
+    
+                      <div className="album-card__name">{album}</div>
+                    </button>
+                    
+                    <button
+                      className="album-card__menu-button"
+                      type="button"
+                      onClick={() => handleOpenChangeAlbumArtwork(album)}
+                      aria-label={`Change artwork for ${album}`}
+                    >
+                      ⋯
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="album-list">
+              {visibleAlbums.map((album) => {
+                const artwork = getAlbumArtwork(album);
+              
+                return (
+                  <div key={album} className="album-list-row">
+                    <button
+                      className="album-list-row__main"
+                      onClick={() => handleAlbumClick(album)}
+                      type="button"
+                    >
+                      {artwork.type === "image" ? (
+                        <img
+                          className="album-list-row__art album-artwork-fixed album-artwork-fixed--list"
+                          src={artwork.src}
+                          alt={album}
+                        />
+                      ) : (
+                        <div
+                          className={`album-list-row__art album-list-row__art--generated album-artwork-fixed    album-artwork-fixed--list ${artwork.gradientClass}`}
+                        >
+                          <span>{artwork.initials}</span>
+                        </div>
+                      )}
+    
+                      <span className="album-list-row__name">{album}</span>
+                    </button>
+                    
+                    <button
+                      className="album-list-row__menu-button"
+                      type="button"
+                      onClick={() => handleOpenChangeAlbumArtwork(album)}
+                      aria-label={`Change artwork for ${album}`}
+                    >
+                      ⋯
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       );
     }
+
     if (activeView === "genres") {
+      const sortedGenres = [...visibleGenres].sort(
+        (a, b) => (genreCounts.get(b) || 0) - (genreCounts.get(a) || 0)
+      );
+    
+      const topGenre = sortedGenres[0];
+      const topGenreCount = topGenre ? genreCounts.get(topGenre) || 0 : 0;
+    
       return (
-        <div className="genre-grid">
-          {[...visibleGenres]
-            .sort((a, b) => (genreCounts.get(b) || 0) - (genreCounts.get(a) || 0))
-            .map((genre) => (
+        <div className="genres-page">
+          <div className="genres-hero">
+            <div>
+              <div className="genres-eyebrow">Library map</div>
+              <h2>Genres</h2>
+              <p>
+                Explore your library by sound, mood, and style. Your most common
+                genres rise to the top.
+              </p>
+            </div>
+      
+            <div className="genres-hero__stat">
+              <span>{visibleGenres.length}</span>
+              <small>genres</small>
+            </div>
+          </div>
+      
+          {topGenre && (
+            <div className="genres-feature-card">
+              <div>
+                <div className="genres-feature-card__label">Dominant genre</div>
+                <div className="genres-feature-card__title">{topGenre}</div>
+                <div className="genres-feature-card__meta">
+                  {topGenreCount} tracks in your library
+                </div>
+              </div>
+          
+              <button
+                className="settings-button"
+                type="button"
+                onClick={() => handleGenreClick(topGenre)}
+              >
+                Open genre
+              </button>
+            </div>
+          )}
+
+          <div className="genre-grid genre-grid--polished">
+            {sortedGenres.map((genre, index) => (
               <button
                 key={genre}
-                className="genre-card"
+                className="genre-card genre-card--polished"
                 onClick={() => handleGenreClick(genre)}
                 type="button"
               >
+                <div className="genre-card__rank">#{index + 1}</div>
                 <div className="genre-card__title">{genre}</div>
                 <div className="genre-card__meta">
                   {genreCounts.get(genre) || 0} tracks
                 </div>
               </button>
-          ))}
+            ))}
+          </div>
         </div>
       );
     }
@@ -3943,8 +4313,13 @@ function App() {
               </button>
             {openMenuTrackId === track.id && (
               <div
-                className="track-row__menu"
+                className={`track-row__menu ${
+                  openMenuDirection === "up" ? "track-row__menu--up" : ""
+                }`}
                 onClick={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+                onMouseEnter={(event) => event.stopPropagation()}
               >
                 <button
                   className="track-row__menu-item"

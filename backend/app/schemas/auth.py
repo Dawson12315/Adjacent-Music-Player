@@ -28,3 +28,10 @@ class LoginRequest(BaseModel):
 
 class AuthResponse(BaseModel):
     user: UserResponse
+
+
+class AccountUpdateRequest(BaseModel):
+    current_password: str
+    username: str | None = Field(default=None, min_length=3, max_length=50)
+    new_password: str | None = Field(default=None, min_length=8, max_length=128)
+    confirm_password: str | None = Field(default=None, min_length=8, max_length=128)
