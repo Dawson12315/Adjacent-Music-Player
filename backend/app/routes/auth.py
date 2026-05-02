@@ -1,3 +1,7 @@
+import json
+import secrets
+
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
@@ -12,6 +16,8 @@ from app.schemas.auth import (
     LoginRequest,
     SetupStatusResponse,
     UserResponse,
+    PasswordRecoveryRequest,
+    RecoveryCodesResponse,
 )
 from app.services.auth import (
     admin_exists,
@@ -38,6 +44,39 @@ def set_auth_cookie(response: Response, token: str):
         path="/",
     )
 
+def generate_recovery_codes(count: int = 10) -> list[str]:
+    return [secrets.token_hex(4).upper() for _ in range(count)]
+
+
+def hash_recovery_codes(codes: list[str]) -> str:
+    return json.dumps([hash_password(code) for code in codes])
+
+
+def verify_and_consume_recovery_code(user: User, recovery_code: str) -> bool:
+    if not user.recovery_codes_hashes:
+        return False
+
+    code = recovery_code.strip().upper()
+
+    try:
+        hashes = json.loads(user.recovery_codes_hashes)
+    except json.JSONDecodeError:
+        return False
+
+    remaining_hashes = []
+    matched = False
+
+    for code_hash in hashes:
+        if not matched and verify_password(code, code_hash):
+            matched = True
+            continue
+
+        remaining_hashes.append(code_hash)
+
+    if matched:
+        user.recovery_codes_hashes = json.dumps(remaining_hashes)
+
+    return matched
 
 @router.get("/auth/setup-status", response_model=SetupStatusResponse)
 def get_setup_status(db: Session = Depends(get_db)):
@@ -71,6 +110,11 @@ def setup_admin(
         role="admin",
         is_active=True,
     )
+
+    recovery_codes = generate_recovery_codes()
+    user.recovery_codes_hashes = hash_recovery_codes(recovery_codes)
+    db.commit()
+    db.refresh(user)
 
     db.add(user)
     db.commit()
@@ -161,6 +205,49 @@ def update_me(
 
     return {"user": current_user}
 
+@router.post("/auth/recovery-codes", response_model=RecoveryCodesResponse)
+def regenerate_recovery_codes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    recovery_codes = generate_recovery_codes()
+    current_user.recovery_codes_hashes = hash_recovery_codes(recovery_codes)
+
+    db.commit()
+
+    return {"recovery_codes": recovery_codes}
+
+
+@router.post("/auth/recover-password")
+def recover_password(
+    payload: PasswordRecoveryRequest,
+    db: Session = Depends(get_db),
+):
+    if payload.new_password != payload.confirm_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New passwords do not match",
+        )
+
+    user = get_user_by_username(db, payload.username.strip())
+
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or recovery code",
+        )
+
+    if not verify_and_consume_recovery_code(user, payload.recovery_code):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or recovery code",
+        )
+
+    user.password_hash = hash_password(payload.new_password)
+
+    db.commit()
+
+    return {"message": "Password reset successfully"}
 
 @router.post("/auth/logout")
 def logout(response: Response):

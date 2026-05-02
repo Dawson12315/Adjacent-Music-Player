@@ -123,6 +123,9 @@ function App() {
   const [isSavingAccount, setIsSavingAccount] = useState(false);
   const [albumViewMode, setAlbumViewMode] = useState("grid");
   const [openMenuDirection, setOpenMenuDirection] = useState("down");
+  const [recoveryCodes, setRecoveryCodes] = useState([]);
+  const [recoveryCodesError, setRecoveryCodesError] = useState("");
+  const [isGeneratingRecoveryCodes, setIsGeneratingRecoveryCodes] = useState(false);
 
   const TRACKS_PAGE_SIZE = 50;
   const ARTISTS_PAGE_SIZE = 50;
@@ -1099,23 +1102,27 @@ function App() {
 
   async function handleLogin(username, password) {
     setAuthError("");
-
-    const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-      credentials: "include",
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ username, password }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.detail || "Unable to sign in");
+  
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        credentials: "include",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username, password }),
+      });
+    
+      const data = await response.json();
+    
+      if (!response.ok) {
+        throw new Error(data.detail || "Unable to sign in");
+      }
+    
+      setCurrentUser(data.user);
+    } catch (error) {
+      setAuthError(error.message || "Unable to sign in");
     }
-
-    setCurrentUser(data.user);
   }
 
   async function handleLogout() {
@@ -1176,6 +1183,32 @@ function App() {
       setAccountError(error.message || "Failed to update account.");
     } finally {
       setIsSavingAccount(false);
+    }
+  }
+
+  async function handleGenerateRecoveryCodes() {
+    setRecoveryCodesError("");
+    setRecoveryCodes([]);
+
+    try {
+      setIsGeneratingRecoveryCodes(true);
+
+      const response = await fetch(`${API_BASE_URL}/api/auth/recovery-codes`, {
+        credentials: "include",
+        method: "POST",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to generate recovery codes.");
+      }
+
+      setRecoveryCodes(data.recovery_codes || []);
+    } catch (error) {
+      setRecoveryCodesError(error.message || "Failed to generate recovery codes.");
+    } finally {
+      setIsGeneratingRecoveryCodes(false);
     }
   }
 
@@ -3441,6 +3474,39 @@ function App() {
                 </button>
               </div>
             </div>
+            <div className="settings-card">
+              <div className="settings-card__title">Password Recovery Codes</div>
+
+              <div className="settings-card__text">
+                Generate one-time recovery codes you can use if you forget your password.
+                Save them somewhere safe. Existing recovery codes will be replaced.
+              </div>
+
+              <div className="settings-card__actions">
+                <button
+                  className="settings-button settings-button--secondary"
+                  type="button"
+                  onClick={handleGenerateRecoveryCodes}
+                  disabled={isGeneratingRecoveryCodes}
+                >
+                  {isGeneratingRecoveryCodes ? "Generating..." : "Generate recovery codes"}
+                </button>
+              </div>
+
+              {recoveryCodesError && (
+                <div className="settings-error">{recoveryCodesError}</div>
+              )}
+
+              {recoveryCodes.length > 0 && (
+                <div className="recovery-codes-box">
+                  {recoveryCodes.map((code) => (
+                    <code key={code} className="recovery-code">
+                      {code}
+                    </code>
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
         
           <section className="settings-section">
@@ -4606,6 +4672,7 @@ function App() {
         mode="setup"
         error={authError}
         onSubmit={handleSetupAdmin}
+        API_BASE_URL={API_BASE_URL}
       />
     );
   }
@@ -4616,6 +4683,7 @@ function App() {
         mode="login"
         error={authError}
         onSubmit={handleLogin}
+        API_BASE_URL={API_BASE_URL}
       />
     );
   }
@@ -5877,9 +5945,15 @@ function App() {
   );
 }
 
-function AuthScreen({ mode, onSubmit, error }) {
+function AuthScreen({ mode, onSubmit, error, API_BASE_URL }) {
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
+  const [isRecoveringPassword, setIsRecoveringPassword] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [recoveryError, setRecoveryError] = useState("");
+  const [recoverySuccess, setRecoverySuccess] = useState("");
 
   const isSetup = mode === "setup";
 
@@ -5893,6 +5967,44 @@ function AuthScreen({ mode, onSubmit, error }) {
     }
   }
 
+  async function handleRecoverPassword(event) {
+    event.preventDefault();
+
+    setRecoveryError("");
+    setRecoverySuccess("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/recover-password`, {
+        credentials: "include",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username,
+          recovery_code: recoveryCode,
+          new_password: newPassword,
+          confirm_password: confirmPassword,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to reset password.");
+      }
+
+      setRecoverySuccess("Password reset successfully. You can now sign in.");
+      setPassword("");
+      setRecoveryCode("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setIsRecoveringPassword(false);
+    } catch (error) {
+      setRecoveryError(error.message || "Failed to reset password.");
+    }
+  }
+
   return (
     <div className="auth-page">
       <div className="auth-card">
@@ -5903,42 +6015,123 @@ function AuthScreen({ mode, onSubmit, error }) {
         <div className="auth-brand">Adjacent</div>
 
         <h1 className="auth-title">
-          {isSetup ? "Create admin account" : "Welcome back"}
+          {isSetup
+            ? "Create admin account"
+            : isRecoveringPassword
+            ? "Recover password"
+            : "Welcome back"}
         </h1>
 
         <p className="auth-subtitle">
           {isSetup
             ? "Create the first admin account to secure your music library."
+            : isRecoveringPassword
+            ? "Use one of your saved recovery codes to reset your password."
             : "Sign in to continue to your music library."}
         </p>
 
-        {error && <div className="auth-error">{error}</div>}
+        {error && !isRecoveringPassword && <div className="auth-error">{error}</div>}
+        {recoveryError && <div className="auth-error">{recoveryError}</div>}
+        {recoverySuccess && <div className="settings-success">{recoverySuccess}</div>}
 
-        <form className="auth-form" onSubmit={handleSubmit}>
-          <label className="auth-field">
-            <span>Username</span>
-            <input
-              type="text"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              autoComplete="username"
-            />
-          </label>
+        {!isRecoveringPassword ? (
+          <form className="auth-form" onSubmit={handleSubmit}>
+            <label className="auth-field">
+              <span>Username</span>
+              <input
+                type="text"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                autoComplete="username"
+              />
+            </label>
 
-          <label className="auth-field">
-            <span>Password</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete={isSetup ? "new-password" : "current-password"}
-            />
-          </label>
+            <label className="auth-field">
+              <span>Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete={isSetup ? "new-password" : "current-password"}
+              />
+            </label>
 
-          <button className="auth-button" type="submit">
-            {isSetup ? "Create admin" : "Sign in"}
-          </button>
-        </form>
+            <button className="auth-button" type="submit">
+              {isSetup ? "Create admin" : "Sign in"}
+            </button>
+
+            {!isSetup && (
+              <button
+                className="auth-link-button"
+                type="button"
+                onClick={() => {
+                  setRecoveryError("");
+                  setRecoverySuccess("");
+                  setIsRecoveringPassword(true);
+                }}
+              >
+                Forgot password?
+              </button>
+            )}
+          </form>
+        ) : (
+          <form className="auth-form" onSubmit={handleRecoverPassword}>
+            <label className="auth-field">
+              <span>Username</span>
+              <input
+                type="text"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                autoComplete="username"
+              />
+            </label>
+
+            <label className="auth-field">
+              <span>Recovery code</span>
+              <input
+                type="text"
+                value={recoveryCode}
+                onChange={(event) => setRecoveryCode(event.target.value)}
+                autoComplete="one-time-code"
+              />
+            </label>
+
+            <label className="auth-field">
+              <span>New password</span>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                autoComplete="new-password"
+              />
+            </label>
+
+            <label className="auth-field">
+              <span>Confirm new password</span>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                autoComplete="new-password"
+              />
+            </label>
+
+            <button className="auth-button" type="submit">
+              Reset password
+            </button>
+
+            <button
+              className="auth-link-button"
+              type="button"
+              onClick={() => {
+                setIsRecoveringPassword(false);
+                setRecoveryError("");
+              }}
+            >
+              Back to sign in
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );

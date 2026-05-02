@@ -3236,6 +3236,38 @@ button {
   transform: translateY(-1px);
   filter: brightness(1.05);
 }
+.auth-link-button {
+  border: none;
+  background: transparent;
+  color: #b3b3b3;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 4px 0;
+  text-align: center;
+}
+
+.auth-link-button:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+.recovery-codes-box {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.recovery-code {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #101010;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  font-family: monospace;
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+}
 @media (max-width: 900px) {
   .settings-grid--two,
   .account-settings-grid {
