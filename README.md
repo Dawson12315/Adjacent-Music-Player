@@ -161,13 +161,13 @@ Phase 5 — Core App + UI Refinement
 ## Roadmap
 
 ### Next
-- Last.fm Integration(genre tag enrichment and scrobbling)
-- Artist pages (albums + singles)
+- Mobile companion app(android)
 
 ### Future
-- Recommendation engine
-- Related artists/songs
-- Mobile companion app
+- Lyrics
+- Song Radio
+- Mobile companion app(ios)
+- Apple Tv application
 
 ---
 
