@@ -608,3 +608,11 @@ def run_simple_migrations():
                 """
             )
         )
+
+        user_columns = connection.execute(
+            text("PRAGMA table_info(users)")
+        ).fetchall()
+        user_column_names = {column[1] for column in user_columns}
+
+        if "recovery_codes_hashes" not in user_column_names:
+            connection.execute(text("ALTER TABLE users ADD COLUMN recovery_codes_hashes TEXT"))
