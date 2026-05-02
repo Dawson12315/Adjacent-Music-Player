@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     openssl \
     curl \
+    ffmpeg \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

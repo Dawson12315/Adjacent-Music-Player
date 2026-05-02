@@ -1,8 +1,9 @@
 from pathlib import Path
 import mimetypes
+import subprocess
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
@@ -97,6 +98,86 @@ def stream_track(
         filename=file_path.name,
     )
 
+@router.get("/tracks/{track_id}/mobile-stream", tags=["tracks"])
+def mobile_stream_track(
+    track_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    track = db.query(Track).filter(Track.id == track_id).first()
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    file_path = Path(track.file_path)
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    extension = file_path.suffix.lower()
+
+    mobile_native_extensions = {".mp3", ".m4a", ".aac"}
+
+    if extension in mobile_native_extensions:
+        media_type, _ = mimetypes.guess_type(str(file_path))
+
+        return FileResponse(
+            path=file_path,
+            media_type=media_type or "audio/mpeg",
+            filename=file_path.name,
+        )
+
+    if extension not in {".flac", ".wav", ".aiff", ".aif"}:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported mobile audio format: {extension}",
+        )
+
+    ffmpeg_command = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(file_path),
+        "-vn",
+        "-codec:a",
+        "libmp3lame",
+        "-b:a",
+        "320k",
+        "-f",
+        "mp3",
+        "pipe:1",
+    ]
+
+    process = subprocess.Popen(
+        ffmpeg_command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    def stream_transcoded_audio():
+        try:
+            while True:
+                chunk = process.stdout.read(1024 * 64)
+
+                if not chunk:
+                    break
+
+                yield chunk
+        finally:
+            process.stdout.close()
+            process.terminate()
+            process.wait()
+
+    return StreamingResponse(
+        stream_transcoded_audio(),
+        media_type="audio/mpeg",
+        headers={
+            "Content-Disposition": f'inline; filename="{file_path.stem}.mp3"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 @router.post("/tracks/{track_id}/musicbrainz-recording", response_model=TrackResponse, tags=["tracks"])
 def fetch_musicbrainz_recording_id(
