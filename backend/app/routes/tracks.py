@@ -1,12 +1,15 @@
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 import mimetypes
 import subprocess
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
+from jose import JWTError, jwt
 
+from app.config import settings
 from app.db import get_db
 from app.dependencies.auth import get_current_user, require_admin
 from app.models.app_setting import AppSetting
@@ -24,6 +27,46 @@ from app.services.metadata_normalizer import normalize_genre_list
 from app.services.musicbrainz import find_recording_mbid
 
 router = APIRouter()
+
+STREAM_TOKEN_EXPIRE_SECONDS = 60
+
+
+def create_stream_token(track_id: int, user_id: int) -> str:
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        seconds=STREAM_TOKEN_EXPIRE_SECONDS
+    )
+
+    payload = {
+        "sub": str(user_id),
+        "track_id": track_id,
+        "purpose": "mobile_stream",
+        "exp": expires_at,
+    }
+
+    return jwt.encode(
+        payload,
+        settings.auth_secret_key,
+        algorithm=settings.auth_algorithm,
+    )
+
+
+def verify_stream_token(token: str, track_id: int) -> bool:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.auth_secret_key,
+            algorithms=[settings.auth_algorithm],
+        )
+    except JWTError:
+        return False
+
+    if payload.get("purpose") != "mobile_stream":
+        return False
+
+    if payload.get("track_id") != track_id:
+        return False
+
+    return True
 
 
 def build_track_response(track: Track) -> TrackResponse:
@@ -98,12 +141,37 @@ def stream_track(
         filename=file_path.name,
     )
 
-@router.get("/tracks/{track_id}/mobile-stream", tags=["tracks"])
-def mobile_stream_track(
+
+@router.get("/tracks/{track_id}/mobile-stream-token", tags=["tracks"])
+def get_mobile_stream_token(
     track_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    track = db.query(Track).filter(Track.id == track_id).first()
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    return {
+        "token": create_stream_token(
+            track_id=track.id,
+            user_id=current_user.id,
+        )
+    }
+
+
+@router.get("/tracks/{track_id}/mobile-stream", tags=["tracks"])
+def mobile_stream_track(
+    track_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    token = request.query_params.get("token")
+
+    if not token or not verify_stream_token(token, track_id):
+        raise HTTPException(status_code=401, detail="Invalid or expired stream token")
+
     track = db.query(Track).filter(Track.id == track_id).first()
 
     if not track:
@@ -115,7 +183,6 @@ def mobile_stream_track(
         raise HTTPException(status_code=404, detail="File not found")
 
     extension = file_path.suffix.lower()
-
     mobile_native_extensions = {".mp3", ".m4a", ".aac"}
 
     if extension in mobile_native_extensions:
@@ -124,7 +191,8 @@ def mobile_stream_track(
         return FileResponse(
             path=file_path,
             media_type=media_type or "audio/mpeg",
-            filename=file_path.name,
+            filename="mobile-stream.mp3",
+            headers={"Cache-Control": "public, max-age=86400"},
         )
 
     if extension not in {".flac", ".wav", ".aiff", ".aif"}:
@@ -133,51 +201,67 @@ def mobile_stream_track(
             detail=f"Unsupported mobile audio format: {extension}",
         )
 
-    ffmpeg_command = [
-        "ffmpeg",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        str(file_path),
-        "-vn",
-        "-codec:a",
-        "libmp3lame",
-        "-b:a",
-        "320k",
-        "-f",
-        "mp3",
-        "pipe:1",
-    ]
+    cache_dir = Path("data/mobile_cache")
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
-    process = subprocess.Popen(
-        ffmpeg_command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+    cached_file_path = cache_dir / f"track_{track.id}.mp3"
+    temp_file_path = cache_dir / f"track_{track.id}.tmp.mp3"
+
+    source_mtime = file_path.stat().st_mtime
+
+    cache_is_valid = (
+        cached_file_path.exists()
+        and cached_file_path.stat().st_size > 0
+        and cached_file_path.stat().st_mtime >= source_mtime
     )
 
-    def stream_transcoded_audio():
-        try:
-            while True:
-                chunk = process.stdout.read(1024 * 64)
+    if not cache_is_valid:
+        if temp_file_path.exists():
+            temp_file_path.unlink()
 
-                if not chunk:
-                    break
+        ffmpeg_command = [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(file_path),
+            "-vn",
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            "320k",
+            "-movflags",
+            "+faststart",
+            str(temp_file_path),
+        ]
 
-                yield chunk
-        finally:
-            process.stdout.close()
-            process.terminate()
-            process.wait()
+        result = subprocess.run(
+            ffmpeg_command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
 
-    return StreamingResponse(
-        stream_transcoded_audio(),
+        if result.returncode != 0:
+            if temp_file_path.exists():
+                temp_file_path.unlink()
+
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create mobile stream: {result.stderr.strip()}",
+            )
+
+        temp_file_path.replace(cached_file_path)
+
+    return FileResponse(
+        path=cached_file_path,
         media_type="audio/mpeg",
-        headers={
-            "Content-Disposition": f'inline; filename="{file_path.stem}.mp3"',
-            "Cache-Control": "no-store",
-        },
+        filename="mobile-stream.mp3",
+        headers={"Cache-Control": "public, max-age=86400"},
     )
+
 
 @router.post("/tracks/{track_id}/musicbrainz-recording", response_model=TrackResponse, tags=["tracks"])
 def fetch_musicbrainz_recording_id(
@@ -234,12 +318,12 @@ def update_track_now_playing_on_lastfm(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    settings = db.query(AppSetting).first()
+    settings_row = db.query(AppSetting).first()
 
-    if not settings:
+    if not settings_row:
         raise HTTPException(status_code=400, detail="App settings not found")
 
-    if not settings.lastfm_api_key or not settings.lastfm_api_secret or not settings.lastfm_session_key:
+    if not settings_row.lastfm_api_key or not settings_row.lastfm_api_secret or not settings_row.lastfm_session_key:
         raise HTTPException(status_code=400, detail="Missing Last.fm credentials or session")
 
     track = db.query(Track).filter(Track.id == track_id).first()
@@ -251,9 +335,9 @@ def update_track_now_playing_on_lastfm(
         raise HTTPException(status_code=400, detail="Track is missing title or artist")
 
     result = update_now_playing(
-        api_key=settings.lastfm_api_key,
-        api_secret=settings.lastfm_api_secret,
-        session_key=settings.lastfm_session_key,
+        api_key=settings_row.lastfm_api_key,
+        api_secret=settings_row.lastfm_api_secret,
+        session_key=settings_row.lastfm_session_key,
         track_name=track.title,
         artist_name=track.artist,
         album_name=track.album,
@@ -272,12 +356,12 @@ def scrobble_track_to_lastfm(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    settings = db.query(AppSetting).first()
+    settings_row = db.query(AppSetting).first()
 
-    if not settings:
+    if not settings_row:
         raise HTTPException(status_code=400, detail="App settings not found")
 
-    if not settings.lastfm_api_key or not settings.lastfm_api_secret or not settings.lastfm_session_key:
+    if not settings_row.lastfm_api_key or not settings_row.lastfm_api_secret or not settings_row.lastfm_session_key:
         raise HTTPException(status_code=400, detail="Missing Last.fm credentials or session")
 
     track = db.query(Track).filter(Track.id == track_id).first()
@@ -289,9 +373,9 @@ def scrobble_track_to_lastfm(
         raise HTTPException(status_code=400, detail="Track is missing title or artist")
 
     result = scrobble_track(
-        api_key=settings.lastfm_api_key,
-        api_secret=settings.lastfm_api_secret,
-        session_key=settings.lastfm_session_key,
+        api_key=settings_row.lastfm_api_key,
+        api_secret=settings_row.lastfm_api_secret,
+        session_key=settings_row.lastfm_session_key,
         track_name=track.title,
         artist_name=track.artist,
         album_name=track.album,
