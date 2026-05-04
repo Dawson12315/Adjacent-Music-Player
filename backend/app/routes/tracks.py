@@ -12,7 +12,9 @@ from jose import JWTError, jwt
 from app.config import settings
 from app.db import get_db
 from app.dependencies.auth import get_current_user, require_admin
+from app.models.album_artwork import AlbumArtwork
 from app.models.app_setting import AppSetting
+from app.models.artist_artwork import ArtistArtwork
 from app.models.playback_queue_item import PlaybackQueueItem
 from app.models.playback_session import PlaybackSession
 from app.models.playlist_track import PlaylistTrack
@@ -20,11 +22,13 @@ from app.models.track import Track
 from app.models.track_artist import TrackArtist
 from app.models.track_genre import TrackGenre
 from app.models.user import User
+from app.routes.albums import normalize_album_name
 from app.schemas.track import TrackResponse
 from app.schemas.track_edit import TrackUpdate
 from app.services.lastfm import scrobble_track, update_now_playing
 from app.services.metadata_normalizer import normalize_genre_list
 from app.services.musicbrainz import find_recording_mbid
+from app.utils.artist_normalization import normalize_artist_name
 
 router = APIRouter()
 
@@ -69,7 +73,50 @@ def verify_stream_token(token: str, track_id: int) -> bool:
     return True
 
 
-def build_track_response(track: Track) -> TrackResponse:
+def get_album_artwork_path(db: Session, album_name: str | None) -> str | None:
+    if not album_name:
+        return None
+
+    album_key = normalize_album_name(album_name)
+
+    if not album_key:
+        return None
+
+    artwork = (
+        db.query(AlbumArtwork)
+        .filter(AlbumArtwork.album_key == album_key)
+        .first()
+    )
+
+    return artwork.artwork_path if artwork else None
+
+
+def get_artist_artwork_path(db: Session, artist_name: str | None) -> str | None:
+    if not artist_name:
+        return None
+
+    artist_key = normalize_artist_name(artist_name)
+
+    if not artist_key:
+        return None
+
+    artwork = (
+        db.query(ArtistArtwork)
+        .filter(ArtistArtwork.artist_key == artist_key)
+        .first()
+    )
+
+    return artwork.artwork_path if artwork else None
+
+
+def build_track_response(track: Track, db: Session | None = None) -> TrackResponse:
+    album_artwork_path = None
+    artist_artwork_path = None
+
+    if db:
+        album_artwork_path = get_album_artwork_path(db, track.album)
+        artist_artwork_path = get_artist_artwork_path(db, track.artist)
+
     return TrackResponse(
         id=track.id,
         title=track.title,
@@ -77,14 +124,17 @@ def build_track_response(track: Track) -> TrackResponse:
         album=track.album,
         genre=track.genre,
         genres=[item.genre for item in track.track_genres],
+        artists=[item.artist_name for item in track.track_artists],
         file_path=track.file_path,
+        artwork_path=album_artwork_path,
+        album_artwork_path=album_artwork_path,
+        artist_artwork_path=artist_artwork_path,
         raw_title=track.raw_title,
         raw_artist=track.raw_artist,
         raw_album=track.raw_album,
         raw_genre=track.raw_genre,
         musicbrainz_recording_id=track.musicbrainz_recording_id,
         lastfm_tags_enriched=track.lastfm_tags_enriched,
-        artists=[item.artist_name for item in track.track_artists],
     )
 
 
@@ -112,7 +162,7 @@ def list_tracks(
         .all()
     )
 
-    return [build_track_response(track) for track in tracks]
+    return [build_track_response(track, db) for track in tracks]
 
 
 @router.get("/tracks/{track_id}/stream", tags=["tracks"])
@@ -263,7 +313,11 @@ def mobile_stream_track(
     )
 
 
-@router.post("/tracks/{track_id}/musicbrainz-recording", response_model=TrackResponse, tags=["tracks"])
+@router.post(
+    "/tracks/{track_id}/musicbrainz-recording",
+    response_model=TrackResponse,
+    tags=["tracks"],
+)
 def fetch_musicbrainz_recording_id(
     track_id: int,
     force: bool = Query(False),
@@ -284,7 +338,7 @@ def fetch_musicbrainz_recording_id(
         raise HTTPException(status_code=404, detail="Track not found")
 
     if track.musicbrainz_recording_id and not force:
-        return build_track_response(track)
+        return build_track_response(track, db)
 
     mbid = find_recording_mbid(
         track.title,
@@ -309,7 +363,7 @@ def fetch_musicbrainz_recording_id(
         .first()
     )
 
-    return build_track_response(track)
+    return build_track_response(track, db)
 
 
 @router.post("/tracks/{track_id}/lastfm/now-playing", tags=["tracks"])
@@ -323,7 +377,11 @@ def update_track_now_playing_on_lastfm(
     if not settings_row:
         raise HTTPException(status_code=400, detail="App settings not found")
 
-    if not settings_row.lastfm_api_key or not settings_row.lastfm_api_secret or not settings_row.lastfm_session_key:
+    if (
+        not settings_row.lastfm_api_key
+        or not settings_row.lastfm_api_secret
+        or not settings_row.lastfm_session_key
+    ):
         raise HTTPException(status_code=400, detail="Missing Last.fm credentials or session")
 
     track = db.query(Track).filter(Track.id == track_id).first()
@@ -361,7 +419,11 @@ def scrobble_track_to_lastfm(
     if not settings_row:
         raise HTTPException(status_code=400, detail="App settings not found")
 
-    if not settings_row.lastfm_api_key or not settings_row.lastfm_api_secret or not settings_row.lastfm_session_key:
+    if (
+        not settings_row.lastfm_api_key
+        or not settings_row.lastfm_api_secret
+        or not settings_row.lastfm_session_key
+    ):
         raise HTTPException(status_code=400, detail="Missing Last.fm credentials or session")
 
     track = db.query(Track).filter(Track.id == track_id).first()
@@ -470,4 +532,4 @@ def update_track(
         .first()
     )
 
-    return build_track_response(track)
+    return build_track_response(track, db)
