@@ -12,6 +12,9 @@ class TrackResponse(BaseModel):
     genres: List[str] = Field(default_factory=list)
     artists: List[str] = Field(default_factory=list)
     file_path: str
+    artwork_path: Optional[str] = None
+    album_artwork_path: Optional[str] = None
+    artist_artwork_path: Optional[str] = None
     raw_title: Optional[str] = None
     raw_artist: Optional[str] = None
     raw_album: Optional[str] = None

@@ -113,9 +113,7 @@ def setup_admin(
 
     recovery_codes = generate_recovery_codes()
     user.recovery_codes_hashes = hash_recovery_codes(recovery_codes)
-    db.commit()
-    db.refresh(user)
-
+    
     db.add(user)
     db.commit()
     db.refresh(user)
