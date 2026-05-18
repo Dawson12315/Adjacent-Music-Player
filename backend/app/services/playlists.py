@@ -20,8 +20,8 @@ def ensure_liked_songs_playlist(db: Session, user_id: int) -> Playlist:
     )
 
     if liked_songs:
-        if liked_songs.name == "Liked Songs":
-            liked_songs.name = "Loved Songs"
+        if liked_songs.name in ("Liked Songs", "Loved Songs"):
+            liked_songs.name = "Ducking Good"
             db.commit()
             db.refresh(liked_songs)
 
@@ -39,7 +39,7 @@ def ensure_liked_songs_playlist(db: Session, user_id: int) -> Playlist:
     if old_global_liked_songs:
         old_global_liked_songs.user_id = user_id
         old_global_liked_songs.system_key = system_key
-        old_global_liked_songs.name = "Loved Songs"
+        old_global_liked_songs.name = "Ducking Good"
         old_global_liked_songs.is_system = True
 
         db.commit()
@@ -49,7 +49,7 @@ def ensure_liked_songs_playlist(db: Session, user_id: int) -> Playlist:
 
     liked_songs = Playlist(
         user_id=user_id,
-        name="Loved Songs",
+        name="Ducking Good",
         is_system=True,
         system_key=system_key,
     )

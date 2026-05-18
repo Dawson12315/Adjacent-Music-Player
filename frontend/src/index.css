@@ -2,7 +2,15 @@
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   color: #ffffff;
-  background-color: #121212;
+  background-color: #0b0b0b;
+
+  --adjacent-blue: #2f7cff;
+  --adjacent-blue-soft: #8ab4ff;
+  --adjacent-blue-glow: rgba(47, 124, 255, 0.18);
+  --adjacent-bg: #0b0b0b;
+  --adjacent-card: #181818;
+  --adjacent-border: rgba(255, 255, 255, 0.08);
+  --adjacent-muted: rgba(255, 255, 255, 0.62);
 }
 
 * {
@@ -18,12 +26,9 @@ body,
 }
 
 body {
-  background: #121212;
-  color: #ffffff;
-}
-
-body {
-  background: #121212;
+  background:
+    radial-gradient(circle at top left, rgba(47, 124, 255, 0.14), transparent 34%),
+    #0b0b0b;
   color: #ffffff;
 }
 
@@ -51,9 +56,11 @@ button {
 .sidebar {
   grid-row: 1 / 2;
   grid-column: 1 / 2;
-  background: #000000;
+  background:
+    radial-gradient(circle at top left, rgba(47, 124, 255, 0.12), transparent 36%),
+    #050505;
   padding: 24px 16px;
-  border-right: 1px solid #1f1f1f;
+  border-right: 1px solid var(--adjacent-border);
   overflow-y: auto;
   min-height: 0;
   padding-bottom: 112px;
@@ -78,12 +85,15 @@ button {
   border: none;
   color: #b3b3b3;
   text-align: left;
-  padding: 8px 0;
+  padding: 9px 12px;
+  border-radius: 999px;
   cursor: pointer;
+  font-weight: 700;
 }
 
 .sidebar__link:hover {
   color: #ffffff;
+  background: rgba(47, 124, 255, 0.12);
 }
 
 .sidebar__section{
@@ -133,9 +143,35 @@ button {
 .sidebar__section-action:hover {
   color: #ffffff;
 }
+
 .sidebar__link--active {
   color: #ffffff;
-  font-weight: 600;
+  font-weight: 900;
+
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.12),
+      rgba(255, 255, 255, 0.04)
+    ),
+    linear-gradient(
+      135deg,
+      rgba(47, 124, 255, 0.34),
+      rgba(106, 162, 255, 0.18)
+    );
+
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+
+  border: 1px solid rgba(255, 255, 255, 0.14);
+
+  box-shadow:
+    0 10px 30px rgba(47, 124, 255, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+
+  position: relative;
+  overflow: hidden;
 }
 
 .playlist-create {
@@ -432,10 +468,13 @@ button {
 .search-input:focus{
   border-color: #535353
 }
+
 .main-content {
   grid-row: 1 / 2;
   grid-column: 2 / 3;
-  background: linear-gradient(to bottom, #1a1a1a, #121212 220px);
+  background:
+    radial-gradient(circle at top left, rgba(47, 124, 255, 0.16), transparent 32%),
+    linear-gradient(to bottom, #101826, #0b0b0b 260px);
   padding: 24px;
   overflow: hidden;
   min-height: 0;
@@ -472,14 +511,14 @@ button {
   padding: 26px;
   border-radius: 24px;
   background:
-    radial-gradient(circle at top left, rgba(30, 215, 96, 0.16), transparent 34%),
-    radial-gradient(circle at bottom right, rgba(124, 92, 255, 0.16), transparent 38%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025));
+  radial-gradient(circle at top left, rgba(47, 124, 255, 0.22), transparent 34%),
+  radial-gradient(circle at bottom right, rgba(138, 180, 255, 0.12), transparent 38%),
+  linear-gradient(135deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.026));
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .genres-eyebrow {
-  color: #1ed760;
+  color: var(--adjacent-blue-soft);
   font-size: 0.78rem;
   font-weight: 900;
   letter-spacing: 0.12em;
@@ -528,13 +567,13 @@ button {
   padding: 22px;
   border-radius: 22px;
   background:
-    linear-gradient(135deg, rgba(30, 215, 96, 0.12), transparent 42%),
+    linear-gradient(135deg, rgba(47, 124, 255, 0.12), transparent 42%),
     #181818;
-  border: 1px solid rgba(30, 215, 96, 0.18);
+  border: 1px solid rgba(47, 124, 255, 0.18);
 }
 
 .genres-feature-card__label {
-  color: #1ed760;
+  color: var(--adjacent-blue-soft);
   font-size: 0.78rem;
   font-weight: 900;
   letter-spacing: 0.1em;
@@ -579,7 +618,7 @@ button {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(30, 215, 96, 0.1), transparent 45%);
+  background: linear-gradient(135deg, rgba(47, 124, 255, 0.1), transparent 45%);
   opacity: 0.75;
   pointer-events: none;
 }
@@ -676,7 +715,7 @@ button {
 
 .queue-panel {
   background:
-    radial-gradient(circle at top left, rgba(30, 215, 96, 0.08), transparent 34%),
+    radial-gradient(circle at top left, rgba(47, 124, 255, 0.08), transparent 34%),
     #101010;
   border-left: 1px solid rgba(255, 255, 255, 0.08);
   padding: 22px 16px 112px;
@@ -758,7 +797,7 @@ button {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(30, 215, 96, 0.1), transparent 48%);
+  background: linear-gradient(135deg, rgba(47, 124, 255, 0.1), transparent 48%);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.16s ease;
@@ -778,10 +817,10 @@ button {
 
 .queue-panel__item--active {
   background:
-    linear-gradient(135deg, rgba(30, 215, 96, 0.18), transparent 46%),
+    linear-gradient(135deg, rgba(47, 124, 255, 0.18), transparent 46%),
     rgba(255, 255, 255, 0.075);
-  border-color: rgba(30, 215, 96, 0.26);
-  box-shadow: 0 14px 32px rgba(30, 215, 96, 0.08);
+  border-color: rgba(47, 124, 255, 0.26);
+  box-shadow: 0 14px 32px rgba(47, 124, 255, 0.08);
 }
 
 .queue-panel__item > * {
@@ -870,7 +909,7 @@ button {
   gap: 12px;
   padding: 12px 14px;
   background:
-    linear-gradient(135deg, rgba(30, 215, 96, 0.055), transparent 42%),
+    linear-gradient(135deg, rgba(47, 124, 255, 0.08), transparent 42%),
     rgba(255, 255, 255, 0.035);
   border: 1px solid rgba(255, 255, 255, 0.065);
   border-radius: 16px;
@@ -887,7 +926,7 @@ button {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(30, 215, 96, 0.08), transparent 45%);
+  background: linear-gradient(135deg, rgba(47, 124, 255, 0.12), transparent 45%);;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.16s ease;
@@ -897,7 +936,7 @@ button {
   transform: none;
   border-color: rgba(255, 255, 255, 0.13);
   background:
-    linear-gradient(135deg, rgba(30, 215, 96, 0.09), transparent 42%),
+    linear-gradient(135deg, rgba(47, 124, 255, 0.09), transparent 42%),
     rgba(255, 255, 255, 0.055);
 }
 
@@ -906,9 +945,9 @@ button {
 }
 
 .track-row--active {
-  border-color: rgba(30, 215, 96, 0.28);
+  border-color: rgba(47, 124, 255, 0.38);
   background:
-    linear-gradient(135deg, rgba(30, 215, 96, 0.14), transparent 45%),
+    linear-gradient(135deg, rgba(47, 124, 255, 0.18), transparent 45%),
     rgba(255, 255, 255, 0.065);
 }
 
@@ -949,7 +988,7 @@ button {
   align-items: center;
   justify-content: center;
   background:
-    linear-gradient(135deg, rgba(30, 215, 96, 0.18), rgba(124, 92, 255, 0.16)),
+    linear-gradient(135deg, rgba(47, 124, 255, 0.18), rgba(124, 92, 255, 0.16)),
     rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.76);
   font-size: 15px;
@@ -1049,7 +1088,7 @@ button {
 
 .track-row__reason {
   font-size: 0.78rem;
-  color: rgba(30, 215, 96, 0.72);
+  color: rgba(138, 180, 255, 0.82);
   margin-top: 4px;
   white-space: nowrap;
   overflow: hidden;
@@ -1208,7 +1247,7 @@ button {
 .settings-section__header::before {
   content: "Configuration";
   width: fit-content;
-  color: #1ed760;
+  color: var(--adjacent-blue-soft);
   font-size: 0.76rem;
   font-weight: 900;
   letter-spacing: 0.12em;
@@ -1245,7 +1284,7 @@ button {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(30, 215, 96, 0.09), transparent 42%);
+  background: linear-gradient(135deg, rgba(47, 124, 255, 0.09), transparent 42%);
   opacity: 0.75;
   pointer-events: none;
 }
@@ -1281,9 +1320,9 @@ button {
 }
 .settings-notice,
 .settings-success {
-  background: rgba(30, 215, 96, 0.12);
-  border: 1px solid rgba(30, 215, 96, 0.28);
-  color: #d7ffe4;
+  background: rgba(47, 124, 255, 0.13);
+  border: 1px solid rgba(47, 124, 255, 0.32);
+  color: #dbe9ff;
 }
 .settings-error {
   margin-top: 16px;
@@ -1294,7 +1333,7 @@ button {
 
 .settings-notice,
 .settings-success {
-  box-shadow: 0 12px 34px rgba(30, 215, 96, 0.08);
+  box-shadow: 0 12px 34px rgba(47, 124, 255, 0.08);
 }
 
 .settings-error {
@@ -1314,8 +1353,8 @@ button {
   width: 9px;
   height: 9px;
   border-radius: 999px;
-  background: #1ed760;
-  box-shadow: 0 0 18px rgba(30, 215, 96, 0.55);
+  background: var(--adjacent-blue);
+  box-shadow: 0 0 18px rgba(47, 124, 255, 0.55);
   flex-shrink: 0;
 }
 .settings-card__text {
@@ -1366,7 +1405,7 @@ button {
   color: #ffffff;
 }
 .settings-button--secondary:hover {
-  background: rgba(30, 215, 96, 0.14);
+  background: rgba(47, 124, 255, 0.14);
 }
 .settings-button--danger,
 .logout-button {
@@ -1406,7 +1445,7 @@ button {
 .settings-field--inline input[type="checkbox"] {
   width: 18px;
   height: 18px;
-  accent-color: #1ed760;
+  accent-color: var(--adjacent-blue);
 }
 .settings-field__label {
   color: rgba(255, 255, 255, 0.62);
@@ -1437,9 +1476,9 @@ button {
 
 .settings-text-input:focus,
 .settings-time-input:focus {
-  border-color: rgba(30, 215, 96, 0.85);
+  border-color: rgba(47, 124, 255, 0.85);
   background: rgba(255, 255, 255, 0.065);
-  box-shadow: 0 0 0 3px rgba(30, 215, 96, 0.12);
+  box-shadow: 0 0 0 3px rgba(47, 124, 255, 0.12);
 }
 .account-settings-grid {
   display: grid;
@@ -1451,7 +1490,7 @@ button {
   padding: 18px;
   border-radius: 18px;
   background:
-    radial-gradient(circle at top left, rgba(30, 215, 96, 0.11), transparent 34%),
+    radial-gradient(circle at top left, rgba(47, 124, 255, 0.11), transparent 34%),
     radial-gradient(circle at bottom right, rgba(124, 92, 255, 0.12), transparent 38%),
     rgba(255, 255, 255, 0.035);
   border: 1px solid rgba(255, 255, 255, 0.075);
@@ -1460,11 +1499,9 @@ button {
   height: 11px;
   background: rgba(255, 255, 255, 0.08);
 }
-.lastfm-status-pill--running {
-  box-shadow: 0 0 20px rgba(30, 215, 96, 0.18);
-}
+
 .lastfm-readiness-card__bar-fill {
-  background: linear-gradient(90deg, #1ed760, #7c5cff);
+  background: linear-gradient(90deg, var(--adjacent-blue), var(--adjacent-blue-soft));
 }
 .lastfm-readiness-card__stat,
 .lastfm-progress-stat {
@@ -1490,9 +1527,9 @@ button {
   padding: 26px;
   border-radius: 24px;
   background:
-    radial-gradient(circle at top left, rgba(30, 215, 96, 0.16), transparent 34%),
-    radial-gradient(circle at bottom right, rgba(124, 92, 255, 0.16), transparent 38%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025));
+  radial-gradient(circle at top left, rgba(47, 124, 255, 0.22), transparent 34%),
+  radial-gradient(circle at bottom right, rgba(138, 180, 255, 0.12), transparent 38%),
+  linear-gradient(135deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.026));
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -1533,13 +1570,13 @@ button {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(30, 215, 96, 0.12), transparent 45%);
+  background: linear-gradient(135deg, rgba(47, 124, 255, 0.12), transparent 45%);
   opacity: 0.65;
   pointer-events: none;
 }
 
 .behavior-insights-stat:nth-child(2)::before {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.13), transparent 45%);
+  background: linear-gradient(135deg, rgba(90, 160, 255, 0.13), transparent 45%);
 }
 
 .behavior-insights-stat:nth-child(3)::before {
@@ -1751,8 +1788,8 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(30, 215, 96, 0.14);
-  color: #1ed760;
+  background: rgba(47, 124, 255, 0.14);
+  color: var(--adjacent-blue-soft);
   font-weight: 900;
   flex-shrink: 0;
 }
@@ -1764,7 +1801,7 @@ button {
 }
 
 .behavior-insights-eyebrow {
-  color: #1ed760;
+  color: var(--adjacent-blue-soft);
   font-size: 0.78rem;
   font-weight: 900;
   letter-spacing: 0.12em;
@@ -1883,7 +1920,7 @@ button {
 }
 
 .settings-text-input:focus {
-  border-color: rgba(29, 185, 84, 0.8);
+  border-color: rgba(47, 124, 255, 0.8);
   background: rgba(255, 255, 255, 0.06);
 }
 
@@ -1927,8 +1964,9 @@ button {
 }
 
 .lastfm-status-pill--running {
-  background: rgba(29, 185, 84, 0.16);
-  color: #4ade80;
+  background: rgba(47, 124, 255, 0.16);
+  box-shadow: 0 0 20px rgba(47, 124, 255, 0.18);
+  color: var(--adjacent-blue-soft);
 }
 
 .lastfm-status-pill--stopping {
@@ -2110,7 +2148,7 @@ button {
 }
 
 .player-bar__progress-track:hover .player-bar__progress-fill {
-  background: #1db954;
+  background: var(--adjacent-blue);
 }
 
 .player-bar__title {
@@ -2182,8 +2220,9 @@ button {
   padding: 6px 8px;
   transition: color 0.2s ease, transform 0.2s ease;
 }
+
 .player-bar__icon-button--active {
-  color: #1db954;
+  color: var(--adjacent-blue-soft);
 }
 
 .player-bar__icon-button:hover {
@@ -2191,7 +2230,7 @@ button {
   transform: scale(1.1);
 }
 .player-bar__icon-button--active:hover {
-  color: #1ed760;
+  color: #dbe9ff;
 }
 
 .player-bar__play-button {
@@ -2616,14 +2655,14 @@ button {
   padding: 26px;
   border-radius: 24px;
   background:
-    radial-gradient(circle at top left, rgba(30, 215, 96, 0.16), transparent 34%),
-    radial-gradient(circle at bottom right, rgba(124, 92, 255, 0.12), transparent 38%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025));
+  radial-gradient(circle at top left, rgba(47, 124, 255, 0.22), transparent 34%),
+  radial-gradient(circle at bottom right, rgba(138, 180, 255, 0.12), transparent 38%),
+  linear-gradient(135deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.026));
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .artists-eyebrow {
-  color: #1ed760;
+  color: var(--adjacent-blue-soft);
   font-size: 0.78rem;
   font-weight: 900;
   letter-spacing: 0.12em;
@@ -2685,7 +2724,7 @@ button {
 .artist-grid-card:hover {
   transform: translateY(-3px);
   background:
-    radial-gradient(circle at top, rgba(30, 215, 96, 0.12), transparent 62%),
+    radial-gradient(circle at top, rgba(47, 124, 255, 0.12), transparent 62%),
     rgba(255, 255, 255, 0.035);
 }
 
@@ -2695,7 +2734,7 @@ button {
   margin: 0 auto 12px;
   border-radius: 999px;
   background:
-    linear-gradient(135deg, rgba(30, 215, 96, 0.16), rgba(124, 92, 255, 0.08)),
+    linear-gradient(135deg, rgba(47, 124, 255, 0.16), rgba(124, 92, 255, 0.08)),
     #202020;
   display: flex;
   align-items: center;
@@ -2747,7 +2786,7 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.075);
   border-radius: 18px;
   background:
-    linear-gradient(135deg, rgba(30, 215, 96, 0.055), transparent 42%),
+    linear-gradient(135deg, rgba(47, 124, 255, 0.055), transparent 42%),
     rgba(255, 255, 255, 0.035);
   color: #ffffff;
   text-align: left;
@@ -2757,7 +2796,7 @@ button {
 .artist-list-row:hover {
   border-color: rgba(255, 255, 255, 0.13);
   background:
-    linear-gradient(135deg, rgba(30, 215, 96, 0.09), transparent 42%),
+    linear-gradient(135deg, rgba(47, 124, 255, 0.09), transparent 42%),
     rgba(255, 255, 255, 0.055);
 }
 
@@ -2815,9 +2854,9 @@ button {
   padding: 26px;
   border-radius: 24px;
   background:
-    radial-gradient(circle at top left, rgba(30, 215, 96, 0.16), transparent 34%),
-    radial-gradient(circle at bottom right, rgba(124, 92, 255, 0.12), transparent 38%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025));
+  radial-gradient(circle at top left, rgba(47, 124, 255, 0.22), transparent 34%),
+  radial-gradient(circle at bottom right, rgba(138, 180, 255, 0.12), transparent 38%),
+  linear-gradient(135deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.026));
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 .album-hero {
@@ -2849,7 +2888,7 @@ button {
   object-position: center;
 }
 .albums-eyebrow {
-  color: #1ed760;
+  color: var(--adjacent-blue-soft);
   font-size: 0.78rem;
   font-weight: 900;
   letter-spacing: 0.12em;
@@ -2912,17 +2951,17 @@ button {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(30, 215, 96, 0.1), transparent 45%);
+  background: linear-gradient(135deg, rgba(47, 124, 255, 0.1), transparent 45%);
   opacity: 0.75;
   pointer-events: none;
 }
 
 .album-card:nth-child(3n)::before {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.12), transparent 45%);
+  background: linear-gradient(135deg, rgba(90, 160, 255, 0.12), transparent 45%);
 }
 
 .album-card:nth-child(4n)::before {
-  background: linear-gradient(135deg, rgba(30, 215, 96, 0.1), transparent 45%);
+  background: linear-gradient(135deg, rgba(47, 124, 255, 0.1), transparent 45%);
 }
 
 .album-card:hover {
@@ -3036,7 +3075,7 @@ button {
   padding: 10px;
   border-radius: 18px;
   background:
-    linear-gradient(135deg, rgba(30, 215, 96, 0.08), transparent 42%),
+    linear-gradient(135deg, rgba(47, 124, 255, 0.08), transparent 42%),
     rgba(255, 255, 255, 0.035);
   border: 1px solid rgba(255, 255, 255, 0.075);
 }
@@ -3044,7 +3083,7 @@ button {
 .album-list-row:hover {
   border-color: rgba(255, 255, 255, 0.13);
   background:
-    linear-gradient(135deg, rgba(30, 215, 96, 0.12), transparent 42%),
+    linear-gradient(135deg, rgba(47, 124, 255, 0.12), transparent 42%),
     rgba(255, 255, 255, 0.055);
 }
 
@@ -3126,7 +3165,7 @@ button {
   min-height: 100vh;
   width: 100%;
   background:
-    radial-gradient(circle at top left, rgba(30, 215, 96, 0.16), transparent 32%),
+    radial-gradient(circle at top left, rgba(47, 124, 255, 0.2), transparent 32%),
     radial-gradient(circle at bottom right, rgba(80, 110, 255, 0.16), transparent 35%),
     #101010;
   color: #ffffff;
@@ -3164,7 +3203,7 @@ button {
 }
 
 .auth-brand {
-  color: #1ed760;
+  color: var(--adjacent-blue-soft);
   font-weight: 800;
   letter-spacing: 0.04em;
   margin-bottom: 10px;
@@ -3216,8 +3255,8 @@ button {
 }
 
 .auth-field input:focus {
-  border-color: #1ed760;
-  box-shadow: 0 0 0 3px rgba(30, 215, 96, 0.16);
+  border-color: var(--adjacent-blue);
+  box-shadow: 0 0 0 3px rgba(47, 124, 255, 0.16);
 }
 
 .auth-button {
@@ -3225,8 +3264,8 @@ button {
   border: none;
   border-radius: 999px;
   padding: 14px 18px;
-  background: #1ed760;
-  color: #050505;
+  background: linear-gradient(135deg, #2f7cff, #6aa2ff);
+  color: #ffffff;
   font-weight: 900;
   cursor: pointer;
   font: inherit;
