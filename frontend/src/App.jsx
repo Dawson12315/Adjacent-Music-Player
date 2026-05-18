@@ -2531,7 +2531,7 @@ function App() {
     if (isLikedSongsPlaylist(playlist)) {
       return {
         type: "image",
-        src: "/liked-songs.png",
+        src: "/ducking-good.png",
       };
     }
 
