@@ -4,13 +4,17 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.dependencies.auth import get_current_user, require_admin
+from app.models.album_artwork import AlbumArtwork
 from app.models.artist_artwork import ArtistArtwork
+from app.models.track import Track
 from app.models.track_artist import TrackArtist
 from app.models.user import User
+from app.routes.albums import normalize_album_name
+from app.schemas.track import TrackResponse
 from app.utils.artist_normalization import normalize_artist_name
 
 router = APIRouter()
@@ -33,6 +37,124 @@ def list_artists(
     )
 
     return [artist[0] for artist in artists if artist[0]]
+
+
+def build_mobile_artist_track_response(track: Track, db: Session) -> TrackResponse:
+    album_key = normalize_album_name(track.album)
+    artist_key = normalize_artist_name(track.artist)
+
+    album_artwork = (
+        db.query(AlbumArtwork)
+        .filter(AlbumArtwork.album_key == album_key)
+        .first()
+    )
+    artist_artwork = (
+        db.query(ArtistArtwork)
+        .filter(ArtistArtwork.artist_key == artist_key)
+        .first()
+    )
+
+    album_artwork_path = album_artwork.artwork_path if album_artwork else None
+    artist_artwork_path = artist_artwork.artwork_path if artist_artwork else None
+
+    return TrackResponse(
+        id=track.id,
+        title=track.title,
+        artist=track.artist,
+        album=track.album,
+        genre=track.genre,
+        genres=[item.genre for item in track.track_genres],
+        artists=[item.artist_name for item in track.track_artists],
+        file_path=track.file_path,
+        artwork_path=album_artwork_path,
+        album_artwork_path=album_artwork_path,
+        artist_artwork_path=artist_artwork_path,
+        raw_title=track.raw_title,
+        raw_artist=track.raw_artist,
+        raw_album=track.raw_album,
+        raw_genre=track.raw_genre,
+        musicbrainz_recording_id=track.musicbrainz_recording_id,
+        lastfm_tags_enriched=track.lastfm_tags_enriched,
+    )
+
+
+@router.get("/mobile/artists", tags=["mobile"])
+def list_mobile_artists(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    artist_rows = (
+        db.query(
+            TrackArtist.artist_name.label("artist_name"),
+            func.count(func.distinct(TrackArtist.track_id)).label("track_count"),
+        )
+        .filter(TrackArtist.artist_name.isnot(None))
+        .group_by(TrackArtist.artist_name)
+        .order_by(func.lower(TrackArtist.artist_name))
+        .all()
+    )
+
+    artist_keys = [normalize_artist_name(row.artist_name) for row in artist_rows if row.artist_name]
+    artwork_rows = (
+        db.query(ArtistArtwork)
+        .filter(ArtistArtwork.artist_key.in_(artist_keys))
+        .all()
+        if artist_keys
+        else []
+    )
+    artwork_by_key = {artwork.artist_key: artwork.artwork_path for artwork in artwork_rows}
+
+    album_count_rows = (
+        db.query(
+            TrackArtist.artist_name.label("artist_name"),
+            func.count(func.distinct(Track.album)).label("album_count"),
+        )
+        .join(Track, Track.id == TrackArtist.track_id)
+        .filter(TrackArtist.artist_name.isnot(None))
+        .filter(Track.album.isnot(None))
+        .group_by(TrackArtist.artist_name)
+        .all()
+    )
+    album_count_by_artist = {
+        row.artist_name: row.album_count for row in album_count_rows if row.artist_name
+    }
+
+    return [
+        {
+            "name": row.artist_name,
+            "artist": row.artist_name,
+            "artist_name": row.artist_name,
+            "trackCount": row.track_count,
+            "track_count": row.track_count,
+            "albumCount": album_count_by_artist.get(row.artist_name, 0),
+            "album_count": album_count_by_artist.get(row.artist_name, 0),
+            "artwork_path": artwork_by_key.get(normalize_artist_name(row.artist_name)),
+            "artist_artwork_path": artwork_by_key.get(normalize_artist_name(row.artist_name)),
+        }
+        for row in artist_rows
+        if row.artist_name
+    ]
+
+
+@router.get("/mobile/artists/{artist_name:path}/tracks", response_model=list[TrackResponse], tags=["mobile"])
+def get_mobile_artist_tracks(
+    artist_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    tracks = (
+        db.query(Track)
+        .join(TrackArtist, TrackArtist.track_id == Track.id)
+        .options(
+            selectinload(Track.track_artists),
+            selectinload(Track.track_genres),
+        )
+        .filter(func.lower(TrackArtist.artist_name) == artist_name.casefold())
+        .order_by(Track.album.asc(), Track.title.asc())
+        .all()
+    )
+
+    return [build_mobile_artist_track_response(track, db) for track in tracks]
 
 
 @router.get("/artists/{artist_name:path}/artwork", tags=["artists"])
