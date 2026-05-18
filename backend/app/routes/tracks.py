@@ -2,12 +2,16 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import mimetypes
 import subprocess
+import threading
+import time
+import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 from jose import JWTError, jwt
+from uuid import uuid4
 
 from app.config import settings
 from app.db import get_db
@@ -32,7 +36,592 @@ from app.utils.artist_normalization import normalize_artist_name
 
 router = APIRouter()
 
-STREAM_TOKEN_EXPIRE_SECONDS = 60
+STREAM_TOKEN_EXPIRE_SECONDS = 60 * 60 * 12
+
+MOBILE_STREAM_PROFILES = {
+    "mp3_128": {
+        "label": "MP3 128",
+        "extension": ".mp3",
+        "media_type": "audio/mpeg",
+        "cache_version": "v2",
+        "ffmpeg_args": [
+            "-map", "0:a:0",
+            "-vn",
+            "-sn",
+            "-dn",
+            "-map_metadata", "-1",
+            "-ar", "44100",
+            "-ac", "2",
+            "-codec:a", "libmp3lame",
+            "-b:a", "128k",
+            "-compression_level", "0",
+            "-id3v2_version", "3",
+            "-write_xing", "1",
+            "-f", "mp3",
+        ],
+    },
+    "aac_128": {
+        "label": "AAC 128",
+        "extension": ".m4a",
+        "media_type": "audio/mp4",
+        "cache_version": "v1",
+        "ffmpeg_args": [
+            "-map", "0:a:0",
+            "-vn",
+            "-sn",
+            "-dn",
+            "-map_metadata", "-1",
+            "-af", "aresample=async=1000:min_hard_comp=0.100:first_pts=0",
+            "-ar", "44100",
+            "-ac", "2",
+            "-codec:a", "aac",
+            "-b:a", "128k",
+            "-movflags", "+faststart",
+            "-f", "mp4",
+        ],
+    },
+    "mp3_320": {
+        "label": "MP3 320",
+        "extension": ".mp3",
+        "media_type": "audio/mpeg",
+        "cache_version": "v7",
+        "ffmpeg_args": [
+            "-map", "0:a:0",
+            "-vn",
+            "-sn",
+            "-dn",
+            "-map_metadata", "-1",
+            "-ar", "44100",
+            "-ac", "2",
+            "-codec:a", "libmp3lame",
+            "-b:a", "320k",
+            "-compression_level", "0",
+            "-id3v2_version", "3",
+            "-write_xing", "0",
+            "-fflags", "+bitexact",
+            "-f", "mp3",
+        ],
+    },
+    "aac_256": {
+        "label": "AAC 256",
+        "extension": ".m4a",
+        "media_type": "audio/mp4",
+        "cache_version": "v2",
+        "ffmpeg_args": [
+            "-map", "0:a:0",
+            "-vn",
+            "-sn",
+            "-dn",
+            "-af", "aresample=async=1:first_pts=0",
+            "-ar", "44100",
+            "-ac", "2",
+            "-codec:a", "aac",
+            "-b:a", "256k",
+            "-movflags", "+faststart",
+        ],
+    },
+    "aac_320": {
+        "label": "AAC 320",
+        "extension": ".m4a",
+        "media_type": "audio/mp4",
+        "cache_version": "v2",
+        "ffmpeg_args": [
+            "-map", "0:a:0",
+            "-vn",
+            "-sn",
+            "-dn",
+            "-map_metadata", "-1",
+            "-af", "aresample=async=1000:min_hard_comp=0.100:first_pts=0",
+            "-ar", "44100",
+            "-ac", "2",
+            "-codec:a", "aac",
+            "-b:a", "320k",
+            "-movflags", "+faststart",
+            "-f", "mp4",
+        ],
+    },
+    "original": {
+        "label": "Original",
+        "passthrough": True,
+    },
+}
+
+
+# Mobile stream cache locking
+MOBILE_CACHE_LOCKS: dict[str, threading.Lock] = {}
+MOBILE_CACHE_LOCKS_GUARD = threading.Lock()
+
+# HLS streaming constants
+HLS_SEGMENT_DURATION_SECONDS = 4
+HLS_CACHE_ROOT = Path("data/hls_cache")
+HLS_STARTUP_QUALITY = "aac_320"
+HLS_DEFAULT_QUALITY = "aac_320"
+HLS_QUALITY_VARIANTS = [
+    {"quality": "aac_320", "bandwidth": 320000, "name": "AAC 320", "codecs": "mp4a.40.2"},
+    {"quality": "aac_256", "bandwidth": 256000, "name": "AAC 256", "codecs": "mp4a.40.2"},
+    {"quality": "aac_128", "bandwidth": 128000, "name": "AAC 128", "codecs": "mp4a.40.2"},
+]
+
+
+def get_mobile_cache_lock(cache_key: str) -> threading.Lock:
+    with MOBILE_CACHE_LOCKS_GUARD:
+        lock = MOBILE_CACHE_LOCKS.get(cache_key)
+
+        if lock is None:
+            lock = threading.Lock()
+            MOBILE_CACHE_LOCKS[cache_key] = lock
+
+        return lock
+
+
+# HLS cache path helper
+def get_hls_cache_paths(track_id: int, quality: str):
+    track_dir = HLS_CACHE_ROOT / f"track_{track_id}" / quality
+    playlist_path = track_dir / "index.m3u8"
+    segment_pattern = track_dir / "segment_%05d.ts"
+
+    return {
+        "track_dir": track_dir,
+        "playlist_path": playlist_path,
+        "segment_pattern": segment_pattern,
+    }
+
+
+def get_hls_ffmpeg_args(profile: dict) -> list[str]:
+    args = list(profile.get("ffmpeg_args", []))
+    cleaned_args = []
+    index = 0
+
+    while index < len(args):
+        current_arg = args[index]
+
+        if current_arg == "-f" and index + 1 < len(args):
+            index += 2
+            continue
+
+        if current_arg == "-movflags" and index + 1 < len(args):
+            index += 2
+            continue
+
+        if current_arg in {"-id3v2_version", "-write_xing"} and index + 1 < len(args):
+            index += 2
+            continue
+
+        cleaned_args.append(current_arg)
+        index += 1
+
+    return cleaned_args
+
+
+def iter_file_range(file_path: Path, start: int, end: int, chunk_size: int = 256 * 1024):
+    started_at = time.perf_counter()
+    bytes_sent = 0
+    chunk_count = 0
+    expected_bytes = end - start + 1
+
+    print(
+        f"[MOBILE STREAM BODY] start file={file_path.name} bytes={start}-{end} expected={expected_bytes}",
+        flush=True,
+    )
+
+    try:
+        with file_path.open("rb") as file:
+            file.seek(start)
+            remaining = expected_bytes
+
+            while remaining > 0:
+                chunk = file.read(min(chunk_size, remaining))
+
+                if not chunk:
+                    print(
+                        f"[MOBILE STREAM BODY] empty-read file={file_path.name} sent={bytes_sent}/{expected_bytes}",
+                        flush=True,
+                    )
+                    break
+
+                chunk_count += 1
+                bytes_sent += len(chunk)
+                remaining -= len(chunk)
+
+                if chunk_count <= 3 or remaining <= 0:
+                    print(
+                        f"[MOBILE STREAM BODY] chunk file={file_path.name} chunk={chunk_count} size={len(chunk)} sent={bytes_sent}/{expected_bytes}",
+                        flush=True,
+                    )
+
+                yield chunk
+
+    except GeneratorExit:
+        print(
+            f"[MOBILE STREAM BODY] client-disconnected file={file_path.name} sent={bytes_sent}/{expected_bytes} chunks={chunk_count}",
+            flush=True,
+        )
+        raise
+
+    finally:
+        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        print(
+            f"[MOBILE STREAM BODY] finish file={file_path.name} sent={bytes_sent}/{expected_bytes} chunks={chunk_count} elapsed_ms={elapsed_ms:.1f}",
+            flush=True,
+        )
+
+
+def range_file_response(
+    request: Request,
+    file_path: Path,
+    media_type: str,
+    filename: str,
+    cache_seconds: int = 86400,
+):
+    file_size = file_path.stat().st_size
+    range_header = request.headers.get("range")
+    print(
+        f"[MOBILE STREAM] file={file_path.name} range={range_header or 'none'} size={file_size}",
+        flush=True,
+    )
+
+    base_headers = {
+        "Accept-Ranges": "bytes",
+        "Cache-Control": f"public, max-age={cache_seconds}, no-transform",
+        "Content-Disposition": f'inline; filename="{filename}"',
+    }
+
+    if not range_header:
+        headers = {
+            **base_headers,
+            "Content-Length": str(file_size),
+        }
+
+        print(
+            f"[MOBILE STREAM] serving full file file={file_path.name} status=200 bytes=0-{file_size - 1}/{file_size}",
+            flush=True,
+        )
+
+        return StreamingResponse(
+            iter_file_range(file_path, 0, file_size - 1),
+            media_type=media_type,
+            headers=headers,
+            status_code=200,
+        )
+
+    if not range_header.startswith("bytes="):
+        raise HTTPException(status_code=416, detail="Invalid range header")
+
+    range_value = range_header.replace("bytes=", "", 1).strip()
+    start_text, _, end_text = range_value.partition("-")
+
+    try:
+        if start_text:
+            start = int(start_text)
+            end = int(end_text) if end_text else file_size - 1
+        else:
+            suffix_length = int(end_text)
+            start = max(file_size - suffix_length, 0)
+            end = file_size - 1
+    except ValueError:
+        raise HTTPException(status_code=416, detail="Invalid range header")
+
+    if start < 0 or end >= file_size or start > end:
+        return StreamingResponse(
+            iter(()),
+            status_code=416,
+            headers={
+                **base_headers,
+                "Content-Range": f"bytes */{file_size}",
+            },
+        )
+
+    content_length = end - start + 1
+    headers = {
+        **base_headers,
+        "Content-Range": f"bytes {start}-{end}/{file_size}",
+        "Content-Length": str(content_length),
+    }
+
+    print(
+        f"[MOBILE STREAM] serving range file={file_path.name} status=206 bytes={start}-{end}/{file_size}",
+        flush=True,
+    )
+
+    return StreamingResponse(
+        iter_file_range(file_path, start, end),
+        media_type=media_type,
+        headers=headers,
+        status_code=206,
+    )
+
+
+
+# Helper: ensure mobile stream cache
+def ensure_mobile_stream_cache(
+    track: Track,
+    file_path: Path,
+    profile: dict,
+    quality: str,
+) -> Path:
+    source_mtime = file_path.stat().st_mtime
+    ensure_started_at = time.perf_counter()
+    cache_dir = Path("data/mobile_cache")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    output_extension = profile["extension"]
+    cache_version = profile.get("cache_version", "v1")
+    cached_file_path = cache_dir / f"track_{track.id}_{quality}_{cache_version}{output_extension}"
+    temp_file_path = cache_dir / f"track_{track.id}_{quality}_{cache_version}_{uuid4().hex}.tmp{output_extension}"
+    def is_cache_valid() -> bool:
+        return (
+            cached_file_path.exists()
+            and cached_file_path.stat().st_size > 0
+            and cached_file_path.stat().st_mtime >= source_mtime
+        )
+
+    if is_cache_valid():
+        print(
+            f"[MOBILE CACHE] hit track={track.id} quality={quality} file={cached_file_path.name} size={cached_file_path.stat().st_size}",
+            flush=True,
+        )
+        return cached_file_path
+
+    cache_key = f"{track.id}:{quality}:{cache_version}"
+    cache_lock = get_mobile_cache_lock(cache_key)
+    print(
+        f"[MOBILE CACHE] miss track={track.id} quality={quality} file={cached_file_path.name}",
+        flush=True,
+    )
+
+    with cache_lock:
+        if is_cache_valid():
+            print(
+                f"[MOBILE CACHE] hit-after-lock track={track.id} quality={quality} file={cached_file_path.name} size={cached_file_path.stat().st_size}",
+                flush=True,
+            )
+            return cached_file_path
+
+        if temp_file_path.exists():
+            temp_file_path.unlink()
+
+        ffmpeg_command = [
+            "ffmpeg",
+            "-y",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(file_path),
+            *profile["ffmpeg_args"],
+            str(temp_file_path),
+        ]
+
+        print(
+            f"[MOBILE CACHE] transcode-start track={track.id} quality={quality} source={file_path.name} temp={temp_file_path.name}",
+            flush=True,
+        )
+
+        transcode_started_at = time.perf_counter()
+
+        result = subprocess.run(
+            ffmpeg_command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        transcode_ms = (time.perf_counter() - transcode_started_at) * 1000
+        print(
+            f"[MOBILE CACHE] transcode-finished track={track.id} quality={quality} returncode={result.returncode} transcode_ms={transcode_ms:.1f}",
+            flush=True,
+        ) 
+
+        if result.returncode != 0:
+            if temp_file_path.exists():
+                temp_file_path.unlink()
+
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create mobile stream: {result.stderr.strip()}",
+            )
+
+        if temp_file_path.exists():
+            temp_file_path.replace(cached_file_path)
+            print(
+                f"[MOBILE CACHE] write-complete track={track.id} quality={quality} file={cached_file_path.name} size={cached_file_path.stat().st_size} ensure_ms={(time.perf_counter() - ensure_started_at) * 1000:.1f}",
+                flush=True,
+            )
+        elif not cached_file_path.exists():
+            raise HTTPException(
+                status_code=500,
+                detail="Mobile stream cache file was not created",
+            )
+
+    return cached_file_path
+
+
+# HLS streaming cache helper
+def ensure_hls_stream_cache(
+    track: Track,
+    file_path: Path,
+    profile: dict,
+    quality: str,
+):
+    if profile.get("passthrough"):
+        raise HTTPException(
+            status_code=400,
+            detail="Original quality is not supported for HLS streaming",
+        )
+
+    source_mtime = file_path.stat().st_mtime
+    cache_version = profile.get("cache_version", "v1")
+    cache_key = f"hls:{track.id}:{quality}:{cache_version}"
+    cache_lock = get_mobile_cache_lock(cache_key)
+
+    paths = get_hls_cache_paths(track.id, quality)
+    track_dir = paths["track_dir"]
+    playlist_path = paths["playlist_path"]
+    segment_pattern = paths["segment_pattern"]
+
+    def is_cache_valid() -> bool:
+        return (
+            playlist_path.exists()
+            and playlist_path.stat().st_size > 0
+            and playlist_path.stat().st_mtime >= source_mtime
+        )
+
+    if is_cache_valid():
+        print(
+            f"[HLS CACHE] hit track={track.id} quality={quality}",
+            flush=True,
+        )
+        return playlist_path
+
+    with cache_lock:
+        if is_cache_valid():
+            print(
+                f"[HLS CACHE] hit-after-lock track={track.id} quality={quality}",
+                flush=True,
+            )
+            return playlist_path
+
+        if track_dir.exists():
+            shutil.rmtree(track_dir, ignore_errors=True)
+
+        track_dir.mkdir(parents=True, exist_ok=True)
+
+        ffmpeg_command = [
+            "ffmpeg",
+            "-y",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(file_path),
+            *get_hls_ffmpeg_args(profile),
+            "-f",
+            "hls",
+            "-hls_time",
+            str(HLS_SEGMENT_DURATION_SECONDS),
+            "-hls_playlist_type",
+            "vod",
+            "-hls_segment_filename",
+            str(segment_pattern),
+            str(playlist_path),
+        ]
+
+        print(
+            f"[HLS CACHE] generate-start track={track.id} quality={quality}",
+            flush=True,
+        )
+
+        result = subprocess.run(
+            ffmpeg_command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            shutil.rmtree(track_dir, ignore_errors=True)
+
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create HLS stream: {result.stderr.strip()}",
+            )
+
+        if not playlist_path.exists():
+            raise HTTPException(
+                status_code=500,
+                detail="HLS playlist generation failed",
+            )
+
+        print(
+            f"[HLS CACHE] generate-finished track={track.id} quality={quality}",
+            flush=True,
+        )
+
+    return playlist_path
+
+
+# --- HLS helper functions ---
+
+def build_hls_variant_playlist_url(
+    track_id: int,
+    quality: str,
+    token: str,
+    fast_start_only: bool = False,
+) -> str:
+    fast_start_param = "&fast_start=1" if fast_start_only else ""
+    return f"/api/tracks/{track_id}/hls/{quality}/index.m3u8?token={token}{fast_start_param}"
+
+
+def get_requested_hls_quality(request: Request) -> str:
+    requested_quality = request.query_params.get("quality") or HLS_DEFAULT_QUALITY
+
+    if requested_quality == "mp3_128":
+        requested_quality = "aac_128"
+
+    profile = MOBILE_STREAM_PROFILES.get(requested_quality)
+
+    if not profile or profile.get("passthrough"):
+        raise HTTPException(status_code=400, detail="Invalid HLS quality")
+
+    if requested_quality not in {variant["quality"] for variant in HLS_QUALITY_VARIANTS}:
+        raise HTTPException(status_code=400, detail="Invalid HLS quality")
+
+    return requested_quality
+
+
+def prepare_hls_variants_in_background(track_id: int, file_path_text: str):
+    file_path = Path(file_path_text)
+
+    if not file_path.exists():
+        return
+
+    track_stub = Track(id=track_id, file_path=file_path_text)
+
+    for variant in HLS_QUALITY_VARIANTS:
+        quality = variant["quality"]
+
+        if quality == HLS_STARTUP_QUALITY:
+            continue
+
+        profile = MOBILE_STREAM_PROFILES.get(quality)
+
+        if not profile or profile.get("passthrough"):
+            continue
+
+        try:
+            ensure_hls_stream_cache(
+                track=track_stub,
+                file_path=file_path,
+                profile=profile,
+                quality=quality,
+            )
+        except Exception as error:
+            print(
+                f"[HLS CACHE] background-generate-failed track={track_id} quality={quality} error={error}",
+                flush=True,
+            )
 
 
 def create_stream_token(track_id: int, user_id: int) -> str:
@@ -147,22 +736,51 @@ def get_track_count(
     return {"count": count}
 
 
-@router.get("/tracks", response_model=list[TrackResponse], tags=["tracks"])
+@router.get("/tracks", tags=["tracks"])
 def list_tracks(
+    limit: int | None = Query(None, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    search: str | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    tracks = (
-        db.query(Track)
-        .options(
-            selectinload(Track.track_artists),
-            selectinload(Track.track_genres),
-        )
-        .order_by(Track.artist.asc(), Track.album.asc(), Track.title.asc())
-        .all()
+    query = db.query(Track).options(
+        selectinload(Track.track_artists),
+        selectinload(Track.track_genres),
     )
 
-    return [build_track_response(track, db) for track in tracks]
+    cleaned_search = search.strip() if search else ""
+
+    if cleaned_search:
+        pattern = f"%{cleaned_search.lower()}%"
+        query = query.filter(
+            func.lower(Track.title).like(pattern)
+            | func.lower(Track.artist).like(pattern)
+            | func.lower(Track.album).like(pattern)
+            | func.lower(Track.genre).like(pattern)
+        )
+
+    total = query.count()
+
+    query = query.order_by(Track.artist.asc(), Track.album.asc(), Track.title.asc())
+
+    if limit is not None:
+        query = query.offset(offset).limit(limit)
+
+    tracks = query.all()
+
+    items = [build_track_response(track, db) for track in tracks]
+
+    if limit is None:
+        return items
+
+    return {
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(items) < total,
+    }
 
 
 @router.get("/tracks/{track_id}/stream", tags=["tracks"])
@@ -211,13 +829,116 @@ def get_mobile_stream_token(
     }
 
 
+
+# Endpoint: Prepare mobile stream cache
+@router.post("/tracks/{track_id}/mobile-stream-cache/prepare", tags=["tracks"])
+def prepare_mobile_stream_cache(
+    track_id: int,
+    quality: str = Query("mp3_320"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = MOBILE_STREAM_PROFILES.get(quality)
+
+    if not profile:
+        raise HTTPException(status_code=400, detail="Invalid mobile stream quality")
+
+    track = db.query(Track).filter(Track.id == track_id).first()
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    file_path = Path(track.file_path)
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if profile.get("passthrough"):
+        return {"prepared": True, "passthrough": True}
+    else:
+        cached_file_path = ensure_mobile_stream_cache(
+            track=track,
+            file_path=file_path,
+            profile=profile,
+            quality=quality,
+        )
+
+    return {
+        "prepared": True,
+        "track_id": track.id,
+        "quality": quality,
+        "size_bytes": cached_file_path.stat().st_size,
+    }
+
+
+# Endpoint: Mobile stream
+
 @router.get("/tracks/{track_id}/mobile-stream", tags=["tracks"])
 def mobile_stream_track(
+    track_id: int,
+    request: Request,
+    quality: str = Query("mp3_320"),
+    db: Session = Depends(get_db),
+):
+    token = request.query_params.get("token")
+
+    if not token or not verify_stream_token(token, track_id):
+        raise HTTPException(status_code=401, detail="Invalid or expired stream token")
+
+    profile = MOBILE_STREAM_PROFILES.get(quality)
+
+    if not profile:
+        raise HTTPException(status_code=400, detail="Invalid mobile stream quality")
+
+    track = db.query(Track).filter(Track.id == track_id).first()
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    file_path = Path(track.file_path)
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    source_extension = file_path.suffix.lower()
+
+    if profile.get("passthrough"):
+        media_type, _ = mimetypes.guess_type(str(file_path))
+    
+        return range_file_response(
+            request=request,
+            file_path=file_path,
+            media_type=media_type or "application/octet-stream",
+            filename=f"track-{track.id}{source_extension}",
+        )
+
+    output_extension = profile["extension"]
+    cached_file_path = ensure_mobile_stream_cache(
+        track=track,
+        file_path=file_path,
+        profile=profile,
+        quality=quality,
+    )
+
+    return range_file_response(
+        request=request,
+        file_path=cached_file_path,
+        media_type=profile["media_type"],
+        filename=f"track-{track.id}{output_extension}",
+    )
+
+
+# HLS streaming endpoints
+
+@router.get("/tracks/{track_id}/hls/master.m3u8", tags=["tracks"])
+def get_hls_master_playlist(
     track_id: int,
     request: Request,
     db: Session = Depends(get_db),
 ):
     token = request.query_params.get("token")
+    fast_start_only = request.query_params.get("fast_start") == "1"
+    requested_hls_quality = get_requested_hls_quality(request)
 
     if not token or not verify_stream_token(token, track_id):
         raise HTTPException(status_code=401, detail="Invalid or expired stream token")
@@ -232,86 +953,208 @@ def mobile_stream_track(
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    extension = file_path.suffix.lower()
-    mobile_native_extensions = {".mp3", ".m4a", ".aac"}
+    startup_profile = MOBILE_STREAM_PROFILES.get(requested_hls_quality)
 
-    if extension in mobile_native_extensions:
-        media_type, _ = mimetypes.guess_type(str(file_path))
+    if not startup_profile or startup_profile.get("passthrough"):
+        raise HTTPException(status_code=500, detail="Invalid HLS startup quality")
 
-        return FileResponse(
-            path=file_path,
-            media_type=media_type or "audio/mpeg",
-            filename="mobile-stream.mp3",
-            headers={"Cache-Control": "public, max-age=86400"},
-        )
-
-    if extension not in {".flac", ".wav", ".aiff", ".aif"}:
-        raise HTTPException(
-            status_code=415,
-            detail=f"Unsupported mobile audio format: {extension}",
-        )
-
-    cache_dir = Path("data/mobile_cache")
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
-    cached_file_path = cache_dir / f"track_{track.id}.mp3"
-    temp_file_path = cache_dir / f"track_{track.id}.tmp.mp3"
-
-    source_mtime = file_path.stat().st_mtime
-
-    cache_is_valid = (
-        cached_file_path.exists()
-        and cached_file_path.stat().st_size > 0
-        and cached_file_path.stat().st_mtime >= source_mtime
+    ensure_hls_stream_cache(
+        track=track,
+        file_path=file_path,
+        profile=startup_profile,
+        quality=requested_hls_quality,
     )
 
-    if not cache_is_valid:
-        if temp_file_path.exists():
-            temp_file_path.unlink()
+    if not fast_start_only:
+        threading.Thread(
+            target=prepare_hls_variants_in_background,
+            args=(track.id, str(file_path)),
+            daemon=True,
+        ).start()
 
-        ffmpeg_command = [
-            "ffmpeg",
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            str(file_path),
-            "-vn",
-            "-codec:a",
-            "libmp3lame",
-            "-b:a",
-            "320k",
-            "-movflags",
-            "+faststart",
-            str(temp_file_path),
-        ]
+    lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
 
-        result = subprocess.run(
-            ffmpeg_command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+    for variant in HLS_QUALITY_VARIANTS:
+        quality = variant["quality"]
+        if quality != requested_hls_quality:
+            continue
+        profile = MOBILE_STREAM_PROFILES.get(quality)
+
+        if not profile or profile.get("passthrough"):
+            continue
+
+        lines.append(
+            f'#EXT-X-STREAM-INF:BANDWIDTH={variant["bandwidth"]},NAME="{variant["name"]}",CODECS="{variant["codecs"]}"'
+        )
+        lines.append(
+            build_hls_variant_playlist_url(track.id, quality, token, fast_start_only)
         )
 
-        if result.returncode != 0:
-            if temp_file_path.exists():
-                temp_file_path.unlink()
+    return Response(
+        content="\n".join(lines) + "\n",
+        media_type="application/vnd.apple.mpegurl",
+        headers={"Cache-Control": "public, max-age=60"},
+    )
 
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to create mobile stream: {result.stderr.strip()}",
+
+@router.get("/tracks/{track_id}/hls/{quality}/index.m3u8", tags=["tracks"])
+def get_hls_quality_playlist(
+    track_id: int,
+    quality: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    token = request.query_params.get("token")
+    fast_start_only = request.query_params.get("fast_start") == "1"
+
+    if not token or not verify_stream_token(token, track_id):
+        raise HTTPException(status_code=401, detail="Invalid or expired stream token")
+
+    profile = MOBILE_STREAM_PROFILES.get(quality)
+
+    if not profile or profile.get("passthrough"):
+        raise HTTPException(status_code=400, detail="Invalid HLS quality")
+
+    track = db.query(Track).filter(Track.id == track_id).first()
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    file_path = Path(track.file_path)
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    playlist_path = ensure_hls_stream_cache(
+        track=track,
+        file_path=file_path,
+        profile=profile,
+        quality=quality,
+    )
+
+    if quality == HLS_DEFAULT_QUALITY and not fast_start_only:
+        threading.Thread(
+            target=prepare_hls_variants_in_background,
+            args=(track.id, str(file_path)),
+            daemon=True,
+        ).start()
+
+    playlist_text = playlist_path.read_text()
+    rewritten_lines = []
+
+    for line in playlist_text.splitlines():
+        stripped = line.strip()
+
+        if stripped and not stripped.startswith("#"):
+            segment_name = Path(stripped).name
+            rewritten_lines.append(
+                f"/api/tracks/{track.id}/hls/{quality}/{segment_name}?token={token}"
+                + ("&fast_start=1" if fast_start_only else "")
             )
+        else:
+            rewritten_lines.append(line)
 
-        temp_file_path.replace(cached_file_path)
+    return Response(
+        content="\n".join(rewritten_lines) + "\n",
+        media_type="application/vnd.apple.mpegurl",
+        headers={"Cache-Control": "public, max-age=60"},
+    )
+
+
+
+
+@router.get("/tracks/{track_id}/hls/{quality}/{segment_name}", tags=["tracks"])
+def get_hls_segment(
+    track_id: int,
+    quality: str,
+    segment_name: str,
+    request: Request,
+):
+    token = request.query_params.get("token")
+
+    if not token or not verify_stream_token(token, track_id):
+        raise HTTPException(status_code=401, detail="Invalid or expired stream token")
+
+    segment_path = (
+        HLS_CACHE_ROOT
+        / f"track_{track_id}"
+        / quality
+        / segment_name
+    )
+
+    if not segment_path.exists():
+        raise HTTPException(status_code=404, detail="HLS segment not found")
 
     return FileResponse(
-        path=cached_file_path,
-        media_type="audio/mpeg",
-        filename="mobile-stream.mp3",
-        headers={"Cache-Control": "public, max-age=86400"},
+        path=segment_path,
+        media_type="video/mp2t",
+        filename=segment_name,
+        headers={
+            "Cache-Control": "public, max-age=86400",
+        },
     )
 
+
+@router.post("/tracks/{track_id}/hls/prepare", tags=["tracks"])
+def prepare_hls_stream(
+    track_id: int,
+    quality: str = Query("all"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    track = db.query(Track).filter(Track.id == track_id).first()
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    file_path = Path(track.file_path)
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    requested_qualities = (
+        [variant["quality"] for variant in HLS_QUALITY_VARIANTS]
+        if quality == "all"
+        else [quality]
+    )
+
+    requested_qualities = [
+        "aac_128" if requested_quality == "mp3_128" else requested_quality
+        for requested_quality in requested_qualities
+    ]
+
+    prepared = []
+
+    for requested_quality in requested_qualities:
+        profile = MOBILE_STREAM_PROFILES.get(requested_quality)
+
+        if not profile or profile.get("passthrough"):
+            raise HTTPException(status_code=400, detail="Invalid HLS quality")
+
+        playlist_path = ensure_hls_stream_cache(
+            track=track,
+            file_path=file_path,
+            profile=profile,
+            quality=requested_quality,
+        )
+
+        prepared.append(
+            {
+                "quality": requested_quality,
+                "playlist": str(playlist_path),
+            }
+        )
+    if quality != "all":
+        threading.Thread(
+            target=prepare_hls_variants_in_background,
+            args=(track.id, str(file_path)),
+            daemon=True,
+        ).start()
+    return {
+        "prepared": True,
+        "track_id": track.id,
+        "qualities": prepared,
+    }
 
 @router.post(
     "/tracks/{track_id}/musicbrainz-recording",
