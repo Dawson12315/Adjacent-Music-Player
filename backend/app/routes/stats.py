@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.dependencies.auth import get_current_user
 from app.models.track import Track
+from app.models.listening_event import ListeningEvent
+from app.models.track_genre import TrackGenre
 from app.models.track_user_stats import TrackUserStats
 from app.models.user import User
 from app.schemas.track import TrackResponse
@@ -104,9 +107,30 @@ def stats_overview(
         .all()
     )
 
+    top_genres = (
+        db.query(
+            TrackGenre.genre.label("name"),
+            func.count(ListeningEvent.id).label("play_count"),
+        )
+        .join(Track, Track.id == TrackGenre.track_id)
+        .join(ListeningEvent, ListeningEvent.track_id == Track.id)
+        .filter(
+            ListeningEvent.user_id == current_user.id,
+            ListeningEvent.event_type == "play_started",
+        )
+        .group_by(TrackGenre.genre)
+        .order_by(func.count(ListeningEvent.id).desc())
+        .limit(limit)
+        .all()
+    )
+
     return {
         "top_played": [build_track_response(track) for track in top_played],
         "most_liked": [build_track_response(track) for track in most_liked],
         "most_skipped": [build_track_response(track) for track in most_skipped],
         "recently_played": [build_track_response(track) for track in recently_played],
+        "top_genres": [
+            {"name": genre.name, "play_count": genre.play_count}
+            for genre in top_genres
+        ],
     }
