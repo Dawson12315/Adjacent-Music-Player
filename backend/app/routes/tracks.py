@@ -741,6 +741,8 @@ def list_tracks(
     limit: int | None = Query(None, ge=1, le=500),
     offset: int = Query(0, ge=0),
     search: str | None = Query(None),
+    sort_by: str = Query("artist", pattern="^(title|album|artist)$"),
+    section: str | None = Query(None, pattern="^(\\$#|[A-Za-z])$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -762,8 +764,44 @@ def list_tracks(
 
     total = query.count()
 
-    query = query.order_by(Track.artist.asc(), Track.album.asc(), Track.title.asc())
+    sort_columns = {
+        "title": [
+            func.lower(Track.title),
+            func.lower(Track.artist),
+            func.lower(Track.album),
+            Track.id,
+        ],
+        "album": [
+            func.lower(Track.album),
+            func.lower(Track.artist),
+            func.lower(Track.title),
+            Track.id,
+        ],
+        "artist": [
+            func.lower(Track.artist),
+            func.lower(Track.album),
+            func.lower(Track.title),
+            Track.id,
+        ],
+    }
 
+    query = query.order_by(*sort_columns.get(sort_by, sort_columns["artist"]))
+
+    if section:
+        sort_field = {
+            "title": Track.title,
+            "album": Track.album,
+            "artist": Track.artist,
+        }.get(sort_by, Track.artist)
+    
+        sort_value = func.lower(func.coalesce(sort_field, ""))
+        normalized_section = section.lower()
+    
+        if normalized_section == "$#":
+            offset = 0
+        else:
+            offset = query.filter(sort_value < normalized_section).count()
+    
     if limit is not None:
         query = query.offset(offset).limit(limit)
 

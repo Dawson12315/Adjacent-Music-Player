@@ -2,7 +2,7 @@ import os
 import shutil
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
@@ -134,6 +134,58 @@ def list_mobile_artists(
         for row in artist_rows
         if row.artist_name
     ]
+
+
+# New endpoint: /mobile/artists/section-index
+@router.get("/mobile/artists/section-index", tags=["mobile"])
+def get_mobile_artist_section_index(
+    section: str = Query(..., pattern="^(\\$#|[A-Za-z])$"),
+    search: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    normalized_section = section.casefold()
+    normalized_search = search.strip().casefold() if search else None
+
+    query = (
+        db.query(TrackArtist.artist_name.label("artist_name"))
+        .filter(TrackArtist.artist_name.isnot(None))
+        .group_by(TrackArtist.artist_name)
+    )
+
+    if normalized_search:
+        query = query.filter(func.lower(TrackArtist.artist_name).contains(normalized_search))
+
+    artists = [
+        row.artist_name
+        for row in query.order_by(func.lower(TrackArtist.artist_name)).all()
+        if row.artist_name
+    ]
+
+    target_index = None
+    target_artist = None
+
+    for index, artist_name in enumerate(artists):
+        first_character = artist_name.strip()[:1].casefold()
+
+        if normalized_section == "$#":
+            
+            if not first_character.isalpha():
+                target_index = index
+                target_artist = artist_name
+                break
+        elif first_character == normalized_section:
+            target_index = index
+            target_artist = artist_name
+            break
+
+    return {
+        "section": section.upper() if normalized_section != "$#" else "$#",
+        "index": target_index,
+        "artist_name": target_artist,
+        "total": len(artists),
+        "found": target_index is not None,
+    }
 
 
 @router.get("/mobile/artists/{artist_name:path}/tracks", response_model=list[TrackResponse], tags=["mobile"])
