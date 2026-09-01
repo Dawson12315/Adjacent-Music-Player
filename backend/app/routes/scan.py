@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, Query
 
 from app.config import settings
@@ -7,6 +8,9 @@ from app.models.user import User
 from app.schemas.scan import ScanResponse
 from app.services.job_locking import release_job_lock, try_acquire_job_lock
 from app.services.scanner import scan_directory
+
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -23,9 +27,9 @@ def run_scan(
         return {"added": 0}
 
     try:
-        print(f"Manual scan requested by {current_user.username} with limit={limit}")
+        logger.info(f"Manual scan requested by {current_user.username} with limit={limit}")
         result = scan_directory(settings.music_library_path, limit=limit)
-        print(f"Manual scan finished. Added {result['added']} tracks.")
+        logger.info(f"Manual scan finished. Added {result['added']} tracks.")
         return result
     finally:
         release_job_lock(db, "scan")

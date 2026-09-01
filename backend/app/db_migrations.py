@@ -381,6 +381,57 @@ def run_simple_migrations():
             )
         )
 
+        # Stats queries filter by user and event type and then group or order
+        # by time; SQLite uses one index per table access, so the single-column
+        # indexes above degrade into scans as the event log grows.
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_listening_events_user_type_time
+                ON listening_events(user_id, event_type, created_at)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_listening_events_track_type
+                ON listening_events(track_id, event_type)
+                """
+            )
+        )
+
+        # The track list always sorts on lower(column); expression indexes let
+        # those ORDER BY and section-jump count queries walk an index instead
+        # of sorting 36k rows per request.
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_tracks_lower_artist
+                ON tracks(lower(artist))
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_tracks_lower_album
+                ON tracks(lower(album))
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_tracks_lower_title
+                ON tracks(lower(title))
+                """
+            )
+        )
+
         connection.execute(
             text(
                 """

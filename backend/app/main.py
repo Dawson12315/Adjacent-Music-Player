@@ -1,3 +1,4 @@
+import logging
 import os
 
 from fastapi import FastAPI
@@ -31,6 +32,14 @@ from app.services.scheduler import start_scheduler
 
 from app.routes import recommendation_evaluation
 
+
+# Application loggers (uvicorn configures only its own); INFO keeps job and
+# transcode progress visible without the per-request noise the old print()
+# calls produced.
+logging.basicConfig(
+    level=logging.DEBUG if settings.debug else logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 UPLOADS_DIR = "data/uploads"
 LEGACY_UPLOADS_DIR = "app/uploads"
@@ -87,12 +96,16 @@ if os.path.exists(LEGACY_UPLOADS_DIR):
     )
 
 
+# The Vite dev server origin is a development convenience only; a production
+# API should trust exactly the origin it was configured with.
+cors_origins = [settings.frontend_origin]
+
+if not settings.is_production and "http://localhost:5173" not in cors_origins:
+    cors_origins.append("http://localhost:5173")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        settings.frontend_origin,
-        "http://localhost:5173",
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
