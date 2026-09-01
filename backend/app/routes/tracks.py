@@ -37,6 +37,7 @@ from app.schemas.track_edit import TrackUpdate
 from app.services.auth import get_user_by_id
 from app.services.lastfm import scrobble_track, update_now_playing
 from app.services.metadata_normalizer import normalize_genre_list
+from app.services.recommendations.rec_cache import invalidate_library_caches
 from app.services.musicbrainz import find_recording_mbid
 from app.utils.artist_normalization import normalize_artist_name
 
@@ -1382,6 +1383,7 @@ def purge_tracks(
     db.query(Track).delete()
 
     db.commit()
+    invalidate_library_caches()
 
     return {
         "message": "All stored tracks purged",

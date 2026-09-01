@@ -13,6 +13,7 @@ from app.models.track_genre import TrackGenre
 from app.models.track_lastfm_similarity import TrackLastfmSimilarity
 from app.models.track_user_stats import TrackUserStats
 from app.config import settings
+from app.services.recommendations.rec_cache import invalidate_library_caches
 from app.services.scanner import scan_directory
 
 # Keeps each IN (...) list under SQLite's bound-parameter ceiling.
@@ -109,6 +110,7 @@ def cleanup_missing_tracks(db: Session) -> dict:
         ).delete(synchronize_session=False)
 
     db.commit()
+    invalidate_library_caches()
 
     return {"removed": removed_count}
 

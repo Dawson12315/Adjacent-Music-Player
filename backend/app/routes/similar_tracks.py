@@ -37,6 +37,7 @@ def get_similar_tracks(
         seed_track_ids=[track_id],
         playlist_id=None,
         limit=SIMILAR_TRACKS_LIMIT,
+        user_id=current_user.id,
     )
 
     recommended_track_ids = [recommendation.id for recommendation in recommendations]

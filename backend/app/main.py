@@ -130,6 +130,45 @@ def on_startup():
 
     start_scheduler()
 
+    _rebuild_cooccurrence_if_empty()
+
+
+def _rebuild_cooccurrence_if_empty():
+    """Self-heal: the table is derived data, so an empty table alongside
+    existing listening/playlist history just means the rebuild never ran."""
+    import threading
+
+    from sqlalchemy import func as sa_func
+
+    from app.db import SessionLocal
+    from app.models.listening_event import ListeningEvent
+    from app.models.playlist_track import PlaylistTrack
+    from app.models.track_cooccurrence import TrackCooccurrence
+    from app.services.recommendations.cooccurrence_builder import (
+        rebuild_track_cooccurrence_standalone,
+    )
+
+    db = SessionLocal()
+    try:
+        has_pairs = db.query(TrackCooccurrence.id).first() is not None
+        if has_pairs:
+            return
+
+        has_source_data = (
+            db.query(sa_func.count(ListeningEvent.id)).scalar() or 0
+        ) > 0 or (db.query(sa_func.count(PlaylistTrack.id)).scalar() or 0) > 1
+
+        if not has_source_data:
+            return
+    finally:
+        db.close()
+
+    threading.Thread(
+        target=rebuild_track_cooccurrence_standalone,
+        name="cooccurrence-rebuild",
+        daemon=True,
+    ).start()
+
 
 app.include_router(health_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")

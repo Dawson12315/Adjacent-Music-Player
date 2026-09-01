@@ -82,6 +82,18 @@ export function HomeView() {
         tracks={home.forYou}
         artworkFor={artworkFor}
         onPlay={(track) => playFrom(track, home.forYou, "recommendation")}
+        action={
+          <button
+            className="btn btn--icon btn--ghost"
+            type="button"
+            aria-label="Refresh recommendations"
+            title="Refresh recommendations"
+            onClick={home.refreshForYou}
+            disabled={home.isLoadingForYou}
+          >
+            <Icon name="refresh" size={15} />
+          </button>
+        }
       />
 
       <Rail
@@ -184,7 +196,7 @@ export function HomeView() {
 }
 
 /** A horizontal shelf of track cards. */
-function Rail({ title, subtitle, icon, tracks, isLoading, artworkFor, onPlay, showCount }) {
+function Rail({ title, subtitle, icon, tracks, isLoading, artworkFor, onPlay, showCount, action }) {
   if (!isLoading && tracks.length === 0) {
     return null;
   }
@@ -196,6 +208,7 @@ function Rail({ title, subtitle, icon, tracks, isLoading, artworkFor, onPlay, sh
           {icon && <Icon name={icon} size={16} />} {title}
         </h2>
         {subtitle && <span className="section-head__link">{subtitle}</span>}
+        {action}
       </div>
 
       {isLoading ? (

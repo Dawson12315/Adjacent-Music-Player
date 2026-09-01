@@ -13,6 +13,9 @@ from app.services.recommendations.retrievers.lastfm_artist_retriever import (
 from app.services.recommendations.retrievers.lastfm_track_retriever import (
     retrieve_lastfm_track_candidates,
 )
+from app.services.recommendations.retrievers.recent_additions_retriever import (
+    retrieve_recent_addition_candidates,
+)
 from app.services.recommendations.types import RetrievedCandidate
 
 
@@ -37,6 +40,8 @@ def retrieve_candidates(
     limit: int = 400,
     refresh: int = 0,
     playlist_id: int | None = None,
+    user_id: int | None = None,
+    include_recent_additions: bool = False,
 ):
     genre_candidates = retrieve_genre_candidates(
         db=db,
@@ -58,6 +63,7 @@ def retrieve_candidates(
         playlist_track_ids=playlist_track_ids,
         playlist_profile=playlist_profile,
         limit=max(limit, 150),
+        user_id=user_id,
     )
 
     lastfm_artist_candidates = retrieve_lastfm_artist_candidates(
@@ -67,6 +73,7 @@ def retrieve_candidates(
         limit=min(max(limit, 200), 300),
         refresh=refresh,
         playlist_id=playlist_id,
+        user_id=user_id,
     )
 
     lastfm_track_candidates = retrieve_lastfm_track_candidates(
@@ -75,12 +82,21 @@ def retrieve_candidates(
         limit=min(max(limit, 200), 300),
     )
 
+    recent_candidates = {}
+    if include_recent_additions:
+        recent_candidates = retrieve_recent_addition_candidates(
+            db=db,
+            playlist_track_ids=playlist_track_ids,
+            playlist_profile=playlist_profile,
+        )
+
     merged = merge_retrieved_candidates(
         genre_candidates,
         cooccurrence_candidates,
         behavior_candidates,
         lastfm_artist_candidates,
         lastfm_track_candidates,
+        recent_candidates,
     )
 
     sorted_candidates = sorted(

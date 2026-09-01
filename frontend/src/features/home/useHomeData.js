@@ -22,6 +22,10 @@ export function useHomeData() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingForYou, setIsLoadingForYou] = useState(true);
 
+  // Each bump reruns the recommendation pipeline with exploration enabled, so
+  // "show me different ones" is a button instead of a page reload.
+  const [forYouRefresh, setForYouRefresh] = useState(0);
+
   useEffect(() => {
     const controller = new AbortController();
     const { signal } = controller;
@@ -47,8 +51,18 @@ export function useHomeData() {
       if (!signal.aborted) setIsLoading(false);
     });
 
-    // Deliberately not awaited alongside the rest.
-    getForYou({ limit: 12, signal })
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+
+    setIsLoadingForYou(true);
+
+    // Deliberately not awaited alongside the rest — the recommendation
+    // pipeline is much slower than the stats rails.
+    getForYou({ limit: 12, refresh: forYouRefresh, signal })
       .then((tracks) => {
         if (!signal.aborted) setData((previous) => ({ ...previous, forYou: tracks }));
       })
@@ -58,9 +72,11 @@ export function useHomeData() {
       });
 
     return () => controller.abort();
-  }, []);
+  }, [forYouRefresh]);
 
-  return { ...data, isLoading, isLoadingForYou };
+  const refreshForYou = () => setForYouRefresh((value) => value + 1);
+
+  return { ...data, isLoading, isLoadingForYou, refreshForYou };
 }
 
 /** "Good morning" / "Good afternoon" / "Good evening", by local clock. */

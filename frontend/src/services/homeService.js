@@ -7,10 +7,11 @@ import { normalizeTracks } from "./normalize";
  *
  * This runs the full retrieval pipeline, so it is slow enough to want a skeleton.
  */
-export async function getForYou({ limit = 20, signal } = {}) {
+export async function getForYou({ limit = 20, refresh = 0, signal } = {}) {
   const data = await apiClient.get("/api/recommendations/for-you", {
-    params: { limit },
+    params: { limit, refresh: refresh || undefined },
     signal,
+    noStore: refresh > 0,
   });
 
   return normalizeTracks(data, { metadataComplete: true });

@@ -141,6 +141,17 @@ def _sync_scheduler_jobs():
         db.close()
 
 
+def _run_cooccurrence_rebuild_job():
+    from app.services.recommendations.cooccurrence_builder import (
+        rebuild_track_cooccurrence_standalone,
+    )
+
+    try:
+        rebuild_track_cooccurrence_standalone()
+    except Exception as error:
+        logger.warning(f"Scheduled co-occurrence rebuild error: {error}")
+
+
 def start_scheduler():
     global _scheduler
 
@@ -149,6 +160,20 @@ def start_scheduler():
 
     _scheduler = BackgroundScheduler()
     _scheduler.start()
+
+    # Not settings-gated: co-occurrence is derived data that silently rots
+    # when listening or playlists change, and the rebuild is cheap.
+    _scheduler.add_job(
+        _run_cooccurrence_rebuild_job,
+        trigger="cron",
+        hour=3,
+        minute=45,
+        id="scheduled_cooccurrence_rebuild",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     _sync_scheduler_jobs()
 
 

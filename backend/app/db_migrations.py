@@ -248,6 +248,42 @@ def run_simple_migrations():
             )
         )
 
+        # Genre retrieval works backwards from families to an IN-query over
+        # genre strings; both columns need an index for that to be cheap.
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_track_genres_genre
+                ON track_genres(genre)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_tracks_genre
+                ON tracks(genre)
+                """
+            )
+        )
+
+        # Recommendation evaluation history — one row per offline eval run so
+        # tuning changes can be compared over time.
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS recommendation_eval_runs (
+                    id INTEGER PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    params_json TEXT NOT NULL,
+                    metrics_json TEXT NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
         connection.execute(
             text(
                 """
