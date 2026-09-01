@@ -20,12 +20,16 @@ from app.dependencies.auth import get_current_user, require_admin
 from app.models.album_artwork import AlbumArtwork
 from app.models.app_setting import AppSetting
 from app.models.artist_artwork import ArtistArtwork
+from app.models.listening_event import ListeningEvent
 from app.models.playback_queue_item import PlaybackQueueItem
 from app.models.playback_session import PlaybackSession
 from app.models.playlist_track import PlaylistTrack
 from app.models.track import Track
 from app.models.track_artist import TrackArtist
+from app.models.track_cooccurrence import TrackCooccurrence
 from app.models.track_genre import TrackGenre
+from app.models.track_lastfm_similarity import TrackLastfmSimilarity
+from app.models.track_user_stats import TrackUserStats
 from app.models.user import User
 from app.routes.albums import normalize_album_name
 from app.schemas.track import TrackResponse
@@ -1350,16 +1354,29 @@ def purge_tracks(
 ):
     deleted_tracks = db.query(Track).count()
 
+    # Every table referencing tracks is cleared explicitly, in bulk statements
+    # that execute immediately (per-object ORM assignments sat unflushed in
+    # this autoflush=False session and tripped FKs). Explicit ordering matters
+    # for another reason too: whether a table's FK carries ON DELETE CASCADE
+    # depends on which schema vintage created it, so cascades cannot be
+    # trusted on databases that predate the current migrations.
     db.query(PlaylistTrack).delete()
     db.query(PlaybackQueueItem).delete()
 
-    session = db.query(PlaybackSession).first()
-    if session:
-        session.current_track_id = None
-        session.queue_index = -1
-        session.current_time_seconds = 0
-        session.is_playing = False
+    db.query(PlaybackSession).update(
+        {
+            PlaybackSession.current_track_id: None,
+            PlaybackSession.queue_index: -1,
+            PlaybackSession.current_time_seconds: 0,
+            PlaybackSession.is_playing: False,
+        },
+        synchronize_session=False,
+    )
 
+    db.query(TrackLastfmSimilarity).delete()
+    db.query(TrackCooccurrence).delete()
+    db.query(TrackUserStats).delete()
+    db.query(ListeningEvent).delete()
     db.query(TrackArtist).delete()
     db.query(TrackGenre).delete()
     db.query(Track).delete()
