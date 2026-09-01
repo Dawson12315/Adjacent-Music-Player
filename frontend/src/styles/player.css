@@ -128,9 +128,18 @@
   color: var(--blue-100);
 }
 
-/* The liked heart is the one control that turns Duck Yellow */
+/* The like control is a duck: grey until liked, then Duck Yellow with a glow. */
 .player-bar__like-button.player-bar__icon-button--active {
   color: var(--yellow);
+}
+
+.player-bar__like-button.player-bar__icon-button--active svg {
+  filter: drop-shadow(0 0 3px var(--yellow-glow)) drop-shadow(0 0 7px var(--yellow-glow));
+}
+
+/* Outranks the generic --active:hover, which would flip the duck blue. */
+.player-bar__like-button.player-bar__icon-button--active:hover {
+  color: var(--yellow-300);
 }
 
 .player-bar__play-button {

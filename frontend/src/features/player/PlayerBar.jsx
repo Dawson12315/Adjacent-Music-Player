@@ -94,7 +94,7 @@ export function PlayerBar() {
             onClick={toggleLike}
             disabled={!currentTrack}
           >
-            <Icon name={isLiked ? "heartFilled" : "heart"} size={18} />
+            <Icon name="duck" size={20} />
           </button>
 
           <button

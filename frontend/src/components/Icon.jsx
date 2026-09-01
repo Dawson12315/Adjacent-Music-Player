@@ -136,6 +136,21 @@ const icons = {
       d="M12 19.5S4.5 15 4.5 9.9A3.9 3.9 0 0 1 12 8a3.9 3.9 0 0 1 7.5 1.9c0 5.1-7.5 9.6-7.5 9.6Z"
     />
   ),
+  /* The DuckMark silhouette as a monochrome glyph — the like control wears it.
+     The eye is a real evenodd cutout rather than a background-coloured dot, so
+     the glyph holds up on any surface and under a glow. */
+  duck: (
+    <g transform="translate(0.7 0) scale(0.72)">
+      <path {...SOLID} d="M3.4 20.6 1 17.4l4.2.5Z" />
+      <path {...SOLID} d="M4 20.8c0-3.5 4-6 9-6s9 2.5 9 6-4 6-9 6-9-2.5-9-6Z" />
+      <path
+        {...SOLID}
+        fillRule="evenodd"
+        d="M13.3 12.4a5.9 5.9 0 1 0 11.8 0 5.9 5.9 0 1 0-11.8 0Zm6.05-1.4a1.25 1.25 0 1 0 2.5 0 1.25 1.25 0 1 0-2.5 0Z"
+      />
+      <path {...SOLID} d="m24.4 10.9 6 1.7-6 2Z" />
+    </g>
+  ),
 
   /* ---------- interface ---------- */
   search: (
