@@ -34,9 +34,9 @@ def settings_response(settings: AppSetting) -> dict:
         "scan_enabled": settings.scan_enabled,
         "scan_time": settings.scan_time,
         "lastfm_api_key": settings.lastfm_api_key,
-        "lastfm_api_secret": settings.lastfm_api_secret,
+        "lastfm_api_secret_set": bool(settings.lastfm_api_secret),
         "lastfm_username": settings.lastfm_username,
-        "lastfm_session_key": settings.lastfm_session_key,
+        "lastfm_session_key_set": bool(settings.lastfm_session_key),
         "lastfm_enrichment_enabled": settings.lastfm_enrichment_enabled,
         "lastfm_enrichment_time": settings.lastfm_enrichment_time,
     }
@@ -90,11 +90,13 @@ def update_settings(
     settings.scan_enabled = payload.scan_enabled
     settings.scan_time = payload.scan_time
     settings.lastfm_api_key = payload.lastfm_api_key
-    settings.lastfm_api_secret = payload.lastfm_api_secret
     settings.lastfm_username = payload.lastfm_username
-    settings.lastfm_session_key = payload.lastfm_session_key
     settings.lastfm_enrichment_enabled = payload.lastfm_enrichment_enabled
     settings.lastfm_enrichment_time = payload.lastfm_enrichment_time
+
+    # Write-only secret: None means "keep", "" means "clear", anything else replaces.
+    if payload.lastfm_api_secret is not None:
+        settings.lastfm_api_secret = payload.lastfm_api_secret or None
 
     db.commit()
     db.refresh(settings)

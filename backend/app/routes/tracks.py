@@ -1,6 +1,7 @@
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import mimetypes
+import re
 import subprocess
 import threading
 import time
@@ -29,6 +30,7 @@ from app.models.user import User
 from app.routes.albums import normalize_album_name
 from app.schemas.track import TrackResponse
 from app.schemas.track_edit import TrackUpdate
+from app.services.auth import get_user_by_id
 from app.services.lastfm import scrobble_track, update_now_playing
 from app.services.metadata_normalizer import normalize_genre_list
 from app.services.musicbrainz import find_recording_mbid
@@ -36,7 +38,9 @@ from app.utils.artist_normalization import normalize_artist_name
 
 router = APIRouter()
 
-STREAM_TOKEN_EXPIRE_SECONDS = 60 * 60 * 12
+# One hour covers any single listening session for a track; tokens ride in URLs
+# (an HLS constraint), so a leaked URL should go stale quickly.
+STREAM_TOKEN_EXPIRE_SECONDS = 60 * 60
 
 MAX_TRACKS_BY_IDS = 500
 
@@ -156,6 +160,8 @@ MOBILE_CACHE_LOCKS_GUARD = threading.Lock()
 # HLS streaming constants
 HLS_SEGMENT_DURATION_SECONDS = 4
 HLS_CACHE_ROOT = Path("data/hls_cache")
+# Matches ffmpeg's -hls_segment_filename output plus the playlist itself.
+HLS_SEGMENT_NAME_PATTERN = re.compile(r"segment_\d{5}\.ts|index\.m3u8")
 HLS_STARTUP_QUALITY = "aac_320"
 HLS_DEFAULT_QUALITY = "aac_320"
 HLS_QUALITY_VARIANTS = [
@@ -645,7 +651,25 @@ def create_stream_token(track_id: int, user_id: int) -> str:
     )
 
 
-def verify_stream_token(token: str, track_id: int) -> bool:
+def get_stream_token(request: Request) -> str | None:
+    """Prefer header transport; keep the query param for HLS playlist URLs.
+
+    Playlist rewriting has to embed the token in segment URLs (media players
+    fetch them without custom headers), but clients that can set headers should
+    keep tokens out of URLs, logs, and referrers.
+    """
+    header_token = request.headers.get("x-stream-token")
+    if header_token:
+        return header_token
+
+    authorization = request.headers.get("authorization")
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+
+    return request.query_params.get("token")
+
+
+def verify_stream_token(token: str, track_id: int, db: Session) -> bool:
     try:
         payload = jwt.decode(
             token,
@@ -661,7 +685,16 @@ def verify_stream_token(token: str, track_id: int) -> bool:
     if payload.get("track_id") != track_id:
         return False
 
-    return True
+    # A token must not outlive its user: deactivating an account revokes
+    # streaming immediately instead of at token expiry.
+    try:
+        user_id = int(payload.get("sub", ""))
+    except (TypeError, ValueError):
+        return False
+
+    user = get_user_by_id(db, user_id)
+
+    return bool(user and user.is_active)
 
 
 def get_album_artwork_path(db: Session, album_name: str | None) -> str | None:
@@ -944,9 +977,9 @@ def mobile_stream_track(
     quality: str = Query("mp3_320"),
     db: Session = Depends(get_db),
 ):
-    token = request.query_params.get("token")
+    token = get_stream_token(request)
 
-    if not token or not verify_stream_token(token, track_id):
+    if not token or not verify_stream_token(token, track_id, db):
         raise HTTPException(status_code=401, detail="Invalid or expired stream token")
 
     profile = MOBILE_STREAM_PROFILES.get(quality)
@@ -1000,11 +1033,11 @@ def get_hls_master_playlist(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    token = request.query_params.get("token")
+    token = get_stream_token(request)
     fast_start_only = request.query_params.get("fast_start") == "1"
     requested_hls_quality = get_requested_hls_quality(request)
 
-    if not token or not verify_stream_token(token, track_id):
+    if not token or not verify_stream_token(token, track_id, db):
         raise HTTPException(status_code=401, detail="Invalid or expired stream token")
 
     track = db.query(Track).filter(Track.id == track_id).first()
@@ -1068,10 +1101,10 @@ def get_hls_quality_playlist(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    token = request.query_params.get("token")
+    token = get_stream_token(request)
     fast_start_only = request.query_params.get("fast_start") == "1"
 
-    if not token or not verify_stream_token(token, track_id):
+    if not token or not verify_stream_token(token, track_id, db):
         raise HTTPException(status_code=401, detail="Invalid or expired stream token")
 
     profile = MOBILE_STREAM_PROFILES.get(quality)
@@ -1133,11 +1166,20 @@ def get_hls_segment(
     quality: str,
     segment_name: str,
     request: Request,
+    db: Session = Depends(get_db),
 ):
-    token = request.query_params.get("token")
+    token = get_stream_token(request)
 
-    if not token or not verify_stream_token(token, track_id):
+    if not token or not verify_stream_token(token, track_id, db):
         raise HTTPException(status_code=401, detail="Invalid or expired stream token")
+
+    # Both values become path components; only ffmpeg-generated names are valid.
+    profile = MOBILE_STREAM_PROFILES.get(quality)
+    if not profile or profile.get("passthrough"):
+        raise HTTPException(status_code=400, detail="Invalid HLS quality")
+
+    if not HLS_SEGMENT_NAME_PATTERN.fullmatch(segment_name):
+        raise HTTPException(status_code=404, detail="HLS segment not found")
 
     segment_path = (
         HLS_CACHE_ROOT

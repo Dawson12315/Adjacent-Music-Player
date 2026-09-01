@@ -183,10 +183,15 @@ export function LastfmPanel({ settings, updateField, toggleField }) {
             <span className="field__label">Last.fm API secret</span>
             <input
               className="input"
-              type="text"
+              type="password"
+              autoComplete="off"
               value={settings.lastfm_api_secret}
               onChange={(event) => updateField("lastfm_api_secret", event.target.value)}
-              placeholder="Enter Last.fm API secret"
+              placeholder={
+                settings.lastfm_api_secret_set
+                  ? "Saved — enter a new secret to replace it"
+                  : "Enter Last.fm API secret"
+              }
             />
           </label>
         </div>
@@ -205,7 +210,7 @@ export function LastfmPanel({ settings, updateField, toggleField }) {
             disabled={
               isConnecting ||
               !settings.lastfm_api_key.trim() ||
-              !settings.lastfm_api_secret.trim()
+              !(settings.lastfm_api_secret.trim() || settings.lastfm_api_secret_set)
             }
           >
             {isConnecting ? "Connecting..." : "Connect Last.fm"}

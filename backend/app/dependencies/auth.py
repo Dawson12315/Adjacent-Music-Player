@@ -25,7 +25,15 @@ def get_current_user(
             detail="Invalid authentication token",
         )
 
-    user = get_user_by_id(db, int(payload["sub"]))
+    try:
+        user_id = int(payload["sub"])
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+        )
+
+    user = get_user_by_id(db, user_id)
 
     if not user or not user.is_active:
         raise HTTPException(
