@@ -271,6 +271,11 @@ export function PlayerProvider({ children }) {
 
     const wasLiked = isLiked;
 
+    // Optimistic: the heart flips instantly and reverts only if the server
+    // disagrees. The round trip can be slow (a running library scan holds the
+    // database's write lock in bursts) and the icon must not wait on it.
+    setIsLiked(!wasLiked);
+
     try {
       const liked = wasLiked
         ? await playlistsService.unlikeTrack(currentTrack.id)
@@ -279,6 +284,7 @@ export function PlayerProvider({ children }) {
       setIsLiked(liked);
       events.likeChanged(currentTrack, !wasLiked);
     } catch (error) {
+      setIsLiked(wasLiked);
       notify(error.message || "Could not update your liked songs.");
     }
   }, [currentTrack, isLiked, events, notify]);

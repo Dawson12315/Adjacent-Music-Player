@@ -37,11 +37,51 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
 
     count = 0
     files_seen = 0
-    pending_in_batch = 0
+    pending_batch: list[dict] = []
 
     def report_progress():
         if progress_callback:
             progress_callback(files_seen=files_seen, added=count)
+
+    def write_batch():
+        """Insert one gathered batch inside a short-lived transaction.
+
+        Metadata extraction happens over what is usually a network mount and
+        takes seconds per file. Interleaving it with the inserts held SQLite's
+        single write lock for the entire batch — minutes at a time — during
+        which every user action that writes (likes, playlist edits, listening
+        events) sat blocked. Gather first, then write in one quick burst.
+        """
+        nonlocal count
+
+        for prepared in pending_batch:
+            track = Track(**prepared["track"])
+            db.add(track)
+            db.flush()
+
+            for index, artist_name in enumerate(prepared["artists"]):
+                db.add(
+                    TrackArtist(
+                        track_id=track.id,
+                        artist_name=artist_name,
+                        position=index,
+                    )
+                )
+
+            for genre_name in prepared["genres"]:
+                db.add(
+                    TrackGenre(
+                        track_id=track.id,
+                        genre=genre_name,
+                    )
+                )
+
+        db.commit()
+        count += len(pending_batch)
+        pending_batch.clear()
+
+        logger.info("Scan progress: %s tracks added", count)
+        report_progress()
 
     try:
         # One query instead of one per file; 36k existence SELECTs was most of
@@ -94,54 +134,34 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
             primary_genre = normalized_genres[0] if normalized_genres else normalize_genre(metadata.get("genre"))
             artist_list = normalize_artist_list(resolved_artist_value)
 
-            track = Track(
-                title=final_title,
-                artist=final_artist,
-                album=final_album,
-                genre=primary_genre,
-                raw_title=raw_title,
-                raw_artist=raw_artist,
-                raw_album=raw_album,
-                raw_genre=raw_genre,
-                file_path=metadata["file_path"],
-                duration_seconds=metadata.get("duration_seconds"),
+            pending_batch.append(
+                {
+                    "track": {
+                        "title": final_title,
+                        "artist": final_artist,
+                        "album": final_album,
+                        "genre": primary_genre,
+                        "raw_title": raw_title,
+                        "raw_artist": raw_artist,
+                        "raw_album": raw_album,
+                        "raw_genre": raw_genre,
+                        "file_path": metadata["file_path"],
+                        "duration_seconds": metadata.get("duration_seconds"),
+                    },
+                    "artists": artist_list,
+                    "genres": normalized_genres,
+                }
             )
-
-            db.add(track)
-            db.flush()
-
-            for index, artist_name in enumerate(artist_list):
-                db.add(
-                    TrackArtist(
-                        track_id=track.id,
-                        artist_name=artist_name,
-                        position=index,
-                    )
-                )
-
-            for genre_name in normalized_genres:
-                db.add(
-                    TrackGenre(
-                        track_id=track.id,
-                        genre=genre_name,
-                    )
-                )
-
             known_file_paths.add(str(file_path))
-            count += 1
-            pending_in_batch += 1
 
-            if pending_in_batch >= SCAN_COMMIT_BATCH_SIZE:
-                db.commit()
-                pending_in_batch = 0
-                logger.info("Scan progress: %s tracks added", count)
-                report_progress()
+            if len(pending_batch) >= SCAN_COMMIT_BATCH_SIZE:
+                write_batch()
 
-            if count >= limit:
+            if count + len(pending_batch) >= limit:
                 break
 
-        if pending_in_batch:
-            db.commit()
+        if pending_batch:
+            write_batch()
 
         report_progress()
         logger.info("Scan complete. Added %s tracks.", count)

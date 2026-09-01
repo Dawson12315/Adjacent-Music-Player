@@ -1,15 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { MetadataPicker } from "./MetadataPicker";
 import { Modal } from "../../components/Modal";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { usePlayer } from "../../contexts/PlayerContext";
-import { updateTrack } from "../../services/tracksService";
+import { TRACK_UPDATED_EVENT } from "../library/useTrackFeed";
+import { getArtistTracks, updateTrack } from "../../services/tracksService";
 
 export function EditTrackModal() {
-  const { editingTrack, closeTrackEditor, artists, albums, tracks, applyTrackUpdate } =
-    useLibrary();
+  const { editingTrack, closeTrackEditor, artists } = useLibrary();
   const { replaceTrack } = usePlayer();
   const { notify } = useNotifications();
 
@@ -19,16 +19,38 @@ export function EditTrackModal() {
   const [genres, setGenres] = useState((editingTrack?.genres || []).join(", "));
   const [isSaving, setIsSaving] = useState(false);
 
-  // Only albums that already belong to the selected artist are offered.
-  const artistAlbums = useMemo(
-    () =>
-      albums.filter((candidate) =>
-        tracks.some(
-          (track) => (track.artist || "") === artist && (track.album || "") === candidate,
-        ),
-      ),
-    [albums, tracks, artist],
-  );
+  /**
+   * Only albums that already belong to the selected artist are offered. The
+   * library no longer holds every track in memory, so this asks the server
+   * for the artist's tracks and derives the album list — previously this read
+   * a `tracks` array that no longer exists in LibraryContext, which crashed
+   * the whole page the moment the editor opened.
+   */
+  const [artistAlbums, setArtistAlbums] = useState([]);
+
+  useEffect(() => {
+    const cleanedArtist = artist.trim();
+
+    if (!cleanedArtist) {
+      setArtistAlbums([]);
+      return undefined;
+    }
+
+    const controller = new AbortController();
+
+    getArtistTracks(cleanedArtist, { signal: controller.signal })
+      .then((rows) => {
+        const unique = [...new Set(rows.map((row) => row.album).filter(Boolean))];
+        setArtistAlbums(unique);
+      })
+      .catch((error) => {
+        if (error.name !== "AbortError") {
+          setArtistAlbums([]);
+        }
+      });
+
+    return () => controller.abort();
+  }, [artist]);
 
   if (!editingTrack) {
     return null;
@@ -72,8 +94,14 @@ export function EditTrackModal() {
         ...(editingTrack.metadataComplete ? { genres: parsedGenres } : {}),
       });
 
-      applyTrackUpdate(updated);
+      // The player queue and any mounted track feed patch themselves in
+      // place; the modal has no direct handle on either.
       replaceTrack(updated);
+      window.dispatchEvent(
+        new CustomEvent(TRACK_UPDATED_EVENT, { detail: updated }),
+      );
+
+      notify("Track info updated.");
       closeTrackEditor();
     } catch (error) {
       notify(error.message || "Failed to update track info.");

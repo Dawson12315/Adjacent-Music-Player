@@ -6,6 +6,9 @@ import * as tracksService from "../../services/tracksService";
 const PAGE_SIZE = 60;
 const SEARCH_DEBOUNCE_MS = 250;
 
+/** Fired on window by the edit modal when a track's metadata is saved. */
+export const TRACK_UPDATED_EVENT = "adjacent:track-updated";
+
 /**
  * Supplies the tracks for whatever the current route is asking for.
  *
@@ -150,6 +153,19 @@ export function useTrackFeed() {
       previous.map((track) => (track.id === updated.id ? updated : track)),
     );
   }, []);
+
+  // The edit modal lives at the app shell, with no handle on whichever feed
+  // is mounted; it announces saves and any live feed patches itself.
+  useEffect(() => {
+    const handleTrackUpdated = (event) => {
+      if (event.detail?.id) {
+        replaceTrack(event.detail);
+      }
+    };
+
+    window.addEventListener(TRACK_UPDATED_EVENT, handleTrackUpdated);
+    return () => window.removeEventListener(TRACK_UPDATED_EVENT, handleTrackUpdated);
+  }, [replaceTrack]);
 
   return {
     tracks,
