@@ -132,6 +132,12 @@ def on_startup():
 
     _rebuild_cooccurrence_if_empty()
 
+    # Reclaims stale transcode cache entries (old naming schemes, purged
+    # tracks) in the background; skips itself if the library is unmounted.
+    from app.services.stream_cache_maintenance import start_stream_cache_sweep_background
+
+    start_stream_cache_sweep_background()
+
 
 def _rebuild_cooccurrence_if_empty():
     """Self-heal: the table is derived data, so an empty table alongside
