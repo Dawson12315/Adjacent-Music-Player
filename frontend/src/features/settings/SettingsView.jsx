@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { AccountPanel } from "./AccountPanel";
 import { LastfmPanel } from "./LastfmPanel";
@@ -6,11 +6,9 @@ import { useAppSettings } from "./useAppSettings";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { usePlayer } from "../../contexts/PlayerContext";
-import { usePolling } from "../../hooks/usePolling";
+import { useScan } from "../../contexts/ScanContext";
 import * as settingsService from "../../services/settingsService";
 import { purgeTracks } from "../../services/tracksService";
-
-const SCAN_POLL_MS = 2500;
 
 export function SettingsView() {
   const { notice, notify } = useNotifications();
@@ -18,49 +16,12 @@ export function SettingsView() {
   const { clearPlayback } = usePlayer();
   const { settings, updateField, toggleField, save, isSaving } = useAppSettings();
 
+  // Scan progress and polling live in ScanProvider, so the sidebar counts keep
+  // updating and the completion toast still fires after navigating away.
+  const { progress: scanProgress, isScanning, startScan } = useScan();
+
   const [confirmAction, setConfirmAction] = useState(null);
   const [isCleaning, setIsCleaning] = useState(false);
-
-  /**
-   * Scans run in the background on the server; this polls their progress. The
-   * ref remembers a scan was in flight so the finishing poll can announce the
-   * result exactly once — including scans started before this page mounted.
-   */
-  const [scanProgress, setScanProgress] = useState(null);
-  const scanWasRunningRef = useRef(false);
-  const isScanning = Boolean(scanProgress?.is_running);
-
-  const fetchScanProgress = useCallback(async () => {
-    try {
-      const progress = await settingsService.getScanProgress();
-      setScanProgress(progress);
-
-      if (progress.is_running) {
-        scanWasRunningRef.current = true;
-      } else if (scanWasRunningRef.current) {
-        scanWasRunningRef.current = false;
-
-        if (progress.last_result === "completed") {
-          await refreshLibrary();
-          notify(
-            `Library scan completed. Added ${progress.added} new track${
-              progress.added === 1 ? "" : "s"
-            }.`,
-          );
-        } else if (progress.error) {
-          notify(progress.error);
-        }
-      }
-    } catch (error) {
-      console.error("Failed to read scan progress", error);
-    }
-  }, [notify, refreshLibrary]);
-
-  useEffect(() => {
-    fetchScanProgress();
-  }, [fetchScanProgress]);
-
-  usePolling(fetchScanProgress, SCAN_POLL_MS, isScanning);
 
   async function handleScan() {
     if (isScanning) return;
@@ -68,23 +29,7 @@ export function SettingsView() {
     setConfirmAction(null);
 
     try {
-      const result = await settingsService.scanLibrary();
-
-      if (result.started) {
-        scanWasRunningRef.current = true;
-        setScanProgress((previous) => ({
-          ...(previous || {}),
-          is_running: true,
-          files_seen: 0,
-          added: 0,
-          error: null,
-        }));
-        notify("Library scan started.");
-      } else {
-        notify("A scan is already running.");
-      }
-
-      await fetchScanProgress();
+      await startScan();
     } catch (error) {
       notify(error.message || "Failed to start the library scan.");
     }
