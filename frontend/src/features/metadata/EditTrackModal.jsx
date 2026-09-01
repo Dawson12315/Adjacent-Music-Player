@@ -9,7 +9,7 @@ import { TRACK_UPDATED_EVENT } from "../library/useTrackFeed";
 import { getArtistTracks, updateTrack } from "../../services/tracksService";
 
 export function EditTrackModal() {
-  const { editingTrack, closeTrackEditor, artists } = useLibrary();
+  const { editingTrack, closeTrackEditor, artists, refreshLibrary } = useLibrary();
   const { replaceTrack } = usePlayer();
   const { notify } = useNotifications();
 
@@ -100,6 +100,11 @@ export function EditTrackModal() {
       window.dispatchEvent(
         new CustomEvent(TRACK_UPDATED_EVENT, { detail: updated }),
       );
+
+      // Genre/artist/album edits change the *library* lists too (a new genre
+      // must appear in the Genres view now, not whenever the next background
+      // refresh happens to run). Fire-and-forget; the modal need not wait.
+      refreshLibrary().catch(() => {});
 
       notify("Track info updated.");
       closeTrackEditor();

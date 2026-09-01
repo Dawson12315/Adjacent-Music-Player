@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Artwork } from "./Artwork";
 import { Icon } from "./Icon";
 import { EditArtistModal } from "../features/metadata/EditArtistModal";
+import { TRACK_UPDATED_EVENT } from "../features/library/useTrackFeed";
 import { useLibrary } from "../contexts/LibraryContext";
 import { usePageMeta } from "../contexts/PageMetaContext";
 import { usePlayer } from "../contexts/PlayerContext";
@@ -37,6 +38,17 @@ export function PageHeader() {
   const [isActionsOpen, setIsActionsOpen] = useState(false);
   const [isEditingArtist, setIsEditingArtist] = useState(false);
 
+  // Bumped when a track edit is saved, so the genre pills refresh even while
+  // the user stays on the same artist page.
+  const [genreRefreshKey, setGenreRefreshKey] = useState(0);
+
+  useEffect(() => {
+    const handleTrackUpdated = () => setGenreRefreshKey((key) => key + 1);
+
+    window.addEventListener(TRACK_UPDATED_EVENT, handleTrackUpdated);
+    return () => window.removeEventListener(TRACK_UPDATED_EVENT, handleTrackUpdated);
+  }, []);
+
   useDismissable(isActionsOpen, () => setIsActionsOpen(false));
 
   // Held with the artist it describes, so switching artists clears the previous one by
@@ -64,7 +76,7 @@ export function PageHeader() {
       });
 
     return () => controller.abort();
-  }, [selectedArtist]);
+  }, [selectedArtist, genreRefreshKey]);
 
   // Home owns its own greeting.
   if (activeView === "home") {
