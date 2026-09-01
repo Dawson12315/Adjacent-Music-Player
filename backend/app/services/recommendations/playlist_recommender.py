@@ -10,10 +10,12 @@ from app.services.recommendations.diversification import diversify_tracks
 from app.services.recommendations.genre_utils import (
     get_track_families,
     get_track_genres,
+    is_canonical_family,
     map_genre_to_family,
 )
 from app.services.recommendations.ranking import rank_candidates
 from app.services.recommendations.retrieval import retrieve_candidates
+from app.services.recommendations.user_taste import build_user_taste_profile
 from app.services.recommendations.utils import build_track_response
 
 
@@ -104,9 +106,24 @@ def build_playlist_profile(playlist_tracks: list[Track]) -> dict:
     primary_families = [family for family, _count in family_counts.most_common(5)]
     track_count = len(playlist_tracks)
     metadata_sparse = len(family_counts) == 0
-    focused_playlist = len(family_counts) <= 2 if family_counts else False
 
-    family_count_values = [count for _family, count in family_counts.most_common(5)]
+    # Playlist-shape classification only trusts the curated family buckets.
+    # Long-tail self-mapped genres still participate in *matching* via
+    # family_counts, but letting each of them count as its own family made
+    # every Last.fm-enriched playlist look eclectic and misfired the focused
+    # and multi-cluster gates downstream.
+    canonical_counts = Counter(
+        {
+            family: count
+            for family, count in family_counts.items()
+            if is_canonical_family(family)
+        }
+    )
+    shape_counts = canonical_counts if canonical_counts else family_counts
+
+    focused_playlist = len(shape_counts) <= 2 if shape_counts else False
+
+    family_count_values = [count for _family, count in shape_counts.most_common(5)]
     dominant_family_share = 0.0
     if family_count_values:
         dominant_family_share = max(family_count_values) / max(sum(family_count_values), 1)
@@ -141,6 +158,9 @@ def _retrieve_and_rank_candidates(
     refresh: int,
     playlist_id: int | None,
     retrieval_limit: int,
+    user_id: int | None = None,
+    user_taste: dict | None = None,
+    include_recent_additions: bool = False,
 ):
     retrieved_candidates = retrieve_candidates(
         db=db,
@@ -149,6 +169,8 @@ def _retrieve_and_rank_candidates(
         limit=retrieval_limit,
         refresh=refresh,
         playlist_id=playlist_id,
+        user_id=user_id,
+        include_recent_additions=include_recent_additions,
     )
 
     candidate_track_ids = list(retrieved_candidates.keys())
@@ -180,6 +202,7 @@ def _retrieve_and_rank_candidates(
         playlist_profile=playlist_profile,
         refresh=refresh,
         playlist_id=playlist_id,
+        user_taste=user_taste,
     )
 
     return scored_candidates, debug_by_track_id, retrieved_candidates
@@ -340,6 +363,8 @@ def get_playlist_recommendations_from_track_ids(
     playlist_id: int | None = None,
     limit: int = 20,
     exclude_track_ids: list[int] | None = None,
+    user_id: int | None = None,
+    include_recent_additions: bool = False,
 ):
     if not seed_track_ids:
         return []
@@ -361,6 +386,9 @@ def get_playlist_recommendations_from_track_ids(
 
     playlist_profile = build_playlist_profile(playlist_tracks)
 
+    # Built once per request; bounded personalization applied during ranking.
+    user_taste = build_user_taste_profile(db, user_id)
+
     global_scored_candidates, global_debug_by_track_id, global_retrieved_candidates = (
         _retrieve_and_rank_candidates(
             db=db,
@@ -369,6 +397,9 @@ def get_playlist_recommendations_from_track_ids(
             refresh=refresh,
             playlist_id=playlist_id,
             retrieval_limit=max(limit * 20, 200),
+            user_id=user_id,
+            user_taste=user_taste,
+            include_recent_additions=include_recent_additions,
         )
     )
 
@@ -392,6 +423,8 @@ def get_playlist_recommendations_from_track_ids(
                     refresh=refresh,
                     playlist_id=playlist_id,
                     retrieval_limit=max(limit * 10, 100),
+                    user_id=user_id,
+                    user_taste=user_taste,
                 )
             )
 
@@ -555,6 +588,7 @@ def get_playlist_recommendations_for_playlist(
     refresh: int = 0,
     limit: int = 20,
     exclude_track_ids: list[int] | None = None,
+    user_id: int | None = None,
 ):
     playlist = db.query(Playlist).filter(Playlist.id == playlist_id).first()
     if not playlist:
@@ -577,4 +611,5 @@ def get_playlist_recommendations_for_playlist(
         playlist_id=playlist_id,
         limit=limit,
         exclude_track_ids=exclude_track_ids,
+        user_id=user_id,
     )

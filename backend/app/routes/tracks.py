@@ -1,9 +1,11 @@
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+import hashlib
+import logging
 import mimetypes
+import re
 import subprocess
 import threading
-import time
 import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -19,24 +21,47 @@ from app.dependencies.auth import get_current_user, require_admin
 from app.models.album_artwork import AlbumArtwork
 from app.models.app_setting import AppSetting
 from app.models.artist_artwork import ArtistArtwork
+from app.models.listening_event import ListeningEvent
 from app.models.playback_queue_item import PlaybackQueueItem
 from app.models.playback_session import PlaybackSession
 from app.models.playlist_track import PlaylistTrack
 from app.models.track import Track
 from app.models.track_artist import TrackArtist
+from app.models.track_cooccurrence import TrackCooccurrence
 from app.models.track_genre import TrackGenre
+from app.models.track_lastfm_similarity import TrackLastfmSimilarity
+from app.models.track_user_stats import TrackUserStats
 from app.models.user import User
 from app.routes.albums import normalize_album_name
 from app.schemas.track import TrackResponse
 from app.schemas.track_edit import TrackUpdate
+from app.services.auth import get_user_by_id
 from app.services.lastfm import scrobble_track, update_now_playing
+from app.services.stream_cache_maintenance import clear_stream_caches
+from app.services.track_responses import (
+    build_single_track_response,
+    build_track_response_from_maps,
+    build_track_responses,
+)
 from app.services.metadata_normalizer import normalize_genre_list
+from app.services.recommendations.rec_cache import invalidate_library_caches
 from app.services.musicbrainz import find_recording_mbid
 from app.utils.artist_normalization import normalize_artist_name
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
-STREAM_TOKEN_EXPIRE_SECONDS = 60 * 60 * 12
+# One hour covers any single listening session for a track; tokens ride in URLs
+# (an HLS constraint), so a leaked URL should go stale quickly.
+STREAM_TOKEN_EXPIRE_SECONDS = 60 * 60
+
+MAX_TRACKS_BY_IDS = 500
+
+# Ceiling for the legacy no-limit flat listing. Far above any realistic library,
+# it exists to bound the worst-case response, not to paginate: clients that can
+# paginate should pass `limit`.
+MAX_UNPAGED_TRACKS = 50_000
 
 MOBILE_STREAM_PROFILES = {
     "mp3_128": {
@@ -150,10 +175,18 @@ MOBILE_STREAM_PROFILES = {
 # Mobile stream cache locking
 MOBILE_CACHE_LOCKS: dict[str, threading.Lock] = {}
 MOBILE_CACHE_LOCKS_GUARD = threading.Lock()
+MOBILE_CACHE_LOCKS_MAX = 512
+
+# ffmpeg is CPU-bound; without a global cap one client asking for many tracks
+# spawns one transcode per request and starves the host. Threads queue here.
+TRANSCODE_CONCURRENCY = 2
+TRANSCODE_SEMAPHORE = threading.BoundedSemaphore(TRANSCODE_CONCURRENCY)
 
 # HLS streaming constants
 HLS_SEGMENT_DURATION_SECONDS = 4
 HLS_CACHE_ROOT = Path("data/hls_cache")
+# Matches ffmpeg's -hls_segment_filename output plus the playlist itself.
+HLS_SEGMENT_NAME_PATTERN = re.compile(r"segment_\d{5}\.ts|index\.m3u8")
 HLS_STARTUP_QUALITY = "aac_320"
 HLS_DEFAULT_QUALITY = "aac_320"
 HLS_QUALITY_VARIANTS = [
@@ -168,15 +201,36 @@ def get_mobile_cache_lock(cache_key: str) -> threading.Lock:
         lock = MOBILE_CACHE_LOCKS.get(cache_key)
 
         if lock is None:
+            # One lock per (track, quality) accumulates forever on a large
+            # library; drop idle ones once the table gets big.
+            if len(MOBILE_CACHE_LOCKS) >= MOBILE_CACHE_LOCKS_MAX:
+                for key in [k for k, v in MOBILE_CACHE_LOCKS.items() if not v.locked()]:
+                    del MOBILE_CACHE_LOCKS[key]
+
             lock = threading.Lock()
             MOBILE_CACHE_LOCKS[cache_key] = lock
 
         return lock
 
 
+def source_fingerprint(file_path: Path) -> str:
+    """Identity of the *audio content* a cache entry was made from.
+
+    Cache entries used to be keyed by track id alone and validated by mtime
+    comparison. Track ids are reassigned by purge + rescan, and library files
+    are usually older than the cache — so a stale entry for old track N would
+    pass validation and play the wrong song for new track N. Binding entries
+    to (path, mtime, size) makes that structurally impossible: different
+    audio always means a different cache name.
+    """
+    stat = file_path.stat()
+    raw = f"{file_path}:{stat.st_mtime_ns}:{stat.st_size}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+
 # HLS cache path helper
-def get_hls_cache_paths(track_id: int, quality: str):
-    track_dir = HLS_CACHE_ROOT / f"track_{track_id}" / quality
+def get_hls_cache_paths(track_id: int, quality: str, fingerprint: str):
+    track_dir = HLS_CACHE_ROOT / f"track_{track_id}_{fingerprint}" / quality
     playlist_path = track_dir / "index.m3u8"
     segment_pattern = track_dir / "segment_%05d.ts"
 
@@ -214,56 +268,18 @@ def get_hls_ffmpeg_args(profile: dict) -> list[str]:
 
 
 def iter_file_range(file_path: Path, start: int, end: int, chunk_size: int = 256 * 1024):
-    started_at = time.perf_counter()
-    bytes_sent = 0
-    chunk_count = 0
-    expected_bytes = end - start + 1
+    with file_path.open("rb") as file:
+        file.seek(start)
+        remaining = end - start + 1
 
-    print(
-        f"[MOBILE STREAM BODY] start file={file_path.name} bytes={start}-{end} expected={expected_bytes}",
-        flush=True,
-    )
+        while remaining > 0:
+            chunk = file.read(min(chunk_size, remaining))
 
-    try:
-        with file_path.open("rb") as file:
-            file.seek(start)
-            remaining = expected_bytes
+            if not chunk:
+                break
 
-            while remaining > 0:
-                chunk = file.read(min(chunk_size, remaining))
-
-                if not chunk:
-                    print(
-                        f"[MOBILE STREAM BODY] empty-read file={file_path.name} sent={bytes_sent}/{expected_bytes}",
-                        flush=True,
-                    )
-                    break
-
-                chunk_count += 1
-                bytes_sent += len(chunk)
-                remaining -= len(chunk)
-
-                if chunk_count <= 3 or remaining <= 0:
-                    print(
-                        f"[MOBILE STREAM BODY] chunk file={file_path.name} chunk={chunk_count} size={len(chunk)} sent={bytes_sent}/{expected_bytes}",
-                        flush=True,
-                    )
-
-                yield chunk
-
-    except GeneratorExit:
-        print(
-            f"[MOBILE STREAM BODY] client-disconnected file={file_path.name} sent={bytes_sent}/{expected_bytes} chunks={chunk_count}",
-            flush=True,
-        )
-        raise
-
-    finally:
-        elapsed_ms = (time.perf_counter() - started_at) * 1000
-        print(
-            f"[MOBILE STREAM BODY] finish file={file_path.name} sent={bytes_sent}/{expected_bytes} chunks={chunk_count} elapsed_ms={elapsed_ms:.1f}",
-            flush=True,
-        )
+            remaining -= len(chunk)
+            yield chunk
 
 
 def range_file_response(
@@ -275,10 +291,6 @@ def range_file_response(
 ):
     file_size = file_path.stat().st_size
     range_header = request.headers.get("range")
-    print(
-        f"[MOBILE STREAM] file={file_path.name} range={range_header or 'none'} size={file_size}",
-        flush=True,
-    )
 
     base_headers = {
         "Accept-Ranges": "bytes",
@@ -291,11 +303,6 @@ def range_file_response(
             **base_headers,
             "Content-Length": str(file_size),
         }
-
-        print(
-            f"[MOBILE STREAM] serving full file file={file_path.name} status=200 bytes=0-{file_size - 1}/{file_size}",
-            flush=True,
-        )
 
         return StreamingResponse(
             iter_file_range(file_path, 0, file_size - 1),
@@ -338,11 +345,6 @@ def range_file_response(
         "Content-Length": str(content_length),
     }
 
-    print(
-        f"[MOBILE STREAM] serving range file={file_path.name} status=206 bytes={start}-{end}/{file_size}",
-        flush=True,
-    )
-
     return StreamingResponse(
         iter_file_range(file_path, start, end),
         media_type=media_type,
@@ -359,42 +361,29 @@ def ensure_mobile_stream_cache(
     profile: dict,
     quality: str,
 ) -> Path:
-    source_mtime = file_path.stat().st_mtime
-    ensure_started_at = time.perf_counter()
     cache_dir = Path("data/mobile_cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     output_extension = profile["extension"]
     cache_version = profile.get("cache_version", "v1")
-    cached_file_path = cache_dir / f"track_{track.id}_{quality}_{cache_version}{output_extension}"
-    temp_file_path = cache_dir / f"track_{track.id}_{quality}_{cache_version}_{uuid4().hex}.tmp{output_extension}"
+    fingerprint = source_fingerprint(file_path)
+    cache_basename = f"track_{track.id}_{fingerprint}_{quality}_{cache_version}"
+    cached_file_path = cache_dir / f"{cache_basename}{output_extension}"
+    temp_file_path = cache_dir / f"{cache_basename}_{uuid4().hex}.tmp{output_extension}"
+
+    # The fingerprint in the name carries source identity (path+mtime+size),
+    # so existence is validity — no mtime comparison to get wrong.
     def is_cache_valid() -> bool:
-        return (
-            cached_file_path.exists()
-            and cached_file_path.stat().st_size > 0
-            and cached_file_path.stat().st_mtime >= source_mtime
-        )
+        return cached_file_path.exists() and cached_file_path.stat().st_size > 0
 
     if is_cache_valid():
-        print(
-            f"[MOBILE CACHE] hit track={track.id} quality={quality} file={cached_file_path.name} size={cached_file_path.stat().st_size}",
-            flush=True,
-        )
         return cached_file_path
 
     cache_key = f"{track.id}:{quality}:{cache_version}"
     cache_lock = get_mobile_cache_lock(cache_key)
-    print(
-        f"[MOBILE CACHE] miss track={track.id} quality={quality} file={cached_file_path.name}",
-        flush=True,
-    )
 
     with cache_lock:
         if is_cache_valid():
-            print(
-                f"[MOBILE CACHE] hit-after-lock track={track.id} quality={quality} file={cached_file_path.name} size={cached_file_path.stat().st_size}",
-                flush=True,
-            )
             return cached_file_path
 
         if temp_file_path.exists():
@@ -413,41 +402,34 @@ def ensure_mobile_stream_cache(
             str(temp_file_path),
         ]
 
-        print(
-            f"[MOBILE CACHE] transcode-start track={track.id} quality={quality} source={file_path.name} temp={temp_file_path.name}",
-            flush=True,
-        )
+        logger.info("Transcoding track %s (%s) for mobile cache", track.id, quality)
 
-        transcode_started_at = time.perf_counter()
-
-        result = subprocess.run(
-            ffmpeg_command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        transcode_ms = (time.perf_counter() - transcode_started_at) * 1000
-        print(
-            f"[MOBILE CACHE] transcode-finished track={track.id} quality={quality} returncode={result.returncode} transcode_ms={transcode_ms:.1f}",
-            flush=True,
-        ) 
+        with TRANSCODE_SEMAPHORE:
+            result = subprocess.run(
+                ffmpeg_command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
 
         if result.returncode != 0:
             if temp_file_path.exists():
                 temp_file_path.unlink()
 
+            # ffmpeg stderr contains absolute library paths; log it, don't return it.
+            logger.error(
+                "Mobile transcode failed for track %s (%s): %s",
+                track.id,
+                quality,
+                result.stderr.strip(),
+            )
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to create mobile stream: {result.stderr.strip()}",
+                detail="Failed to create mobile stream",
             )
 
         if temp_file_path.exists():
             temp_file_path.replace(cached_file_path)
-            print(
-                f"[MOBILE CACHE] write-complete track={track.id} quality={quality} file={cached_file_path.name} size={cached_file_path.stat().st_size} ensure_ms={(time.perf_counter() - ensure_started_at) * 1000:.1f}",
-                flush=True,
-            )
         elif not cached_file_path.exists():
             raise HTTPException(
                 status_code=500,
@@ -470,36 +452,25 @@ def ensure_hls_stream_cache(
             detail="Original quality is not supported for HLS streaming",
         )
 
-    source_mtime = file_path.stat().st_mtime
     cache_version = profile.get("cache_version", "v1")
-    cache_key = f"hls:{track.id}:{quality}:{cache_version}"
+    fingerprint = source_fingerprint(file_path)
+    cache_key = f"hls:{track.id}:{fingerprint}:{quality}:{cache_version}"
     cache_lock = get_mobile_cache_lock(cache_key)
 
-    paths = get_hls_cache_paths(track.id, quality)
+    paths = get_hls_cache_paths(track.id, quality, fingerprint)
     track_dir = paths["track_dir"]
     playlist_path = paths["playlist_path"]
     segment_pattern = paths["segment_pattern"]
 
+    # Source identity lives in the directory name; existence is validity.
     def is_cache_valid() -> bool:
-        return (
-            playlist_path.exists()
-            and playlist_path.stat().st_size > 0
-            and playlist_path.stat().st_mtime >= source_mtime
-        )
+        return playlist_path.exists() and playlist_path.stat().st_size > 0
 
     if is_cache_valid():
-        print(
-            f"[HLS CACHE] hit track={track.id} quality={quality}",
-            flush=True,
-        )
         return playlist_path
 
     with cache_lock:
         if is_cache_valid():
-            print(
-                f"[HLS CACHE] hit-after-lock track={track.id} quality={quality}",
-                flush=True,
-            )
             return playlist_path
 
         if track_dir.exists():
@@ -528,24 +499,29 @@ def ensure_hls_stream_cache(
             str(playlist_path),
         ]
 
-        print(
-            f"[HLS CACHE] generate-start track={track.id} quality={quality}",
-            flush=True,
-        )
+        logger.info("Generating HLS stream for track %s (%s)", track.id, quality)
 
-        result = subprocess.run(
-            ffmpeg_command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        with TRANSCODE_SEMAPHORE:
+            result = subprocess.run(
+                ffmpeg_command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
 
         if result.returncode != 0:
             shutil.rmtree(track_dir, ignore_errors=True)
 
+            # ffmpeg stderr contains absolute library paths; log it, don't return it.
+            logger.error(
+                "HLS generation failed for track %s (%s): %s",
+                track.id,
+                quality,
+                result.stderr.strip(),
+            )
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to create HLS stream: {result.stderr.strip()}",
+                detail="Failed to create HLS stream",
             )
 
         if not playlist_path.exists():
@@ -553,11 +529,6 @@ def ensure_hls_stream_cache(
                 status_code=500,
                 detail="HLS playlist generation failed",
             )
-
-        print(
-            f"[HLS CACHE] generate-finished track={track.id} quality={quality}",
-            flush=True,
-        )
 
     return playlist_path
 
@@ -617,10 +588,9 @@ def prepare_hls_variants_in_background(track_id: int, file_path_text: str):
                 profile=profile,
                 quality=quality,
             )
-        except Exception as error:
-            print(
-                f"[HLS CACHE] background-generate-failed track={track_id} quality={quality} error={error}",
-                flush=True,
+        except Exception:
+            logger.exception(
+                "Background HLS generation failed for track %s (%s)", track_id, quality
             )
 
 
@@ -643,7 +613,25 @@ def create_stream_token(track_id: int, user_id: int) -> str:
     )
 
 
-def verify_stream_token(token: str, track_id: int) -> bool:
+def get_stream_token(request: Request) -> str | None:
+    """Prefer header transport; keep the query param for HLS playlist URLs.
+
+    Playlist rewriting has to embed the token in segment URLs (media players
+    fetch them without custom headers), but clients that can set headers should
+    keep tokens out of URLs, logs, and referrers.
+    """
+    header_token = request.headers.get("x-stream-token")
+    if header_token:
+        return header_token
+
+    authorization = request.headers.get("authorization")
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+
+    return request.query_params.get("token")
+
+
+def verify_stream_token(token: str, track_id: int, db: Session) -> bool:
     try:
         payload = jwt.decode(
             token,
@@ -659,7 +647,16 @@ def verify_stream_token(token: str, track_id: int) -> bool:
     if payload.get("track_id") != track_id:
         return False
 
-    return True
+    # A token must not outlive its user: deactivating an account revokes
+    # streaming immediately instead of at token expiry.
+    try:
+        user_id = int(payload.get("sub", ""))
+    except (TypeError, ValueError):
+        return False
+
+    user = get_user_by_id(db, user_id)
+
+    return bool(user and user.is_active)
 
 
 def get_album_artwork_path(db: Session, album_name: str | None) -> str | None:
@@ -699,32 +696,35 @@ def get_artist_artwork_path(db: Session, artist_name: str | None) -> str | None:
 
 
 def build_track_response(track: Track, db: Session | None = None) -> TrackResponse:
-    album_artwork_path = None
-    artist_artwork_path = None
+    """Single-track wrapper over the shared batched builder. List endpoints
+    should call build_track_responses() so artwork resolves in two queries
+    total instead of two per track."""
+    if db is None:
+        return build_track_response_from_maps(track, {}, {})
 
-    if db:
-        album_artwork_path = get_album_artwork_path(db, track.album)
-        artist_artwork_path = get_artist_artwork_path(db, track.artist)
+    return build_single_track_response(db, track)
 
-    return TrackResponse(
-        id=track.id,
-        title=track.title,
-        artist=track.artist,
-        album=track.album,
-        genre=track.genre,
-        genres=[item.genre for item in track.track_genres],
-        artists=[item.artist_name for item in track.track_artists],
-        file_path=track.file_path,
-        artwork_path=album_artwork_path,
-        album_artwork_path=album_artwork_path,
-        artist_artwork_path=artist_artwork_path,
-        raw_title=track.raw_title,
-        raw_artist=track.raw_artist,
-        raw_album=track.raw_album,
-        raw_genre=track.raw_genre,
-        musicbrainz_recording_id=track.musicbrainz_recording_id,
-        lastfm_tags_enriched=track.lastfm_tags_enriched,
+
+def build_track_responses_for_ids(track_ids: list[int], db: Session) -> list[TrackResponse]:
+    if not track_ids:
+        return []
+
+    tracks = (
+        db.query(Track)
+        .options(
+            selectinload(Track.track_artists),
+            selectinload(Track.track_genres),
+        )
+        .filter(Track.id.in_(track_ids))
+        .all()
     )
+
+    track_by_id = {track.id: track for track in tracks}
+    ordered_tracks = [
+        track_by_id[track_id] for track_id in track_ids if track_id in track_by_id
+    ]
+
+    return build_track_responses(db, ordered_tracks)
 
 
 @router.get("/tracks/count", tags=["tracks"])
@@ -804,10 +804,15 @@ def list_tracks(
     
     if limit is not None:
         query = query.offset(offset).limit(limit)
+    else:
+        # Legacy flat listing (used by clients that load the whole library).
+        # Bounded so a single request can never build an arbitrarily large
+        # response; real libraries sit far below this.
+        query = query.limit(MAX_UNPAGED_TRACKS)
 
     tracks = query.all()
 
-    items = [build_track_response(track, db) for track in tracks]
+    items = build_track_responses(db, tracks)
 
     if limit is None:
         return items
@@ -918,9 +923,9 @@ def mobile_stream_track(
     quality: str = Query("mp3_320"),
     db: Session = Depends(get_db),
 ):
-    token = request.query_params.get("token")
+    token = get_stream_token(request)
 
-    if not token or not verify_stream_token(token, track_id):
+    if not token or not verify_stream_token(token, track_id, db):
         raise HTTPException(status_code=401, detail="Invalid or expired stream token")
 
     profile = MOBILE_STREAM_PROFILES.get(quality)
@@ -974,11 +979,11 @@ def get_hls_master_playlist(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    token = request.query_params.get("token")
+    token = get_stream_token(request)
     fast_start_only = request.query_params.get("fast_start") == "1"
     requested_hls_quality = get_requested_hls_quality(request)
 
-    if not token or not verify_stream_token(token, track_id):
+    if not token or not verify_stream_token(token, track_id, db):
         raise HTTPException(status_code=401, detail="Invalid or expired stream token")
 
     track = db.query(Track).filter(Track.id == track_id).first()
@@ -1012,10 +1017,18 @@ def get_hls_master_playlist(
 
     lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
 
-    for variant in HLS_QUALITY_VARIANTS:
+    # A real master playlist: every variant is listed so ABR-capable players
+    # can actually adapt (the old master carried only the requested quality,
+    # which made the master/variant indirection decorative). The requested
+    # quality goes first — players start with the first variant, so an
+    # explicit quality choice still lands before adaptation kicks in.
+    ordered_variants = sorted(
+        HLS_QUALITY_VARIANTS,
+        key=lambda variant: variant["quality"] != requested_hls_quality,
+    )
+
+    for variant in ordered_variants:
         quality = variant["quality"]
-        if quality != requested_hls_quality:
-            continue
         profile = MOBILE_STREAM_PROFILES.get(quality)
 
         if not profile or profile.get("passthrough"):
@@ -1042,10 +1055,10 @@ def get_hls_quality_playlist(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    token = request.query_params.get("token")
+    token = get_stream_token(request)
     fast_start_only = request.query_params.get("fast_start") == "1"
 
-    if not token or not verify_stream_token(token, track_id):
+    if not token or not verify_stream_token(token, track_id, db):
         raise HTTPException(status_code=401, detail="Invalid or expired stream token")
 
     profile = MOBILE_STREAM_PROFILES.get(quality)
@@ -1107,16 +1120,35 @@ def get_hls_segment(
     quality: str,
     segment_name: str,
     request: Request,
+    db: Session = Depends(get_db),
 ):
-    token = request.query_params.get("token")
+    token = get_stream_token(request)
 
-    if not token or not verify_stream_token(token, track_id):
+    if not token or not verify_stream_token(token, track_id, db):
         raise HTTPException(status_code=401, detail="Invalid or expired stream token")
 
+    # Both values become path components; only ffmpeg-generated names are valid.
+    profile = MOBILE_STREAM_PROFILES.get(quality)
+    if not profile or profile.get("passthrough"):
+        raise HTTPException(status_code=400, detail="Invalid HLS quality")
+
+    if not HLS_SEGMENT_NAME_PATTERN.fullmatch(segment_name):
+        raise HTTPException(status_code=404, detail="HLS segment not found")
+
+    # The cache directory embeds the source fingerprint, so the track's file
+    # identity is needed to locate segments.
+    track = db.query(Track).filter(Track.id == track_id).first()
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    file_path = Path(track.file_path)
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
     segment_path = (
-        HLS_CACHE_ROOT
-        / f"track_{track_id}"
-        / quality
+        get_hls_cache_paths(track_id, quality, source_fingerprint(file_path))["track_dir"]
         / segment_name
     )
 
@@ -1338,26 +1370,92 @@ def purge_tracks(
 ):
     deleted_tracks = db.query(Track).count()
 
+    # Every table referencing tracks is cleared explicitly, in bulk statements
+    # that execute immediately (per-object ORM assignments sat unflushed in
+    # this autoflush=False session and tripped FKs). Explicit ordering matters
+    # for another reason too: whether a table's FK carries ON DELETE CASCADE
+    # depends on which schema vintage created it, so cascades cannot be
+    # trusted on databases that predate the current migrations.
     db.query(PlaylistTrack).delete()
     db.query(PlaybackQueueItem).delete()
 
-    session = db.query(PlaybackSession).first()
-    if session:
-        session.current_track_id = None
-        session.queue_index = -1
-        session.current_time_seconds = 0
-        session.is_playing = False
+    db.query(PlaybackSession).update(
+        {
+            PlaybackSession.current_track_id: None,
+            PlaybackSession.queue_index: -1,
+            PlaybackSession.current_time_seconds: 0,
+            PlaybackSession.is_playing: False,
+        },
+        synchronize_session=False,
+    )
 
+    db.query(TrackLastfmSimilarity).delete()
+    db.query(TrackCooccurrence).delete()
+    db.query(TrackUserStats).delete()
+    db.query(ListeningEvent).delete()
     db.query(TrackArtist).delete()
     db.query(TrackGenre).delete()
     db.query(Track).delete()
 
     db.commit()
+    invalidate_library_caches()
+
+    # The transcode caches are derived from the tracks that no longer exist;
+    # dropping them reclaims disk and removes any chance of an old entry
+    # shadowing a future track (ids restart after a purge).
+    clear_stream_caches()
 
     return {
         "message": "All stored tracks purged",
         "deleted_count": deleted_tracks,
     }
+
+
+@router.get("/tracks/by-ids", response_model=list[TrackResponse], tags=["tracks"])
+def get_tracks_by_ids(
+    ids: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    track_ids = []
+
+    for raw_track_id in ids.split(","):
+        cleaned_track_id = raw_track_id.strip()
+
+        if not cleaned_track_id:
+            continue
+
+        try:
+            track_ids.append(int(cleaned_track_id))
+        except ValueError:
+            continue
+
+        if len(track_ids) >= MAX_TRACKS_BY_IDS:
+            break
+
+    return build_track_responses_for_ids(track_ids, db)
+
+
+@router.get("/tracks/{track_id}", response_model=TrackResponse, tags=["tracks"])
+def get_track(
+    track_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    track = (
+        db.query(Track)
+        .options(
+            selectinload(Track.track_artists),
+            selectinload(Track.track_genres),
+        )
+        .filter(Track.id == track_id)
+        .first()
+    )
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    return build_track_response(track, db)
 
 
 @router.patch("/tracks/{track_id}", response_model=TrackResponse, tags=["tracks"])

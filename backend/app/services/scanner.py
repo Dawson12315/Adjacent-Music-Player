@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from app.db import SessionLocal
@@ -13,22 +14,40 @@ from app.services.metadata_normalizer import (
     normalize_primary_artist,
     normalize_title
 )
-from app.services.musicbrainz_backfill import backfill_musicbrainz_recording_ids
+from app.services.musicbrainz_backfill_runner import start_musicbrainz_backfill_background
 from app.services.genre_normalizer import normalize_genre
 from app.utils.files import is_supported_audio_file
 
+logger = logging.getLogger(__name__)
 
-def scan_directory(base_path: str, limit: int = 20) -> dict:
+# Commit in groups rather than per track: one commit per track meant one fsync
+# per file, which dominated scan time on large libraries.
+SCAN_COMMIT_BATCH_SIZE = 200
+
+
+def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> dict:
     base = Path(base_path)
 
     if not base.exists():
-        raise ValueError(f"Path does not exist: {base_path}")
+        raise ValueError(
+            f"Music library path does not exist: {base_path} — is the volume mounted?"
+        )
 
     db = SessionLocal()
 
     count = 0
+    files_seen = 0
+    pending_in_batch = 0
+
+    def report_progress():
+        if progress_callback:
+            progress_callback(files_seen=files_seen, added=count)
 
     try:
+        # One query instead of one per file; 36k existence SELECTs was most of
+        # the incremental-scan cost.
+        known_file_paths = {row[0] for row in db.query(Track.file_path).all()}
+
         for file_path in base.rglob("*"):
             if not file_path.is_file():
                 continue
@@ -36,17 +55,17 @@ def scan_directory(base_path: str, limit: int = 20) -> dict:
             if not is_supported_audio_file(file_path):
                 continue
 
-            existing = db.query(Track).filter(
-                Track.file_path == str(file_path)
-            ).first()
+            files_seen += 1
+            if files_seen % 100 == 0:
+                report_progress()
 
-            if existing:
+            if str(file_path) in known_file_paths:
                 continue
 
             try:
                 metadata = extract_track_metadata(str(file_path))
             except Exception as e:
-                print(f"Skipping file (metadata error): {file_path} -> {e}")
+                logger.warning("Skipping file (metadata error): %s -> %s", file_path, e)
                 continue
 
             raw_title = metadata.get("title") or None
@@ -85,6 +104,7 @@ def scan_directory(base_path: str, limit: int = 20) -> dict:
                 raw_album=raw_album,
                 raw_genre=raw_genre,
                 file_path=metadata["file_path"],
+                duration_seconds=metadata.get("duration_seconds"),
             )
 
             db.add(track)
@@ -107,19 +127,33 @@ def scan_directory(base_path: str, limit: int = 20) -> dict:
                     )
                 )
 
-            db.commit()
-
+            known_file_paths.add(str(file_path))
             count += 1
-            print(f"Added: {metadata['title']}")
+            pending_in_batch += 1
+
+            if pending_in_batch >= SCAN_COMMIT_BATCH_SIZE:
+                db.commit()
+                pending_in_batch = 0
+                logger.info("Scan progress: %s tracks added", count)
+                report_progress()
 
             if count >= limit:
                 break
 
-        print(f"Scan complete. Added {count} tracks.")
+        if pending_in_batch:
+            db.commit()
+
+        report_progress()
+        logger.info("Scan complete. Added %s tracks.", count)
 
         if count > 0:
-            print("Starting MusicBrainz recording ID backfill after scan...")
-            backfill_musicbrainz_recording_ids(batch_size=50)
+            # Backfill runs for hours on a big import; hand it to the shared
+            # background runner instead of blocking the scan caller.
+            started = start_musicbrainz_backfill_background()
+            logger.info(
+                "MusicBrainz backfill %s",
+                "started in background" if started else "already running",
+            )
 
         return {"added": count}
 

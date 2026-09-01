@@ -190,6 +190,9 @@ def run_simple_migrations():
                 text("ALTER TABLE tracks ADD COLUMN lastfm_tags_enriched BOOLEAN NOT NULL DEFAULT 0")
             )
 
+        if "duration_seconds" not in track_column_names:
+            connection.execute(text("ALTER TABLE tracks ADD COLUMN duration_seconds REAL"))
+
         connection.execute(
             text(
                 """
@@ -240,6 +243,42 @@ def run_simple_migrations():
                     genre TEXT NOT NULL,
                     FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE,
                     CONSTRAINT uq_track_genre_pair UNIQUE (track_id, genre)
+                )
+                """
+            )
+        )
+
+        # Genre retrieval works backwards from families to an IN-query over
+        # genre strings; both columns need an index for that to be cheap.
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_track_genres_genre
+                ON track_genres(genre)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_tracks_genre
+                ON tracks(genre)
+                """
+            )
+        )
+
+        # Recommendation evaluation history — one row per offline eval run so
+        # tuning changes can be compared over time.
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS recommendation_eval_runs (
+                    id INTEGER PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    params_json TEXT NOT NULL,
+                    metrics_json TEXT NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
@@ -342,6 +381,19 @@ def run_simple_migrations():
         if "user_id" not in listening_event_column_names:
             connection.execute(text("ALTER TABLE listening_events ADD COLUMN user_id INTEGER"))
 
+        # Events recorded before the user_id column existed belong to the
+        # first admin (single-user era); NULLs are invisible to every stat.
+        connection.execute(
+            text(
+                """
+                UPDATE listening_events
+                SET user_id = (SELECT MIN(id) FROM users WHERE role = 'admin')
+                WHERE user_id IS NULL
+                  AND EXISTS (SELECT 1 FROM users WHERE role = 'admin')
+                """
+            )
+        )
+
         connection.execute(
             text(
                 """
@@ -374,6 +426,57 @@ def run_simple_migrations():
                 """
                 CREATE INDEX IF NOT EXISTS ix_listening_events_session_id
                 ON listening_events(session_id)
+                """
+            )
+        )
+
+        # Stats queries filter by user and event type and then group or order
+        # by time; SQLite uses one index per table access, so the single-column
+        # indexes above degrade into scans as the event log grows.
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_listening_events_user_type_time
+                ON listening_events(user_id, event_type, created_at)
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_listening_events_track_type
+                ON listening_events(track_id, event_type)
+                """
+            )
+        )
+
+        # The track list always sorts on lower(column); expression indexes let
+        # those ORDER BY and section-jump count queries walk an index instead
+        # of sorting 36k rows per request.
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_tracks_lower_artist
+                ON tracks(lower(artist))
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_tracks_lower_album
+                ON tracks(lower(album))
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_tracks_lower_title
+                ON tracks(lower(title))
                 """
             )
         )

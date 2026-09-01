@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Adjacent">
+  <rect width="32" height="32" rx="7.5" fill="#1964E3"/>
+  <g transform="translate(3.8 3.4) scale(0.78)">
+    <!-- Tail, body and head overlap into one silhouette. -->
+    <path d="M3.4 20.6 L1 17.4 L5.2 17.9 Z" fill="#FFC93C"/>
+    <path d="M4 20.8c0-3.5 4-6 9-6s9 2.5 9 6-4 6-9 6-9-2.5-9-6Z" fill="#FFC93C"/>
+    <circle cx="19.2" cy="12.4" r="5.9" fill="#FFC93C"/>
+    <path d="M24.4 10.9 L30.4 12.6 L24.4 14.6 Z" fill="#FE8D09"/>
+    <circle cx="20.6" cy="11" r="1.25" fill="#0A0C11"/>
+  </g>
+</svg>

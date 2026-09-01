@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   backend:
     build:
@@ -14,6 +12,16 @@ services:
       - MUSIC_LIBRARY_PATH=/music
       - FRONTEND_ORIGIN=${FRONTEND_ORIGIN}
       - MUSICBRAINZ_EMAIL=${MUSICBRAINZ_EMAIL}
+      # Required — the backend refuses to start with a missing or placeholder key.
+      - AUTH_SECRET_KEY=${AUTH_SECRET_KEY}
+      - APP_ENV=${APP_ENV:-production}
+      - DEBUG=${DEBUG:-false}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     restart: unless-stopped
 
   frontend:
@@ -21,9 +29,16 @@ services:
       context: ./frontend
     container_name: adjacent-frontend
     ports:
-      - "5173:80"
+      - "5173:8080"
     environment:
       - API_BASE_URL=${API_BASE_URL}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped

@@ -47,3 +47,21 @@ def release_job_lock(db: Session, job_name: str) -> None:
     lock.is_running = False
     lock.started_at = None
     db.commit()
+
+
+def release_all_job_locks() -> None:
+    """Called at startup. Jobs run in this process's threads, so a fresh boot
+    cannot have any running job — anything still marked running is a lock
+    orphaned by a crash, a reload, or Ctrl+C mid-job."""
+    from app.db import SessionLocal
+
+    db = SessionLocal()
+
+    try:
+        db.query(JobLock).update(
+            {JobLock.is_running: False, JobLock.started_at: None},
+            synchronize_session=False,
+        )
+        db.commit()
+    finally:
+        db.close()

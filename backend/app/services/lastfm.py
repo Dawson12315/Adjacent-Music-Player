@@ -1,8 +1,12 @@
+import logging
 import hashlib
 import requests
 import time
 import threading
 from typing import Dict, Optional, Any
+
+
+logger = logging.getLogger(__name__)
 
 LASTFM_BASE_URL = "http://ws.audioscrobbler.com/2.0/"
 LASTFM_MIN_REQUEST_INTERVAL_SECONDS = 1.05
@@ -49,14 +53,14 @@ def _request_lastfm(params: dict) -> Dict:
         )
         data = response.json()
     except requests.RequestException as error:
-        print(f"Last.fm lookup failed: {error}")
+        logger.warning(f"Last.fm lookup failed: {error}")
         return {"success": False, "tags": []}
     except ValueError:
-        print("Last.fm lookup failed: response was not valid JSON")
+        logger.warning("Last.fm lookup failed: response was not valid JSON")
         return {"success": False, "tags": []}
 
     if "error" in data:
-        print(f"Last.fm API error {data.get('error')}: {data.get('message')}")
+        logger.warning(f"Last.fm API error {data.get('error')}: {data.get('message')}")
         return {"success": False, "tags": []}
 
     tags = data.get("toptags", {}).get("tag", [])
@@ -76,14 +80,14 @@ def _request_lastfm_similar_artists(params: dict) -> Dict[str, Any]:
         )
         data = response.json()
     except requests.RequestException as error:
-        print(f"Last.fm similar artist lookup failed: {error}")
+        logger.warning(f"Last.fm similar artist lookup failed: {error}")
         return {"success": False, "artists": [], "error": "request_failed"}
     except ValueError:
-        print("Last.fm similar artist lookup failed: response was not valid JSON")
+        logger.warning("Last.fm similar artist lookup failed: response was not valid JSON")
         return {"success": False, "artists": [], "error": "invalid_json"}
 
     if "error" in data:
-        print(f"Last.fm API error {data.get('error')}: {data.get('message')}")
+        logger.warning(f"Last.fm API error {data.get('error')}: {data.get('message')}")
         return {
             "success": False,
             "artists": [],
@@ -136,14 +140,14 @@ def _request_lastfm_similar_tracks(params: dict) -> Dict[str, Any]:
         )
         data = response.json()
     except requests.RequestException as error:
-        print(f"Last.fm similar track lookup failed: {error}")
+        logger.warning(f"Last.fm similar track lookup failed: {error}")
         return {"success": False, "tracks": [], "error": "request_failed"}
     except ValueError:
-        print("Last.fm similar track lookup failed: response was not valid JSON")
+        logger.warning("Last.fm similar track lookup failed: response was not valid JSON")
         return {"success": False, "tracks": [], "error": "invalid_json"}
 
     if "error" in data:
-        print(f"Last.fm API error {data.get('error')}: {data.get('message')}")
+        logger.warning(f"Last.fm API error {data.get('error')}: {data.get('message')}")
         return {
             "success": False,
             "tracks": [],
@@ -347,7 +351,7 @@ def get_lastfm_session(
         )
         data = response.json()
     except requests.RequestException as error:
-        print(f"Last.fm session lookup failed: {error}")
+        logger.warning(f"Last.fm session lookup failed: {error}")
         return {
             "success": False,
             "session_key": None,
@@ -355,7 +359,7 @@ def get_lastfm_session(
             "error": "request_failed",
         }
     except ValueError:
-        print("Last.fm session lookup failed: response was not valid JSON")
+        logger.warning("Last.fm session lookup failed: response was not valid JSON")
         return {
             "success": False,
             "session_key": None,
@@ -364,7 +368,7 @@ def get_lastfm_session(
         }
 
     if "error" in data:
-        print(f"Last.fm API error {data.get('error')}: {data.get('message')}")
+        logger.warning(f"Last.fm API error {data.get('error')}: {data.get('message')}")
         return {
             "success": False,
             "session_key": None,
@@ -423,14 +427,14 @@ def update_now_playing(
         )
         data = response.json()
     except requests.RequestException as error:
-        print(f"Last.fm now playing failed: {error}")
+        logger.warning(f"Last.fm now playing failed: {error}")
         return {"success": False, "error": "request_failed"}
     except ValueError:
-        print("Last.fm now playing failed: invalid JSON")
+        logger.warning("Last.fm now playing failed: invalid JSON")
         return {"success": False, "error": "invalid_json"}
 
     if "error" in data:
-        print(f"Last.fm API error {data.get('error')}: {data.get('message')}")
+        logger.warning(f"Last.fm API error {data.get('error')}: {data.get('message')}")
         return {"success": False, "error": data.get("message", "api_error")}
 
     return {"success": True, "data": data}
@@ -480,14 +484,14 @@ def scrobble_track(
         )
         data = response.json()
     except requests.RequestException as error:
-        print(f"Last.fm scrobble failed: {error}")
+        logger.warning(f"Last.fm scrobble failed: {error}")
         return {"success": False, "error": "request_failed"}
     except ValueError:
-        print("Last.fm scrobble failed: invalid JSON")
+        logger.warning("Last.fm scrobble failed: invalid JSON")
         return {"success": False, "error": "invalid_json"}
 
     if "error" in data:
-        print(f"Last.fm API error {data.get('error')}: {data.get('message')}")
+        logger.warning(f"Last.fm API error {data.get('error')}: {data.get('message')}")
         return {"success": False, "error": data.get("message", "api_error")}
 
     return {"success": True, "data": data}

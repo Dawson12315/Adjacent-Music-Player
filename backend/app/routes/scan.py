@@ -1,32 +1,42 @@
-from fastapi import APIRouter, Depends, Query
+import logging
 
-from app.config import settings
-from app.db import SessionLocal
-from app.dependencies.auth import require_admin
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+
+from app.dependencies.auth import get_current_user, require_admin
 from app.models.user import User
-from app.schemas.scan import ScanResponse
-from app.services.job_locking import release_job_lock, try_acquire_job_lock
-from app.services.scanner import scan_directory
+from app.schemas.scan import ScanStartResponse
+from app.services.scan_runner import get_scan_progress, start_scan_background
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.post("/scan", response_model=ScanResponse, tags=["scan"])
+@router.post("/scan", response_model=ScanStartResponse, tags=["scan"])
 def run_scan(
-    limit: int = Query(20, ge=1),
+    limit: int = 100000,
     current_user: User = Depends(require_admin),
 ):
-    db = SessionLocal()
+    """Kick off a background library scan.
 
-    if not try_acquire_job_lock(db, "scan"):
-        db.close()
-        return {"added": 0}
+    The scan used to run inside this request; on a large library over a
+    network mount that blocked for up to an hour, died with the connection,
+    and orphaned the job lock. Poll /scan/progress for status.
+    """
+    result = start_scan_background(limit)
 
-    try:
-        print(f"Manual scan requested by {current_user.username} with limit={limit}")
-        result = scan_directory(settings.music_library_path, limit=limit)
-        print(f"Manual scan finished. Added {result['added']} tracks.")
-        return result
-    finally:
-        release_job_lock(db, "scan")
-        db.close()
+    logger.info(
+        "Scan requested by %s: %s", current_user.username, result["reason"]
+    )
+
+    return result
+
+
+@router.get("/scan/progress", tags=["scan"])
+def scan_progress(
+    current_user: User = Depends(get_current_user),
+):
+    response = JSONResponse(content=get_scan_progress())
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response

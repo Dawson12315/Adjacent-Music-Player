@@ -421,6 +421,7 @@ def get_playlist_recommendations(
         refresh=refresh,
         limit=limit,
         exclude_track_ids=parsed_exclude_track_ids,
+        user_id=current_user.id,
     )
 
 

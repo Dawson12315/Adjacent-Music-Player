@@ -40,12 +40,11 @@ def score_candidate(
     score += family_score
 
     # --- COOCCURRENCE ---
+    # Magnitude now flows exclusively through the rank-normalized channel
+    # weight in ranking.py; adding co_score * 4.0 here as well double-counted
+    # the signal on an unbounded scale. Presence still drives bridge logic.
     co_score = float(cooccurrence_scores.get(track.id, 0.0) or 0.0)
     co_boost = 0.0
-    if co_score > 0:
-        co_boost = co_score * 4.0
-        score += co_boost
-        reasons.append(f"cooccurrence:+{co_boost:.2f}")
 
     # --- ARTIST / ALBUM REPETITION ---
     artist_key = (track.artist or "").strip().casefold()

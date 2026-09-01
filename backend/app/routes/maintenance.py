@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -27,5 +27,8 @@ def run_cleanup(
             "message": "Cleanup completed",
             "removed": result["removed"],
         }
+    except ValueError as exc:
+        # Library volume not mounted — refuse rather than delete everything.
+        raise HTTPException(status_code=400, detail=str(exc))
     finally:
         release_job_lock(db, "cleanup")

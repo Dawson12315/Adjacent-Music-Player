@@ -1,3 +1,4 @@
+import logging
 import threading
 
 from app.db import SessionLocal
@@ -5,6 +6,9 @@ from app.services.job_locking import release_job_lock, try_acquire_job_lock
 from app.services.lastfm_enrichment_batch import run_lastfm_enrichment
 from app.services.lastfm_enrichment_progress import get_progress
 
+
+
+logger = logging.getLogger(__name__)
 
 _lastfm_thread = None
 LASTFM_ENRICHMENT_LOCK_NAME = "lastfm_enrichment"
@@ -20,15 +24,15 @@ def run_lastfm_enrichment_with_lock() -> bool:
 
     try:
         if not try_acquire_job_lock(db, LASTFM_ENRICHMENT_LOCK_NAME):
-            print("Last.fm enrichment skipped: already running")
+            logger.warning("Last.fm enrichment skipped: already running")
             return False
 
-        print("Running Last.fm enrichment...")
+        logger.info("Running Last.fm enrichment...")
         run_lastfm_enrichment()
         return True
 
     except Exception as error:
-        print(f"Last.fm enrichment error: {error}")
+        logger.warning(f"Last.fm enrichment error: {error}")
         return False
 
     finally:

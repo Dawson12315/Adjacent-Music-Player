@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import settings
@@ -22,10 +22,20 @@ engine = create_engine(
 )
 
 if settings.database_url.startswith("sqlite"):
+    # foreign_keys is a per-connection setting in SQLite; running it once at
+    # startup only configured whichever pooled connection happened to execute
+    # it, leaving ON DELETE CASCADE dead on every other connection. Hook the
+    # pool instead so every connection gets it.
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
+
+    # journal_mode persists in the database file, so once is enough.
     with engine.begin() as connection:
         connection.execute(text("PRAGMA journal_mode=WAL;"))
-        connection.execute(text("PRAGMA synchronous=NORMAL;"))
-        connection.execute(text("PRAGMA foreign_keys=ON;"))
 
 SessionLocal = sessionmaker(
     autocommit=False,

@@ -1,3 +1,4 @@
+import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.db import SessionLocal
@@ -7,6 +8,9 @@ from app.services.lastfm_enrichment_runner import run_lastfm_enrichment_with_loc
 from app.services.maintenance import cleanup_missing_tracks, scan_library_job
 
 
+
+logger = logging.getLogger(__name__)
+
 _scheduler = None
 
 
@@ -15,13 +19,13 @@ def _run_cleanup_job():
 
     try:
         if not try_acquire_job_lock(db, "cleanup"):
-            print("Cleanup skipped: already running")
+            logger.warning("Cleanup skipped: already running")
             return
 
-        print("Running scheduled cleanup...")
+        logger.info("Running scheduled cleanup...")
         cleanup_missing_tracks(db)
     except Exception as error:
-        print(f"Scheduled cleanup error: {error}")
+        logger.warning(f"Scheduled cleanup error: {error}")
     finally:
         try:
             release_job_lock(db, "cleanup")
@@ -35,13 +39,13 @@ def _run_scan_job():
 
     try:
         if not try_acquire_job_lock(db, "scan"):
-            print("Scan skipped: already running")
+            logger.warning("Scan skipped: already running")
             return
 
-        print("Running scheduled scan...")
+        logger.info("Running scheduled scan...")
         scan_library_job(db)
     except Exception as error:
-        print(f"Scheduled scan error: {error}")
+        logger.warning(f"Scheduled scan error: {error}")
     finally:
         try:
             release_job_lock(db, "scan")
@@ -132,9 +136,29 @@ def _sync_scheduler_jobs():
             _scheduler.remove_job(lastfm_enrichment_job_id)
 
     except Exception as error:
-        print(f"Scheduler sync error: {error}")
+        logger.warning(f"Scheduler sync error: {error}")
     finally:
         db.close()
+
+
+def _run_cooccurrence_rebuild_job():
+    from app.services.recommendations.cooccurrence_builder import (
+        rebuild_track_cooccurrence_standalone,
+    )
+
+    try:
+        rebuild_track_cooccurrence_standalone()
+    except Exception as error:
+        logger.warning(f"Scheduled co-occurrence rebuild error: {error}")
+
+
+def _run_stream_cache_sweep_job():
+    from app.services.stream_cache_maintenance import sweep_stream_caches
+
+    try:
+        sweep_stream_caches()
+    except Exception as error:
+        logger.warning(f"Scheduled stream cache sweep error: {error}")
 
 
 def start_scheduler():
@@ -145,6 +169,33 @@ def start_scheduler():
 
     _scheduler = BackgroundScheduler()
     _scheduler.start()
+
+    # Not settings-gated: co-occurrence is derived data that silently rots
+    # when listening or playlists change, and the rebuild is cheap.
+    _scheduler.add_job(
+        _run_cooccurrence_rebuild_job,
+        trigger="cron",
+        hour=3,
+        minute=45,
+        id="scheduled_cooccurrence_rebuild",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # Transcode caches only ever grow without this; the sweep also removes
+    # entries orphaned by purge/cleanup and superseded naming schemes.
+    _scheduler.add_job(
+        _run_stream_cache_sweep_job,
+        trigger="cron",
+        hour=4,
+        minute=15,
+        id="scheduled_stream_cache_sweep",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     _sync_scheduler_jobs()
 
 

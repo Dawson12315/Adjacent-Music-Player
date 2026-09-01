@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -21,6 +22,15 @@ class TrackResponse(BaseModel):
     raw_genre: Optional[str] = None
     musicbrainz_recording_id: Optional[str] = None
     lastfm_tags_enriched: bool = False
+    duration_seconds: Optional[float] = None
 
     class Config:
         from_attributes = True
+
+
+class TrackWithStatsResponse(TrackResponse):
+    play_count: int = 0
+    skip_count: int = 0
+    completion_count: int = 0
+    like_count: int = 0
+    last_played_at: Optional[datetime] = None

@@ -7,9 +7,47 @@ from app.models.user import User
 from app.services.recommendations.evaluation import (
     evaluate_all_playlists_leave_one_out,
     evaluate_playlist_leave_one_out,
+    evaluate_temporal_split,
+    list_eval_history,
 )
 
 router = APIRouter()
+
+
+@router.get(
+    "/recommendations/evaluate/temporal",
+    tags=["recommendation-evaluation"],
+)
+def evaluate_temporal(
+    top_k: int = Query(20, ge=1, le=100),
+    test_fraction: float = Query(0.2, gt=0.0, lt=0.9),
+    seed_limit: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Train-on-past / predict-the-future evaluation with baselines."""
+    try:
+        return evaluate_temporal_split(
+            db=db,
+            user_id=current_user.id,
+            top_k=top_k,
+            test_fraction=test_fraction,
+            seed_limit=seed_limit,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get(
+    "/recommendations/evaluate/history",
+    tags=["recommendation-evaluation"],
+)
+def evaluation_history(
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    return {"runs": list_eval_history(db, limit=limit)}
 
 
 @router.get(

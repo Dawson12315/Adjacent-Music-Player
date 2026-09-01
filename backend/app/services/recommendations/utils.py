@@ -18,4 +18,5 @@ def build_track_response(track: Track) -> TrackResponse:
         musicbrainz_recording_id=track.musicbrainz_recording_id,
         lastfm_tags_enriched=track.lastfm_tags_enriched,
         artists=[item.artist_name for item in track.track_artists if item.artist_name],
+        duration_seconds=track.duration_seconds,
     )

@@ -6,6 +6,7 @@ from app.dependencies.auth import require_admin
 from app.models.track import Track
 from app.models.user import User
 from app.schemas.artist_edit import ArtistRenameRequest, ArtistTransferRequest
+from app.services.recommendations.rec_cache import invalidate_library_caches
 
 router = APIRouter()
 
@@ -31,6 +32,7 @@ def rename_artist(
         track.artist = new_artist
 
     db.commit()
+    invalidate_library_caches()
 
     return {
         "message": "Artist renamed successfully",
@@ -68,6 +70,7 @@ def transfer_artist(
         track.artist = target_artist
 
     db.commit()
+    invalidate_library_caches()
 
     return {
         "message": "Artist transferred successfully",

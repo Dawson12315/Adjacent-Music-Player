@@ -2,7 +2,7 @@ import os
 import shutil
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
@@ -11,10 +11,7 @@ from app.dependencies.auth import get_current_user, require_admin
 from app.models.album_artwork import AlbumArtwork
 from app.models.track import Track
 from app.models.user import User
-
-from app.models.artist_artwork import ArtistArtwork
-from app.schemas.track import TrackResponse
-from app.utils.artist_normalization import normalize_artist_name
+from app.services.track_responses import build_track_responses
 
 router = APIRouter()
 
@@ -40,44 +37,27 @@ def list_albums(
     )
     return [album[0] for album in albums if album[0]]
 
-def build_mobile_album_track_response(track: Track, db: Session) -> TrackResponse:
-    album_key = normalize_album_name(track.album)
-    artist_key = normalize_artist_name(track.artist)
+def paginate_flat(items: list, limit: int | None, offset: int):
+    """Additive pagination — omitting `limit` keeps the historical flat list
+    the deployed mobile app expects."""
+    if limit is None:
+        return items
 
-    album_artwork = db.query(AlbumArtwork).filter(
-        AlbumArtwork.album_key == album_key
-    ).first()
+    page = items[offset : offset + limit]
 
-    artist_artwork = db.query(ArtistArtwork).filter(
-        ArtistArtwork.artist_key == artist_key
-    ).first()
-
-    album_artwork_path = album_artwork.artwork_path if album_artwork else None
-    artist_artwork_path = artist_artwork.artwork_path if artist_artwork else None
-
-    return TrackResponse(
-        id=track.id,
-        title=track.title,
-        artist=track.artist,
-        album=track.album,
-        genre=track.genre,
-        genres=[item.genre for item in track.track_genres],
-        artists=[item.artist_name for item in track.track_artists],
-        file_path=track.file_path,
-        artwork_path=album_artwork_path,
-        album_artwork_path=album_artwork_path,
-        artist_artwork_path=artist_artwork_path,
-        raw_title=track.raw_title,
-        raw_artist=track.raw_artist,
-        raw_album=track.raw_album,
-        raw_genre=track.raw_genre,
-        musicbrainz_recording_id=track.musicbrainz_recording_id,
-        lastfm_tags_enriched=track.lastfm_tags_enriched,
-    )
+    return {
+        "items": page,
+        "total": len(items),
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(page) < len(items),
+    }
 
 
 @router.get("/mobile/albums", tags=["mobile"])
 def list_mobile_albums(
+    limit: int | None = Query(None, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -103,7 +83,7 @@ def list_mobile_albums(
     )
     artwork_by_key = {artwork.album_key: artwork.artwork_path for artwork in artwork_rows}
 
-    return [
+    items = [
         {
             "name": row.album,
             "album": row.album,
@@ -117,10 +97,14 @@ def list_mobile_albums(
         if row.album
     ]
 
+    return paginate_flat(items, limit, offset)
 
-@router.get("/mobile/albums/{album_name:path}/tracks", response_model=list[TrackResponse], tags=["mobile"])
+
+@router.get("/mobile/albums/{album_name:path}/tracks", tags=["mobile"])
 def get_mobile_album_tracks(
     album_name: str,
+    limit: int | None = Query(None, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -130,12 +114,47 @@ def get_mobile_album_tracks(
             selectinload(Track.track_artists),
             selectinload(Track.track_genres),
         )
-        .filter(func.lower(Track.album) == album_name.casefold())
+        # Same lowering function on both sides — see get_mobile_artist_tracks.
+        .filter(func.lower(Track.album) == func.lower(album_name))
         .order_by(Track.title.asc())
         .all()
     )
 
-    return [build_mobile_album_track_response(track, db) for track in tracks]
+    return paginate_flat(build_track_responses(db, tracks), limit, offset)
+
+
+@router.get("/albums/artwork", tags=["albums"])
+def get_all_album_artwork(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    artwork_rows = db.query(AlbumArtwork).all()
+
+    return {
+        "artwork": {
+            artwork.album_key: artwork.artwork_path
+            for artwork in artwork_rows
+            if artwork.artwork_path
+        }
+    }
+
+
+@router.get("/albums/{album_name:path}/tracks", tags=["albums"])
+def get_album_tracks(
+    album_name: str,
+    limit: int | None = Query(None, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return get_mobile_album_tracks(
+        album_name=album_name,
+        limit=limit,
+        offset=offset,
+        db=db,
+        current_user=current_user,
+    )
+
 
 @router.get("/albums/{album_name:path}/artwork", tags=["albums"])
 def get_album_artwork(
