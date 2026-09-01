@@ -26,6 +26,7 @@ FOR_YOU_SEED_LIMIT = 10
 )
 def get_for_you_recommendations(
     limit: int = Query(20, ge=1, le=100),
+    refresh: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -48,6 +49,9 @@ def get_for_you_recommendations(
         seed_track_ids=seed_track_ids,
         playlist_id=None,
         limit=limit,
+        refresh=refresh,
+        user_id=current_user.id,
+        include_recent_additions=True,
     )
 
     return build_track_responses_for_ids(

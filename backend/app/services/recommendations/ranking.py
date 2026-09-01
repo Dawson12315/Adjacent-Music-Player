@@ -3,17 +3,59 @@ import random
 from app.services.recommendations.genre_utils import get_track_families
 from app.services.recommendations.reasoning import summarize_recommendation_reason
 from app.services.recommendations.scoring import score_candidate
+from app.services.recommendations.user_taste import taste_adjustment_for_candidate
 
 
-RETRIEVAL_SOURCE_WEIGHTS = {
-    "genre": 0.30,
-    "cooccurrence": 1.25,
-    "behavior": 0.45,
-    "lastfm_artist": 1.35,
-    "lastfm_track": 3.00,
+# The single place channel influence is decided. Every channel's raw score is
+# rank-normalized to 0–1 across the candidate set first, so these weights mean
+# the same thing regardless of playlist size or how a channel scales
+# internally. (Raw scales previously varied by 10x between channels, which is
+# why the old constants were unexplainable.)
+CHANNEL_WEIGHTS = {
+    "genre": 1.0,
+    "cooccurrence": 2.0,
+    "behavior": 1.0,
+    "lastfm_artist": 1.5,
+    "lastfm_track": 2.5,
+    "recent": 0.5,
 }
 
-FOCUSED_PLAYLIST_LASTFM_ALIGNMENT_THRESHOLD = 1.20
+# On the normalized 0–1 scale: a candidate in the top 40% of Last.fm artist
+# matches counts as strongly aligned.
+STRONG_LASTFM_ARTIST_NORM_THRESHOLD = 0.60
+
+
+def rank_normalize(values_by_track: dict[int, float]) -> dict[int, float]:
+    """Percentile-of-distinct-values normalization: robust to heavy tails,
+    ties stay tied, output is 0–1 with the best value at 1."""
+    if not values_by_track:
+        return {}
+
+    distinct_values = sorted(set(values_by_track.values()))
+
+    if len(distinct_values) == 1:
+        return {track_id: 1.0 for track_id in values_by_track}
+
+    position = {value: index for index, value in enumerate(distinct_values)}
+    top = len(distinct_values) - 1
+
+    return {
+        track_id: position[value] / top
+        for track_id, value in values_by_track.items()
+    }
+
+
+def normalize_channels(retrieved_candidates: dict) -> dict[str, dict[int, float]]:
+    raw_by_channel: dict[str, dict[int, float]] = {}
+
+    for track_id, candidate in retrieved_candidates.items():
+        for source_name, score in candidate.source_scores.items():
+            raw_by_channel.setdefault(source_name, {})[track_id] = score
+
+    return {
+        source_name: rank_normalize(values)
+        for source_name, values in raw_by_channel.items()
+    }
 
 
 def rank_candidates(
@@ -26,6 +68,7 @@ def rank_candidates(
     playlist_profile=None,
     refresh: int = 0,
     playlist_id: int | None = None,
+    user_taste: dict | None = None,
 ):
     scored_candidates = []
     debug_by_track_id = {}
@@ -34,8 +77,12 @@ def rank_candidates(
     playlist_profile = playlist_profile or {}
     metadata_sparse = bool(playlist_profile.get("metadata_sparse"))
     unique_family_count = len(family_counts)
-    focused_playlist = unique_family_count <= 2
+    focused_playlist = bool(
+        playlist_profile.get("focused_playlist", unique_family_count <= 2)
+    )
     is_multi_cluster = bool(playlist_profile.get("is_multi_cluster"))
+
+    normalized_channels = normalize_channels(retrieved_candidates)
 
     rng = random.Random(f"rank:{playlist_id}:{refresh}")
 
@@ -55,33 +102,38 @@ def rank_candidates(
             retrieved_source_scores=retrieval_sources,
         )
 
-        genre_source_score = retrieval_sources.get("genre", 0.0)
-        cooccurrence_source_score = retrieval_sources.get("cooccurrence", 0.0)
-        behavior_source_score = retrieval_sources.get("behavior", 0.0)
-        lastfm_artist_source_score = retrieval_sources.get("lastfm_artist", 0.0)
-        lastfm_track_source_score = retrieval_sources.get("lastfm_track", 0.0)
+        normalized = {
+            source_name: normalized_channels.get(source_name, {}).get(track.id, 0.0)
+            for source_name in CHANNEL_WEIGHTS
+        }
 
         strong_lastfm_artist_alignment = (
-            lastfm_artist_source_score >= FOCUSED_PLAYLIST_LASTFM_ALIGNMENT_THRESHOLD
+            normalized["lastfm_artist"] >= STRONG_LASTFM_ARTIST_NORM_THRESHOLD
+            and retrieval_sources.get("lastfm_artist", 0.0) > 0
         )
 
         content_fit_score = (
-            genre_source_score * RETRIEVAL_SOURCE_WEIGHTS["genre"]
-            + cooccurrence_source_score * RETRIEVAL_SOURCE_WEIGHTS["cooccurrence"]
-            + lastfm_artist_source_score * RETRIEVAL_SOURCE_WEIGHTS["lastfm_artist"]
-            + lastfm_track_source_score * RETRIEVAL_SOURCE_WEIGHTS["lastfm_track"]
+            normalized["genre"] * CHANNEL_WEIGHTS["genre"]
+            + normalized["cooccurrence"] * CHANNEL_WEIGHTS["cooccurrence"]
+            + normalized["lastfm_artist"] * CHANNEL_WEIGHTS["lastfm_artist"]
+            + normalized["lastfm_track"] * CHANNEL_WEIGHTS["lastfm_track"]
+            + normalized["recent"] * CHANNEL_WEIGHTS["recent"]
         )
 
-        user_affinity_score = (
-            behavior_source_score * RETRIEVAL_SOURCE_WEIGHTS["behavior"]
+        user_affinity_score = normalized["behavior"] * CHANNEL_WEIGHTS["behavior"]
+
+        # Bounded, confidence-scaled personal taste (see user_taste.py).
+        taste_bonus, skip_penalty = taste_adjustment_for_candidate(
+            user_taste, track, candidate_families
         )
+        user_affinity_score += taste_bonus
 
         shared_families = candidate_debug.get("shared_families", [])
         has_shared_family = len(shared_families) > 0
-        has_cooccurrence = cooccurrence_source_score > 0
-        has_genre_signal = genre_source_score > 0
-        has_lastfm_artist_signal = lastfm_artist_source_score > 0
-        has_lastfm_track_signal = lastfm_track_source_score > 0
+        has_cooccurrence = retrieval_sources.get("cooccurrence", 0.0) > 0
+        has_genre_signal = retrieval_sources.get("genre", 0.0) > 0
+        has_lastfm_artist_signal = retrieval_sources.get("lastfm_artist", 0.0) > 0
+        has_lastfm_track_signal = retrieval_sources.get("lastfm_track", 0.0) > 0
 
         has_alignment = (
             has_shared_family
@@ -93,6 +145,7 @@ def rank_candidates(
 
         candidate_debug["base_score"] = base_score
         candidate_debug["retrieval_sources"] = retrieval_sources
+        candidate_debug["normalized_sources"] = normalized
         candidate_debug["shared_families"] = shared_families
         candidate_debug["has_alignment"] = has_alignment
         candidate_debug["metadata_sparse"] = metadata_sparse
@@ -100,6 +153,8 @@ def rank_candidates(
         candidate_debug["unique_family_count"] = unique_family_count
         candidate_debug["is_multi_cluster"] = is_multi_cluster
         candidate_debug["strong_lastfm_artist_alignment"] = strong_lastfm_artist_alignment
+        candidate_debug["taste_bonus"] = taste_bonus
+        candidate_debug["skip_penalty"] = skip_penalty
 
         if focused_playlist and not metadata_sparse and not has_shared_family:
             if strong_lastfm_artist_alignment or has_lastfm_track_signal:
@@ -181,7 +236,17 @@ def rank_candidates(
             + user_affinity_score
             + cluster_survival_bonus
             + refresh_exploration_bonus
+            - skip_penalty
         )
+
+        if taste_bonus > 0:
+            candidate_debug.setdefault("reasons", []).append(
+                f"user_taste_bonus:+{taste_bonus:.2f}"
+            )
+        if skip_penalty > 0:
+            candidate_debug.setdefault("reasons", []).append(
+                f"user_skip_penalty:-{skip_penalty:.2f}"
+            )
 
         tie_break_jitter = rng.random() * (0.03 if focused_playlist else 0.10)
         final_score = base_score + retrieval_weighted_score + tie_break_jitter

@@ -14,6 +14,7 @@ import time
 from app.config import settings
 from app.db import SessionLocal
 from app.services.job_locking import release_job_lock, try_acquire_job_lock
+from app.services.recommendations.rec_cache import invalidate_library_caches
 from app.services.scanner import scan_directory
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,7 @@ def _run_scan(limit: int):
         logger.exception("Background scan failed")
     finally:
         _update_progress(is_running=False, finished_at=time.time())
+        invalidate_library_caches()
 
         db = SessionLocal()
         try:

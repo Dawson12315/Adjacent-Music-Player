@@ -11,6 +11,7 @@ def retrieve_behavior_candidates(
     playlist_track_ids: list[int],
     playlist_profile: dict,
     limit: int = 150,
+    user_id: int | None = None,
 ):
     candidates: dict[int, RetrievedCandidate] = {}
 
@@ -20,7 +21,7 @@ def retrieve_behavior_candidates(
     metadata_sparse = bool(playlist_profile.get("metadata_sparse"))
     is_multi_cluster = bool(playlist_profile.get("is_multi_cluster"))
 
-    rows = (
+    query = (
         db.query(Track, TrackUserStats)
         .join(TrackUserStats, TrackUserStats.track_id == Track.id)
         .options(
@@ -33,6 +34,15 @@ def retrieve_behavior_candidates(
             | (TrackUserStats.like_count > 0)
             | (TrackUserStats.completion_count > 0)
         )
+    )
+
+    # Behavior is personal; without the filter one user's habits leaked into
+    # another's recommendations.
+    if user_id is not None:
+        query = query.filter(TrackUserStats.user_id == user_id)
+
+    rows = (
+        query
         .order_by(
             TrackUserStats.like_count.desc(),
             TrackUserStats.play_count.desc(),
