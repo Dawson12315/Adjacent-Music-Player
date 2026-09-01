@@ -27,8 +27,6 @@ Create a file called:
 ## 2. Paste this:
 
 ```yaml
-version: "3.9"
-
 services:
   backend:
     image: ghcr.io/dawson12315/adjacent-backend:latest
@@ -38,16 +36,17 @@ services:
       - /opt/apps/adjacent:/app/data
       - /mnt/media/music:/music:ro
     environment:
-      - /mnt/media/music=/music
+      - MUSIC_LIBRARY_PATH=/music
       - FRONTEND_ORIGIN=http://YOUR_IP:5173
       - MUSICBRAINZ_EMAIL=Your_Music_Brainz_Account_Email
+      - AUTH_SECRET_KEY=YOUR_GENERATED_SECRET
     restart: unless-stopped
 
   frontend:
     image: ghcr.io/dawson12315/adjacent-frontend:latest
     container_name: adjacent-frontend
     ports:
-      - "5173:80"
+      - "5173:8080"
     environment:
       - API_BASE_URL=http://YOUR_IP:8000
     depends_on:
@@ -67,11 +66,25 @@ Example:
 
 `192.168.86.23`
 
+- Replace `YOUR_GENERATED_SECRET` with your own random secret (required — the backend
+  refuses to start without one). Generate it with:
+
+```bash
+openssl rand -hex 32
+```
+
 - Update this path if needed, in both backend volumes and environment(must be matching):
 
 `/mnt/media/music`
 
 to wherever your music is stored on your Docker host.
+
+- The backend runs as a non-root user (uid 1000). Make sure the data directory on the
+  host is writable by that uid — for the example above:
+
+```bash
+sudo chown -R 1000:1000 /opt/apps/adjacent
+```
 
 ---
 
