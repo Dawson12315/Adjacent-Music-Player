@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AccountPanel } from "./AccountPanel";
 import { LastfmPanel } from "./LastfmPanel";
@@ -6,8 +6,11 @@ import { useAppSettings } from "./useAppSettings";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { usePlayer } from "../../contexts/PlayerContext";
+import { usePolling } from "../../hooks/usePolling";
 import * as settingsService from "../../services/settingsService";
 import { purgeTracks } from "../../services/tracksService";
+
+const SCAN_POLL_MS = 2500;
 
 export function SettingsView() {
   const { notice, notify } = useNotifications();
@@ -16,28 +19,74 @@ export function SettingsView() {
   const { settings, updateField, toggleField, save, isSaving } = useAppSettings();
 
   const [confirmAction, setConfirmAction] = useState(null);
-  const [isScanning, setIsScanning] = useState(false);
   const [isCleaning, setIsCleaning] = useState(false);
+
+  /**
+   * Scans run in the background on the server; this polls their progress. The
+   * ref remembers a scan was in flight so the finishing poll can announce the
+   * result exactly once — including scans started before this page mounted.
+   */
+  const [scanProgress, setScanProgress] = useState(null);
+  const scanWasRunningRef = useRef(false);
+  const isScanning = Boolean(scanProgress?.is_running);
+
+  const fetchScanProgress = useCallback(async () => {
+    try {
+      const progress = await settingsService.getScanProgress();
+      setScanProgress(progress);
+
+      if (progress.is_running) {
+        scanWasRunningRef.current = true;
+      } else if (scanWasRunningRef.current) {
+        scanWasRunningRef.current = false;
+
+        if (progress.last_result === "completed") {
+          await refreshLibrary();
+          notify(
+            `Library scan completed. Added ${progress.added} new track${
+              progress.added === 1 ? "" : "s"
+            }.`,
+          );
+        } else if (progress.error) {
+          notify(progress.error);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to read scan progress", error);
+    }
+  }, [notify, refreshLibrary]);
+
+  useEffect(() => {
+    fetchScanProgress();
+  }, [fetchScanProgress]);
+
+  usePolling(fetchScanProgress, SCAN_POLL_MS, isScanning);
 
   async function handleScan() {
     if (isScanning) return;
 
-    setIsScanning(true);
     setConfirmAction(null);
-    notify("Scanning library...");
 
     try {
       const result = await settingsService.scanLibrary();
-      await refreshLibrary();
-      notify(
-        `Library scan completed. Added ${result.added} new track${
-          result.added === 1 ? "" : "s"
-        }.`,
-      );
+
+      if (result.started) {
+        scanWasRunningRef.current = true;
+        setScanProgress((previous) => ({
+          ...(previous || {}),
+          is_running: true,
+          files_seen: 0,
+          added: 0,
+          error: null,
+        }));
+        notify("Library scan started.");
+      } else {
+        notify("A scan is already running.");
+      }
+
+      await fetchScanProgress();
     } catch (error) {
-      notify(error.message || "Failed to scan the music library.");
-    } finally {
-      setIsScanning(false);
+      notify(error.message || "Failed to start the library scan.");
     }
   }
 
@@ -112,7 +161,7 @@ export function SettingsView() {
                   onClick={handleScan}
                   disabled={isScanning}
                 >
-                  {isScanning ? "Scanning..." : "Go ahead"}
+                  {isScanning ? "Scanning…" : "Go ahead"}
                 </button>
               </div>
             ) : (
@@ -123,7 +172,9 @@ export function SettingsView() {
                   onClick={() => setConfirmAction("scan_library")}
                   disabled={isScanning}
                 >
-                  {isScanning ? "Scanning..." : "Scan library now"}
+                  {isScanning
+                    ? `Scanning… ${(scanProgress?.added ?? 0).toLocaleString()} added`
+                    : "Scan library now"}
                 </button>
               </div>
             )}

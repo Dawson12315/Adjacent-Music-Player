@@ -197,13 +197,16 @@ def stats_summary(
         .scalar()
     )
 
+    # Timestamps are stored in UTC; days and streaks are a human concept, so
+    # bucket them in the server's local timezone or evening listening bleeds
+    # into the next day.
     active_day_rows = (
-        db.query(func.date(ListeningEvent.created_at).label("day"))
+        db.query(func.date(ListeningEvent.created_at, "localtime").label("day"))
         .filter(
             ListeningEvent.user_id == current_user.id,
             ListeningEvent.event_type == "play_started",
         )
-        .group_by(func.date(ListeningEvent.created_at))
+        .group_by(func.date(ListeningEvent.created_at, "localtime"))
         .all()
     )
 
@@ -211,7 +214,7 @@ def stats_summary(
         date.fromisoformat(row.day) for row in active_day_rows if row.day
     )
 
-    today = datetime.utcnow().date()
+    today = datetime.now().date()
     current_streak_days = 0
 
     if active_days and active_days[-1] in (today, today - timedelta(days=1)):
@@ -248,11 +251,10 @@ def stats_summary(
         "first_played_at": play_totals.first_played_at,
         "last_played_at": play_totals.last_played_at,
         "completion_rate": (total_completions / total_plays) if total_plays else 0.0,
-        "skip_rate": (
-            total_skips / (total_plays + total_skips)
-            if (total_plays + total_skips)
-            else 0.0
-        ),
+        # Skips are a subset of started plays (a skip always follows a
+        # play_started), so the denominator is plays — adding skips to it
+        # double-counted them and understated the rate.
+        "skip_rate": min(total_skips / total_plays, 1.0) if total_plays else 0.0,
         "estimated_listening_seconds": float(completed_seconds or 0.0)
         + float(skipped_seconds or 0.0),
         "current_streak_days": current_streak_days,
@@ -266,20 +268,21 @@ def plays_over_time(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    end_day = datetime.utcnow().date()
+    # Local days, matching the summary's streaks — see the note there.
+    end_day = datetime.now().date()
     start_day = end_day - timedelta(days=days - 1)
 
     play_rows = (
         db.query(
-            func.date(ListeningEvent.created_at).label("day"),
+            func.date(ListeningEvent.created_at, "localtime").label("day"),
             func.count(ListeningEvent.id).label("plays"),
         )
         .filter(
             ListeningEvent.user_id == current_user.id,
             ListeningEvent.event_type == "play_started",
-            ListeningEvent.created_at >= datetime.combine(start_day, datetime.min.time()),
+            func.date(ListeningEvent.created_at, "localtime") >= start_day.isoformat(),
         )
-        .group_by(func.date(ListeningEvent.created_at))
+        .group_by(func.date(ListeningEvent.created_at, "localtime"))
         .all()
     )
 
@@ -396,16 +399,17 @@ def plays_by_hour(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Local hours — "when you listen" in UTC put evening plays at 3 AM.
     hour_rows = (
         db.query(
-            func.strftime("%H", ListeningEvent.created_at).label("hour"),
+            func.strftime("%H", ListeningEvent.created_at, "localtime").label("hour"),
             func.count(ListeningEvent.id).label("plays"),
         )
         .filter(
             ListeningEvent.user_id == current_user.id,
             ListeningEvent.event_type == "play_started",
         )
-        .group_by(func.strftime("%H", ListeningEvent.created_at))
+        .group_by(func.strftime("%H", ListeningEvent.created_at, "localtime"))
         .all()
     )
 

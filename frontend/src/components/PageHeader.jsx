@@ -10,7 +10,7 @@ import { useDismissable } from "../hooks/useDismissable";
 import { useNavigation } from "../hooks/useNavigation";
 import { getArtistGenres } from "../services/artistsService";
 import { artworkUrl } from "../config";
-import { resolveAlbumArtwork } from "../utils/artwork";
+import { getArtistArtworkPath, resolveAlbumArtwork } from "../utils/artwork";
 
 /**
  * One page header for every view.
@@ -72,7 +72,9 @@ export function PageHeader() {
   }
 
   const playlist = playlists.find((item) => item.id === selectedPlaylistId) || null;
-  const artistArtworkPath = selectedArtist ? artistArtworkMap[selectedArtist] : null;
+  const artistArtworkPath = selectedArtist
+    ? getArtistArtworkPath(selectedArtist, artistArtworkMap)
+    : null;
   const albumArtwork = selectedAlbum
     ? resolveAlbumArtwork(selectedAlbum, albumArtworkMap)
     : null;

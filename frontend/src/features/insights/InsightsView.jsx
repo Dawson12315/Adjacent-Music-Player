@@ -125,7 +125,7 @@ export function InsightsView() {
         </section>
       )}
 
-      <div className="insights__grid">
+      <div className="insights__grid insights__grid--quad">
         <BarPanel
           title="Top artists"
           rows={data.topArtists.map((a) => ({ label: a.name, value: a.play_count }))}
@@ -183,7 +183,7 @@ export function InsightsView() {
         </section>
       )}
 
-      <div className="insights__grid">
+      <div className="insights__grid insights__grid--trio">
         <TrackPanel
           title="Most played"
           icon="play"
@@ -242,17 +242,17 @@ function StatTile({ icon, label, value, unit, note }) {
 }
 
 function BarPanel({ title, rows }) {
-  if (rows.length === 0) {
-    return null;
-  }
-
   const max = Math.max(...rows.map((row) => row.value), 1);
 
+  // An empty panel keeps its place in the grid — a vanishing one left the
+  // 2×2 layout with a hole.
   return (
     <section className="insights__panel">
       <div className="section-head">
         <h2 className="section-head__title">{title}</h2>
       </div>
+
+      {rows.length === 0 && <p className="state__text">Not enough listening yet.</p>}
 
       <div className="bar-list">
         {rows.map((row) => (

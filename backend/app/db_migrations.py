@@ -345,6 +345,19 @@ def run_simple_migrations():
         if "user_id" not in listening_event_column_names:
             connection.execute(text("ALTER TABLE listening_events ADD COLUMN user_id INTEGER"))
 
+        # Events recorded before the user_id column existed belong to the
+        # first admin (single-user era); NULLs are invisible to every stat.
+        connection.execute(
+            text(
+                """
+                UPDATE listening_events
+                SET user_id = (SELECT MIN(id) FROM users WHERE role = 'admin')
+                WHERE user_id IS NULL
+                  AND EXISTS (SELECT 1 FROM users WHERE role = 'admin')
+                """
+            )
+        )
+
         connection.execute(
             text(
                 """
