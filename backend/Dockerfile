@@ -20,7 +20,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-COPY data ./data
+
+# Runtime state (SQLite DB, transcode caches, uploads) lives in a volume mounted at
+# /app/data. Never COPY it into the image: published images are public, and the local
+# data directory holds the operator's real database.
+RUN mkdir -p data
 
 EXPOSE 8000
 

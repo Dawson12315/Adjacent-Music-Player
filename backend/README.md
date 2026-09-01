@@ -6,5 +6,9 @@ FastAPI service for music library, metadata, and streaming.
 
 ```bash
 cd backend
-source /Users/dawsonhudson/Desktop/Spotify-Replica/backend/.venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # then set AUTH_SECRET_KEY (openssl rand -hex 32)
 uvicorn app.main:app --reload
+```

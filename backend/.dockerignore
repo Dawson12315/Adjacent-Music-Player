@@ -2,3 +2,18 @@ __pycache__
 *.pyc
 .venv
 .env
+.env.*
+!.env.example
+
+# Runtime state must never enter the build context — published images are public.
+data/
+uploads/
+app/uploads/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+
+.DS_Store
+.gitignore
+README.md
