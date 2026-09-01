@@ -152,6 +152,15 @@ def _run_cooccurrence_rebuild_job():
         logger.warning(f"Scheduled co-occurrence rebuild error: {error}")
 
 
+def _run_stream_cache_sweep_job():
+    from app.services.stream_cache_maintenance import sweep_stream_caches
+
+    try:
+        sweep_stream_caches()
+    except Exception as error:
+        logger.warning(f"Scheduled stream cache sweep error: {error}")
+
+
 def start_scheduler():
     global _scheduler
 
@@ -169,6 +178,19 @@ def start_scheduler():
         hour=3,
         minute=45,
         id="scheduled_cooccurrence_rebuild",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # Transcode caches only ever grow without this; the sweep also removes
+    # entries orphaned by purge/cleanup and superseded naming schemes.
+    _scheduler.add_job(
+        _run_stream_cache_sweep_job,
+        trigger="cron",
+        hour=4,
+        minute=15,
+        id="scheduled_stream_cache_sweep",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

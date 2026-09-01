@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+import hashlib
 import logging
 import mimetypes
 import re
@@ -36,6 +37,12 @@ from app.schemas.track import TrackResponse
 from app.schemas.track_edit import TrackUpdate
 from app.services.auth import get_user_by_id
 from app.services.lastfm import scrobble_track, update_now_playing
+from app.services.stream_cache_maintenance import clear_stream_caches
+from app.services.track_responses import (
+    build_single_track_response,
+    build_track_response_from_maps,
+    build_track_responses,
+)
 from app.services.metadata_normalizer import normalize_genre_list
 from app.services.recommendations.rec_cache import invalidate_library_caches
 from app.services.musicbrainz import find_recording_mbid
@@ -206,9 +213,24 @@ def get_mobile_cache_lock(cache_key: str) -> threading.Lock:
         return lock
 
 
+def source_fingerprint(file_path: Path) -> str:
+    """Identity of the *audio content* a cache entry was made from.
+
+    Cache entries used to be keyed by track id alone and validated by mtime
+    comparison. Track ids are reassigned by purge + rescan, and library files
+    are usually older than the cache — so a stale entry for old track N would
+    pass validation and play the wrong song for new track N. Binding entries
+    to (path, mtime, size) makes that structurally impossible: different
+    audio always means a different cache name.
+    """
+    stat = file_path.stat()
+    raw = f"{file_path}:{stat.st_mtime_ns}:{stat.st_size}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+
 # HLS cache path helper
-def get_hls_cache_paths(track_id: int, quality: str):
-    track_dir = HLS_CACHE_ROOT / f"track_{track_id}" / quality
+def get_hls_cache_paths(track_id: int, quality: str, fingerprint: str):
+    track_dir = HLS_CACHE_ROOT / f"track_{track_id}_{fingerprint}" / quality
     playlist_path = track_dir / "index.m3u8"
     segment_pattern = track_dir / "segment_%05d.ts"
 
@@ -339,21 +361,20 @@ def ensure_mobile_stream_cache(
     profile: dict,
     quality: str,
 ) -> Path:
-    source_mtime = file_path.stat().st_mtime
     cache_dir = Path("data/mobile_cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     output_extension = profile["extension"]
     cache_version = profile.get("cache_version", "v1")
-    cached_file_path = cache_dir / f"track_{track.id}_{quality}_{cache_version}{output_extension}"
-    temp_file_path = cache_dir / f"track_{track.id}_{quality}_{cache_version}_{uuid4().hex}.tmp{output_extension}"
+    fingerprint = source_fingerprint(file_path)
+    cache_basename = f"track_{track.id}_{fingerprint}_{quality}_{cache_version}"
+    cached_file_path = cache_dir / f"{cache_basename}{output_extension}"
+    temp_file_path = cache_dir / f"{cache_basename}_{uuid4().hex}.tmp{output_extension}"
 
+    # The fingerprint in the name carries source identity (path+mtime+size),
+    # so existence is validity — no mtime comparison to get wrong.
     def is_cache_valid() -> bool:
-        return (
-            cached_file_path.exists()
-            and cached_file_path.stat().st_size > 0
-            and cached_file_path.stat().st_mtime >= source_mtime
-        )
+        return cached_file_path.exists() and cached_file_path.stat().st_size > 0
 
     if is_cache_valid():
         return cached_file_path
@@ -431,22 +452,19 @@ def ensure_hls_stream_cache(
             detail="Original quality is not supported for HLS streaming",
         )
 
-    source_mtime = file_path.stat().st_mtime
     cache_version = profile.get("cache_version", "v1")
-    cache_key = f"hls:{track.id}:{quality}:{cache_version}"
+    fingerprint = source_fingerprint(file_path)
+    cache_key = f"hls:{track.id}:{fingerprint}:{quality}:{cache_version}"
     cache_lock = get_mobile_cache_lock(cache_key)
 
-    paths = get_hls_cache_paths(track.id, quality)
+    paths = get_hls_cache_paths(track.id, quality, fingerprint)
     track_dir = paths["track_dir"]
     playlist_path = paths["playlist_path"]
     segment_pattern = paths["segment_pattern"]
 
+    # Source identity lives in the directory name; existence is validity.
     def is_cache_valid() -> bool:
-        return (
-            playlist_path.exists()
-            and playlist_path.stat().st_size > 0
-            and playlist_path.stat().st_mtime >= source_mtime
-        )
+        return playlist_path.exists() and playlist_path.stat().st_size > 0
 
     if is_cache_valid():
         return playlist_path
@@ -678,33 +696,13 @@ def get_artist_artwork_path(db: Session, artist_name: str | None) -> str | None:
 
 
 def build_track_response(track: Track, db: Session | None = None) -> TrackResponse:
-    album_artwork_path = None
-    artist_artwork_path = None
+    """Single-track wrapper over the shared batched builder. List endpoints
+    should call build_track_responses() so artwork resolves in two queries
+    total instead of two per track."""
+    if db is None:
+        return build_track_response_from_maps(track, {}, {})
 
-    if db:
-        album_artwork_path = get_album_artwork_path(db, track.album)
-        artist_artwork_path = get_artist_artwork_path(db, track.artist)
-
-    return TrackResponse(
-        id=track.id,
-        title=track.title,
-        artist=track.artist,
-        album=track.album,
-        genre=track.genre,
-        genres=[item.genre for item in track.track_genres],
-        artists=[item.artist_name for item in track.track_artists],
-        file_path=track.file_path,
-        artwork_path=album_artwork_path,
-        album_artwork_path=album_artwork_path,
-        artist_artwork_path=artist_artwork_path,
-        raw_title=track.raw_title,
-        raw_artist=track.raw_artist,
-        raw_album=track.raw_album,
-        raw_genre=track.raw_genre,
-        musicbrainz_recording_id=track.musicbrainz_recording_id,
-        lastfm_tags_enriched=track.lastfm_tags_enriched,
-        duration_seconds=track.duration_seconds,
-    )
+    return build_single_track_response(db, track)
 
 
 def build_track_responses_for_ids(track_ids: list[int], db: Session) -> list[TrackResponse]:
@@ -722,12 +720,11 @@ def build_track_responses_for_ids(track_ids: list[int], db: Session) -> list[Tra
     )
 
     track_by_id = {track.id: track for track in tracks}
-
-    return [
-        build_track_response(track_by_id[track_id], db)
-        for track_id in track_ids
-        if track_id in track_by_id
+    ordered_tracks = [
+        track_by_id[track_id] for track_id in track_ids if track_id in track_by_id
     ]
+
+    return build_track_responses(db, ordered_tracks)
 
 
 @router.get("/tracks/count", tags=["tracks"])
@@ -815,7 +812,7 @@ def list_tracks(
 
     tracks = query.all()
 
-    items = [build_track_response(track, db) for track in tracks]
+    items = build_track_responses(db, tracks)
 
     if limit is None:
         return items
@@ -1020,10 +1017,18 @@ def get_hls_master_playlist(
 
     lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
 
-    for variant in HLS_QUALITY_VARIANTS:
+    # A real master playlist: every variant is listed so ABR-capable players
+    # can actually adapt (the old master carried only the requested quality,
+    # which made the master/variant indirection decorative). The requested
+    # quality goes first — players start with the first variant, so an
+    # explicit quality choice still lands before adaptation kicks in.
+    ordered_variants = sorted(
+        HLS_QUALITY_VARIANTS,
+        key=lambda variant: variant["quality"] != requested_hls_quality,
+    )
+
+    for variant in ordered_variants:
         quality = variant["quality"]
-        if quality != requested_hls_quality:
-            continue
         profile = MOBILE_STREAM_PROFILES.get(quality)
 
         if not profile or profile.get("passthrough"):
@@ -1130,10 +1135,20 @@ def get_hls_segment(
     if not HLS_SEGMENT_NAME_PATTERN.fullmatch(segment_name):
         raise HTTPException(status_code=404, detail="HLS segment not found")
 
+    # The cache directory embeds the source fingerprint, so the track's file
+    # identity is needed to locate segments.
+    track = db.query(Track).filter(Track.id == track_id).first()
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    file_path = Path(track.file_path)
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
     segment_path = (
-        HLS_CACHE_ROOT
-        / f"track_{track_id}"
-        / quality
+        get_hls_cache_paths(track_id, quality, source_fingerprint(file_path))["track_dir"]
         / segment_name
     )
 
@@ -1384,6 +1399,11 @@ def purge_tracks(
 
     db.commit()
     invalidate_library_caches()
+
+    # The transcode caches are derived from the tracks that no longer exist;
+    # dropping them reclaims disk and removes any chance of an old entry
+    # shadowing a future track (ids restart after a purge).
+    clear_stream_caches()
 
     return {
         "message": "All stored tracks purged",

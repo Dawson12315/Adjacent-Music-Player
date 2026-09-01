@@ -8,6 +8,8 @@ from app.models.track import Track
 from app.models.track_genre import TrackGenre
 from app.models.listening_event import ListeningEvent
 from app.models.user import User
+from app.services.track_responses import get_artwork_maps, normalize_album_key
+from app.utils.artist_normalization import normalize_artist_name
 
 router = APIRouter()
 
@@ -55,7 +57,7 @@ def list_genre_tracks(
         )
         .join(TrackGenre, TrackGenre.track_id == Track.id)
         .outerjoin(play_counts, play_counts.c.track_id == Track.id)
-        .filter(func.lower(TrackGenre.genre) == genre_name.lower())
+        .filter(func.lower(TrackGenre.genre) == func.lower(genre_name))
     )
 
     total = base_query.count()
@@ -71,9 +73,15 @@ def list_genre_tracks(
         .all()
     )
 
+    # These used to read attributes the Track model does not have, so genre
+    # lists always shipped null artwork. Two batched lookups fix that.
+    album_map, artist_map = get_artwork_maps(db, [track for track, _count in rows])
+
     items = []
 
     for track, play_count in rows:
+        album_artwork_path = album_map.get(normalize_album_key(track.album))
+
         items.append({
             "id": track.id,
             "title": track.title,
@@ -82,9 +90,9 @@ def list_genre_tracks(
             "genre": track.genre,
             "genres": [genre_name],
             "file_path": track.file_path,
-            "artwork_path": getattr(track, "artwork_path", None),
-            "album_artwork_path": getattr(track, "album_artwork_path", None),
-            "artist_artwork_path": getattr(track, "artist_artwork_path", None),
+            "artwork_path": album_artwork_path,
+            "album_artwork_path": album_artwork_path,
+            "artist_artwork_path": artist_map.get(normalize_artist_name(track.artist)),
             "play_count": int(play_count or 0),
         })
 
