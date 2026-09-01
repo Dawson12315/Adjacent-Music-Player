@@ -9,6 +9,7 @@ import { LibraryProvider } from "./contexts/LibraryProvider";
 import { NotificationProvider } from "./contexts/NotificationProvider";
 import { PageMetaProvider } from "./contexts/PageMetaProvider";
 import { PlayerProvider } from "./contexts/PlayerProvider";
+import { ScanProvider } from "./contexts/ScanProvider";
 import { AuthScreen } from "./features/auth/AuthScreen";
 import { DuckMark } from "./components/DuckMark";
 
@@ -72,8 +73,9 @@ function AuthenticatedApp() {
 
   return (
     <LibraryProvider>
-      <PlayerProvider>
-        <PageMetaProvider>
+      <ScanProvider>
+        <PlayerProvider>
+          <PageMetaProvider>
           <Suspense fallback={<TrackListSkeleton />}>
             <Routes>
               <Route element={<AppLayout />}>
@@ -100,8 +102,9 @@ function AuthenticatedApp() {
               </Route>
             </Routes>
           </Suspense>
-        </PageMetaProvider>
-      </PlayerProvider>
+          </PageMetaProvider>
+        </PlayerProvider>
+      </ScanProvider>
     </LibraryProvider>
   );
 }
