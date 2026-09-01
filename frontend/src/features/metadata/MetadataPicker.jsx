@@ -25,8 +25,8 @@ export function MetadataPicker({
   }
 
   return (
-    <label className="modal__field">
-      <span className="modal__label">{label}</span>
+    <label className="field">
+      <span className="field__label">{label}</span>
 
       <div className="modal__select-row">
         <button
@@ -42,7 +42,7 @@ export function MetadataPicker({
         </button>
 
         <button
-          className="modal__plus-button"
+          className="btn btn--icon"
           type="button"
           aria-label={createButtonLabel}
           onClick={() => {
@@ -80,7 +80,7 @@ export function MetadataPicker({
       {isCreating && (
         <div className="modal__inline-create">
           <input
-            className="modal__input"
+            className="input"
             type="text"
             placeholder={createPlaceholder}
             value={draft}
@@ -89,7 +89,7 @@ export function MetadataPicker({
 
           <div className="modal__inline-actions">
             <button
-              className="settings-button settings-button--secondary"
+              className="btn"
               type="button"
               onClick={reset}
             >
@@ -97,7 +97,7 @@ export function MetadataPicker({
             </button>
 
             <button
-              className="settings-button"
+              className="btn btn--primary"
               type="button"
               onClick={() => {
                 const trimmed = draft.trim();

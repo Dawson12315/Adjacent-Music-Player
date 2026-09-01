@@ -75,6 +75,7 @@ def build_mobile_artist_track_response(track: Track, db: Session) -> TrackRespon
         raw_genre=track.raw_genre,
         musicbrainz_recording_id=track.musicbrainz_recording_id,
         lastfm_tags_enriched=track.lastfm_tags_enriched,
+        duration_seconds=track.duration_seconds,
     )
 
 
@@ -207,6 +208,35 @@ def get_mobile_artist_tracks(
     )
 
     return [build_mobile_artist_track_response(track, db) for track in tracks]
+
+
+@router.get("/artists/artwork", tags=["artists"])
+def get_all_artist_artwork(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    artwork_rows = db.query(ArtistArtwork).all()
+
+    return {
+        "artwork": {
+            artwork.artist_key: artwork.artwork_path
+            for artwork in artwork_rows
+            if artwork.artwork_path
+        }
+    }
+
+
+@router.get("/artists/{artist_name:path}/tracks", response_model=list[TrackResponse], tags=["artists"])
+def get_artist_tracks(
+    artist_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return get_mobile_artist_tracks(
+        artist_name=artist_name,
+        db=db,
+        current_user=current_user,
+    )
 
 
 @router.get("/artists/{artist_name:path}/artwork", tags=["artists"])

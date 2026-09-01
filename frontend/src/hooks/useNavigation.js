@@ -39,6 +39,10 @@ function parseLocation(pathname) {
   const name = rawName ? decodeURIComponent(rawName) : null;
 
   switch (section) {
+    case undefined:
+      return { activeView: "home" };
+    case "tracks":
+      return { activeView: "tracks" };
     case "settings":
       return { activeView: "settings" };
     case "insights":
@@ -54,7 +58,7 @@ function parseLocation(pathname) {
     case "genres":
       return name ? { activeView: "tracks", selectedGenre: name } : { activeView: "genres" };
     default:
-      return { activeView: "tracks" };
+      return { activeView: "home" };
   }
 }
 
@@ -121,7 +125,8 @@ export function useNavigation() {
     (playlistId) => navigate(buildPlaylistPath(playlistId)),
     [navigate],
   );
-  const clearFilters = useCallback(() => navigate("/"), [navigate]);
+  const clearFilters = useCallback(() => navigate("/tracks"), [navigate]);
+  const goHome = useCallback(() => navigate("/"), [navigate]);
 
   return useMemo(
     () => ({
@@ -139,6 +144,7 @@ export function useNavigation() {
       goToGenre,
       goToPlaylist,
       clearFilters,
+      goHome,
       navigate,
     }),
     [
@@ -156,6 +162,7 @@ export function useNavigation() {
       goToGenre,
       goToPlaylist,
       clearFilters,
+      goHome,
       navigate,
     ],
   );

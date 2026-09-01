@@ -10,6 +10,7 @@ import { useListeningEvents } from "../hooks/useListeningEvents";
 import { useMediaSession } from "../hooks/useMediaSession";
 import { usePlaybackPersistence } from "../hooks/usePlaybackPersistence";
 import { getPlaybackState } from "../services/playbackService";
+import { getTracksByIds } from "../services/tracksService";
 import * as playlistsService from "../services/playlistsService";
 import { initialPlayerState, playerReducer } from "../features/player/playerReducer";
 
@@ -24,7 +25,7 @@ const DEFAULT_SOURCE = { source_type: "library", source_id: null };
  */
 export function PlayerProvider({ children }) {
   const { currentUser } = useAuth();
-  const { tracks, loading: libraryLoading } = useLibrary();
+  const { loading: libraryLoading } = useLibrary();
   const { notify } = useNotifications();
 
   const [state, dispatch] = useReducer(playerReducer, initialPlayerState);
@@ -91,15 +92,24 @@ export function PlayerProvider({ children }) {
 
         if (cancelled) return;
 
-        const trackMap = new Map(tracks.map((track) => [track.id, track]));
-        const restoredQueue = saved.queueTrackIds
-          .map((id) => trackMap.get(id))
-          .filter(Boolean);
+        /*
+         * The queue is stored as bare track ids. The library is no longer held in memory,
+         * so they are resolved in one request — in order, and capped, since a queue built
+         * from "play everything" could otherwise be tens of thousands long.
+         */
+        const restoredQueue = saved.queueTrackIds.length
+          ? await getTracksByIds(saved.queueTrackIds)
+          : [];
+
+        if (cancelled) return;
 
         const restoredTrack =
           restoredQueue[saved.queueIndex] ??
-          (saved.currentTrackId ? trackMap.get(saved.currentTrackId) : null) ??
-          null;
+          (saved.currentTrackId
+            ? (await getTracksByIds([saved.currentTrackId]))[0] ?? null
+            : null);
+
+        if (cancelled) return;
 
         dispatch({
           type: "RESTORE",
@@ -129,7 +139,7 @@ export function PlayerProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [currentUser, libraryLoading, hasRestored, tracks, requestSeek]);
+  }, [currentUser, libraryLoading, hasRestored, requestSeek]);
 
   /* ---------- persistence ---------- */
 

@@ -168,10 +168,10 @@ export function LastfmPanel({ settings, updateField, toggleField }) {
         </div>
 
         <div className="settings-grid settings-grid--two">
-          <label className="settings-field">
-            <span className="settings-field__label">Last.fm API key</span>
+          <label className="field">
+            <span className="field__label">Last.fm API key</span>
             <input
-              className="settings-text-input"
+              className="input"
               type="text"
               value={settings.lastfm_api_key}
               onChange={(event) => updateField("lastfm_api_key", event.target.value)}
@@ -179,10 +179,10 @@ export function LastfmPanel({ settings, updateField, toggleField }) {
             />
           </label>
 
-          <label className="settings-field">
-            <span className="settings-field__label">Last.fm API secret</span>
+          <label className="field">
+            <span className="field__label">Last.fm API secret</span>
             <input
-              className="settings-text-input"
+              className="input"
               type="text"
               value={settings.lastfm_api_secret}
               onChange={(event) => updateField("lastfm_api_secret", event.target.value)}
@@ -191,7 +191,7 @@ export function LastfmPanel({ settings, updateField, toggleField }) {
           </label>
         </div>
 
-        <div className="settings-card__text settings-card__status-text">
+        <div className="settings-card__text settings-card__text">
           {settings.lastfm_username
             ? `Connected as ${settings.lastfm_username}`
             : "Not connected to Last.fm yet."}
@@ -199,7 +199,7 @@ export function LastfmPanel({ settings, updateField, toggleField }) {
 
         <div className="settings-card__actions">
           <button
-            className="settings-button settings-button--secondary"
+            className="btn"
             type="button"
             onClick={handleConnect}
             disabled={
@@ -213,7 +213,7 @@ export function LastfmPanel({ settings, updateField, toggleField }) {
 
           {readiness.ready && (
             <button
-              className="settings-button"
+              className="btn btn--primary"
               type="button"
               onClick={handleStartEnrichment}
               disabled={isEnriching || !settings.lastfm_api_key.trim()}
@@ -224,7 +224,7 @@ export function LastfmPanel({ settings, updateField, toggleField }) {
 
           {isEnriching && (
             <button
-              className="settings-button settings-button--danger"
+              className="btn btn--danger"
               type="button"
               onClick={handleStopEnrichment}
             >
@@ -244,7 +244,7 @@ export function LastfmPanel({ settings, updateField, toggleField }) {
         {progress && <LastfmProgressCard progress={progress} />}
 
         <div className="settings-grid settings-grid--two">
-          <label className="settings-field settings-field--inline">
+          <label className="field field--inline">
             <input
               type="checkbox"
               checked={settings.lastfm_enrichment_enabled}
@@ -253,10 +253,10 @@ export function LastfmPanel({ settings, updateField, toggleField }) {
             <span>Enable daily Last.fm enrichment</span>
           </label>
 
-          <label className="settings-field">
-            <span className="settings-field__label">Run time</span>
+          <label className="field">
+            <span className="field__label">Run time</span>
             <input
-              className="settings-time-input"
+              className="input"
               type="time"
               value={settings.lastfm_enrichment_time}
               onChange={(event) =>

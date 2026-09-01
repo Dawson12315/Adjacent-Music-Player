@@ -1,24 +1,30 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { Artwork } from "../../components/Artwork";
+import { Icon } from "../../components/Icon";
+import { useLibrary } from "../../contexts/LibraryContext";
 import { getPlaylistRecommendations } from "../../services/recommendationsService";
 import { getSimilarTracks } from "../../services/tracksService";
+import { resolveAlbumArtwork } from "../../utils/artwork";
 
-const SIMILAR_TRACK_LIMIT = 10;
+const LIMIT = 10;
 
 /**
  * "More like this".
  *
- * Two sources behind one component: per-playlist recommendations when a playlist is
- * open, and per-track similarity otherwise. The playlist variant is slow — it runs the
- * full retrieval pipeline server-side — so requests are aborted when the source changes
- * rather than left to land out of order.
+ * Two sources behind one component: per-playlist recommendations when a playlist is open,
+ * and per-track similarity otherwise. Both now run the real retrieval pipeline — the
+ * track endpoint used to be `WHERE genre = ? ORDER BY random()`, which never touched the
+ * Last.fm similarity tables, the co-occurrence data, or listening behaviour.
  */
 export function SimilarTracksSection({ sourceTrack, playlistId, onPlay, onAdd }) {
+  const { albumArtworkMap } = useLibrary();
+
   const [tracks, setTracks] = useState([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
 
-  const refresh = useCallback(() => setRefreshKey((previous) => previous + 1), []);
+  const refresh = useCallback(() => setRefreshKey((key) => key + 1), []);
 
   useEffect(() => {
     if (!playlistId && !sourceTrack) {
@@ -40,16 +46,12 @@ export function SimilarTracksSection({ sourceTrack, playlistId, onPlay, onAdd })
           : await getSimilarTracks(sourceTrack.id, { signal: controller.signal });
 
         if (!controller.signal.aborted) {
-          setTracks(results.slice(0, SIMILAR_TRACK_LIMIT));
+          setTracks(results.slice(0, LIMIT));
         }
       } catch (error) {
-        if (error.name !== "AbortError") {
-          setTracks([]);
-        }
+        if (error.name !== "AbortError") setTracks([]);
       } finally {
-        if (!controller.signal.aborted) {
-          setIsLoading(false);
-        }
+        if (!controller.signal.aborted) setIsLoading(false);
       }
     }
 
@@ -63,74 +65,61 @@ export function SimilarTracksSection({ sourceTrack, playlistId, onPlay, onAdd })
   }
 
   return (
-    <div className="similar-section">
+    <section className="similar-section">
       <div className="similar-section__header">
-        <h3>More like this</h3>
+        <h2 className="section-head__title">
+          <Icon name="sparkle" size={16} /> More like this
+        </h2>
 
-        {onAdd && (
-          <button
-            className="similar-section__refresh-button"
-            type="button"
-            onClick={refresh}
-            disabled={isLoading}
-            aria-label="Refresh recommendations"
-          >
-            ↻
-          </button>
-        )}
+        <button
+          className="btn btn--icon btn--ghost btn--sm"
+          type="button"
+          onClick={refresh}
+          disabled={isLoading}
+          aria-label="Refresh recommendations"
+        >
+          <Icon name="refresh" size={14} />
+        </button>
       </div>
 
       <div className="similar-section__list">
-        {tracks.map((track) =>
-          onAdd ? (
-            <div key={track.id} className="track-row similar-track-row">
-              <button
-                className="similar-track-row__main"
-                onClick={() => onPlay(track)}
-                type="button"
-              >
-                <div className="track-row__content">
-                  <div className="track-row__title">{track.title}</div>
-                  <div className="track-row__meta">
-                    {track.artist || "Unknown Artist"} • {track.album || "Unknown Album"}
-                  </div>
-
-                  {track.debug?.reason_summary && (
-                    <div className="track-row__reason">{track.debug.reason_summary}</div>
-                  )}
-                </div>
-              </button>
-
-              <button
-                className="similar-track-row__add-button"
-                type="button"
-                onClick={() => onAdd(track)}
-                aria-label={`Add ${track.title} to playlist`}
-              >
-                +
-              </button>
-            </div>
-          ) : (
-            <button
-              key={track.id}
-              className="track-row"
-              onClick={() => onPlay(track)}
-              type="button"
-            >
-              <div className="track-row__content">
-                <div className="track-row__title">{track.title}</div>
-                <div className="track-row__meta">
-                  {track.artist || "Unknown Artist"} • {track.album || "Unknown Album"}
-                </div>
-
+        {tracks.map((track) => (
+          <div className="track-row" key={track.id}>
+            <button className="track-row__main" type="button" onClick={() => onPlay(track)}>
+              <span className="track-row__index">
+                <Icon name="play" size={12} />
+              </span>
+              <Artwork
+                artwork={resolveAlbumArtwork(track.album, albumArtworkMap)}
+                className="track-row__art"
+                size={40}
+              />
+              <span className="track-row__content">
+                <span className="track-row__title">{track.title}</span>
+                <span className="track-row__meta">
+                  {track.artist || "Unknown Artist"} · {track.album || "Unknown Album"}
+                </span>
                 {track.debug?.reason_summary && (
-                  <div className="track-row__reason">{track.debug.reason_summary}</div>
+                  <span className="track-row__reason">{track.debug.reason_summary}</span>
                 )}
-              </div>
+              </span>
             </button>
-          ),
-        )}
+
+            {onAdd && (
+              <div className="track-row__actions">
+                <button
+                  className="btn btn--icon btn--ghost btn--sm"
+                  type="button"
+                  onClick={() => onAdd(track)}
+                  aria-label={`Add ${track.title} to this playlist`}
+                >
+                  <Icon name="plus" size={16} />
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
       </div>
-    </div>
+    </section>
   );
 }

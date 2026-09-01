@@ -1,0 +1,230 @@
+/*
+ * Adjacent design tokens
+ * ----------------------
+ * The single source of truth for colour, type, space, radius, elevation, motion and
+ * stacking. Before this existed the stylesheet held 151 distinct colours, 36 font sizes
+ * and 52 padding combinations, with the brand blue written out by hand 49 times across
+ * 19 alpha values. Nothing below this file should contain a raw colour or a magic number.
+ *
+ * The app is deliberately dark-only. It is a music player; a light mode is a product
+ * decision, not a token decision, and the tokens are structured so one could be added by
+ * redefining this block alone.
+ */
+
+:root {
+  /* ---------------------------------------------------------------- *
+   * Colour — surfaces
+   *
+   * Every dark surface carries a slight blue bias rather than being a
+   * neutral grey. It is a small shift that makes the greys read as part
+   * of the brand instead of as a default.
+   * ---------------------------------------------------------------- */
+  --field:              #0A0C11;
+  --field-raised:       #10131B;
+  --surface:            #161A24;
+  --surface-hover:      #1C212D;
+  --surface-active:     #222839;
+  --surface-inset:      #0D1017;
+
+  /* Translucent surface washes, for layering over artwork or gradients */
+  --wash-subtle:        rgba(255, 255, 255, 0.03);
+  --wash:               rgba(255, 255, 255, 0.05);
+  --wash-strong:        rgba(255, 255, 255, 0.08);
+
+  /* ---------------------------------------------------------------- *
+   * Colour — borders. Three steps replace eleven near-identical alphas.
+   * ---------------------------------------------------------------- */
+  --border-subtle:      rgba(255, 255, 255, 0.06);
+  --border:             rgba(255, 255, 255, 0.10);
+  --border-strong:      rgba(255, 255, 255, 0.16);
+
+  /* ---------------------------------------------------------------- *
+   * Colour — text. Four steps replace eleven ways of saying "secondary".
+   * ---------------------------------------------------------------- */
+  --text:               #F2F4F8;
+  --text-secondary:     #A8B0C0;
+  --text-muted:         #6F7788;
+  --text-disabled:      #4A5162;
+  --text-on-accent:     #06080D;
+
+  /* ---------------------------------------------------------------- *
+   * Colour — Adjacent Blue.
+   *
+   * The interactive colour: links, focus, selection, progress. Sampled
+   * from the logo tile, which sits at #1964E3.
+   * ---------------------------------------------------------------- */
+  --blue-100:           #D6E4FF;
+  --blue-300:           #8AB4FF;
+  --blue:               #2F7CFF;
+  --blue-600:           #1964E3;
+  --blue-700:           #1450BC;
+
+  --blue-wash:          rgba(47, 124, 255, 0.08);
+  --blue-wash-strong:   rgba(47, 124, 255, 0.16);
+  --blue-border:        rgba(47, 124, 255, 0.32);
+  --blue-glow:          rgba(47, 124, 255, 0.22);
+
+  /* ---------------------------------------------------------------- *
+   * Colour — Duck Yellow.
+   *
+   * Reserved for one job: what is playing right now. The equalizer, the
+   * active row marker, the liked heart. Used sparingly it reads as a
+   * signal rather than decoration, and ties every screen to the mark.
+   * ---------------------------------------------------------------- */
+  --yellow-300:         #FFDC7A;
+  --yellow:             #FFC93C;
+  --yellow-600:         #F0A81E;
+  --orange:             #FE8D09;
+
+  --yellow-wash:        rgba(255, 201, 60, 0.12);
+  --yellow-glow:        rgba(255, 201, 60, 0.30);
+
+  /* ---------------------------------------------------------------- *
+   * Colour — semantic. Separate from the accent on purpose.
+   * ---------------------------------------------------------------- */
+  --success:            #3DD68C;
+  --success-wash:       rgba(61, 214, 140, 0.12);
+  --warning:            #FFB020;
+  --warning-wash:       rgba(255, 176, 32, 0.12);
+  --danger:             #FF6B6B;
+  --danger-wash:        rgba(255, 107, 107, 0.12);
+  --danger-border:      rgba(255, 107, 107, 0.32);
+
+  /* ---------------------------------------------------------------- *
+   * Typography
+   *
+   * Loaded explicitly in index.html. The previous stylesheet asked for
+   * Inter and never loaded it, so everything silently rendered in
+   * system-ui and three deliberately different weights came out
+   * identical.
+   * ---------------------------------------------------------------- */
+  --font-display: "Bricolage Grotesque", "Geist", system-ui, -apple-system, sans-serif;
+  --font-ui:      "Geist", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono:    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* A ten-step scale, replacing 36 ad-hoc values */
+  --text-3xs:           11px;
+  --text-2xs:           12px;
+  --text-xs:            13px;
+  --text-sm:            14px;
+  --text-base:          15px;
+  --text-md:            17px;
+  --text-lg:            20px;
+  --text-xl:            26px;
+  --text-2xl:           34px;
+  --text-3xl:           44px;
+
+  --weight-normal:      400;
+  --weight-medium:      500;
+  --weight-semibold:    600;
+  --weight-bold:        700;
+  --weight-black:       800;
+
+  --leading-none:       1;
+  --leading-tight:      1.15;
+  --leading-snug:       1.35;
+  --leading-normal:     1.55;
+
+  --tracking-tighter:   -0.03em;
+  --tracking-tight:     -0.015em;
+  --tracking-normal:    0;
+  --tracking-wide:      0.04em;
+  --tracking-caps:      0.1em;
+
+  /* ---------------------------------------------------------------- *
+   * Space — a 4px grid. Replaces 52 improvised padding combinations.
+   * ---------------------------------------------------------------- */
+  --space-0:            0;
+  --space-1:            4px;
+  --space-2:            8px;
+  --space-3:            12px;
+  --space-4:            16px;
+  --space-5:            20px;
+  --space-6:            24px;
+  --space-8:            32px;
+  --space-10:           40px;
+  --space-12:           48px;
+  --space-16:           64px;
+  --space-20:           80px;
+
+  /* ---------------------------------------------------------------- *
+   * Radius — five steps replace sixteen.
+   * ---------------------------------------------------------------- */
+  --radius-xs:          6px;
+  --radius-sm:          8px;
+  --radius-md:          12px;
+  --radius-lg:          16px;
+  --radius-xl:          22px;
+  --radius-pill:        999px;
+
+  /* ---------------------------------------------------------------- *
+   * Elevation — four steps replace twenty-four one-off shadows.
+   * ---------------------------------------------------------------- */
+  --shadow-sm:          0 2px 8px rgba(0, 0, 0, 0.30);
+  --shadow-md:          0 8px 24px rgba(0, 0, 0, 0.36);
+  --shadow-lg:          0 16px 40px rgba(0, 0, 0, 0.44);
+  --shadow-xl:          0 24px 64px rgba(0, 0, 0, 0.52);
+  --shadow-focus:       0 0 0 3px var(--blue-glow);
+  --shadow-glow-blue:   0 8px 28px rgba(47, 124, 255, 0.22);
+
+  /* ---------------------------------------------------------------- *
+   * Motion. Every transition in the old file was `ease` at one of five
+   * durations that differed by 10ms; these are three intentional steps
+   * with an easing curve that decelerates properly.
+   * ---------------------------------------------------------------- */
+  --duration-fast:      120ms;
+  --duration:           180ms;
+  --duration-slow:      280ms;
+  --ease-out:           cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out:        cubic-bezier(0.65, 0, 0.35, 1);
+
+  --transition-colors:  color var(--duration) var(--ease-out),
+                        background-color var(--duration) var(--ease-out),
+                        border-color var(--duration) var(--ease-out);
+  --transition-transform: transform var(--duration) var(--ease-out);
+
+  /* ---------------------------------------------------------------- *
+   * Stacking. A named scale — the old file had a row menu at z-index
+   * 3000 floating above a modal overlay at 1000.
+   * ---------------------------------------------------------------- */
+  --z-base:             1;
+  --z-sticky:           100;
+  --z-dropdown:         200;
+  --z-player:           300;
+  --z-overlay:          400;
+  --z-modal:            500;
+  --z-toast:            600;
+
+  /* ---------------------------------------------------------------- *
+   * Layout constants
+   * ---------------------------------------------------------------- */
+  --sidebar-width:      248px;
+  --queue-width:        320px;
+  --player-height:      88px;
+  --content-max:        1400px;
+}
+
+/*
+ * Generated artwork
+ * -----------------
+ * 99.8% of this library has no real cover art — 7 albums out of 4,240 — so the generated
+ * tile is not a fallback, it is the app's primary visual surface. It previously drew from
+ * six stock Tailwind gradients that shared nothing with the brand, one of them a
+ * green-on-teal that read as a competitor.
+ *
+ * These ten sit on a single arc from Adjacent Blue through indigo and violet into Duck
+ * Yellow, held at roughly even luminance so no tile shouts louder than its neighbours and
+ * a wall of them reads as one system.
+ */
+:root {
+  --art-1:  linear-gradient(140deg, #1B4FD8, #2F7CFF);
+  --art-2:  linear-gradient(140deg, #2560E8, #4E8CFF);
+  --art-3:  linear-gradient(140deg, #3B4BC8, #6E7BFF);
+  --art-4:  linear-gradient(140deg, #4F3FBE, #8A6BFF);
+  --art-5:  linear-gradient(140deg, #6A3BAE, #A76BF0);
+  --art-6:  linear-gradient(140deg, #8B3A86, #C86BC0);
+  --art-7:  linear-gradient(140deg, #A63C63, #E0748F);
+  --art-8:  linear-gradient(140deg, #B85338, #F0916B);
+  --art-9:  linear-gradient(140deg, #B5761F, #FFC93C);
+  --art-10: linear-gradient(140deg, #8A6B22, #D6B24A);
+}

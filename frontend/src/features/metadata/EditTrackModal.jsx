@@ -89,7 +89,7 @@ export function EditTrackModal() {
       actions={
         <>
           <button
-            className="settings-button settings-button--secondary"
+            className="btn"
             type="button"
             onClick={closeTrackEditor}
           >
@@ -97,7 +97,7 @@ export function EditTrackModal() {
           </button>
 
           <button
-            className="settings-button"
+            className="btn btn--primary"
             type="button"
             onClick={handleSave}
             disabled={isSaving}
@@ -109,7 +109,7 @@ export function EditTrackModal() {
     >
       <div className="modal__raw-metadata">
         {hasMetadataMismatch && (
-          <div className="modal__metadata-warning">
+          <div className="modal__warning">
             Metadata was modified during import. Review for accuracy.
           </div>
         )}
@@ -135,7 +135,7 @@ export function EditTrackModal() {
 
         <div className="modal__raw-metadata-actions">
           <button
-            className="settings-button settings-button--secondary"
+            className="btn"
             type="button"
             onClick={useRawMetadata}
             disabled={
@@ -170,20 +170,20 @@ export function EditTrackModal() {
         onChange={setAlbum}
       />
 
-      <label className="modal__field">
-        <span className="modal__label">Track name</span>
+      <label className="field">
+        <span className="field__label">Track name</span>
         <input
-          className="modal__input"
+          className="input"
           type="text"
           value={title}
           onChange={(event) => setTitle(event.target.value)}
         />
       </label>
 
-      <label className="modal__field">
-        <span className="modal__label">Genres</span>
+      <label className="field">
+        <span className="field__label">Genres</span>
         <input
-          className="modal__input"
+          className="input"
           type="text"
           value={genres}
           onChange={(event) => setGenres(event.target.value)}

@@ -1,121 +1,99 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { Link } from "react-router-dom";
 
-import { Pagination } from "../../components/Pagination";
-import { SearchBar } from "../../components/SearchBar";
+import { Artwork } from "../../components/Artwork";
+import { Icon } from "../../components/Icon";
 import { ViewToggle } from "../../components/ViewToggle";
 import { useLibrary } from "../../contexts/LibraryContext";
-import { useNavigation } from "../../hooks/useNavigation";
-import { artworkUrl } from "../../config";
-import { useLibraryFilters, usePagination } from "./useLibraryFilters";
+import { useInfiniteScroll } from "../../hooks/useInfiniteScroll";
+import { buildArtistPath } from "../../hooks/useNavigation";
+import { resolveArtistArtwork } from "../../utils/artwork";
+import { useLibraryFilters } from "./useLibraryFilters";
 
-const ARTISTS_PAGE_SIZE = 50;
+const PAGE_SIZE = 60;
 
 const VIEW_OPTIONS = [
-  { value: "list", label: "List" },
   { value: "grid", label: "Grid" },
+  { value: "list", label: "List" },
 ];
 
 export function ArtistsView() {
-  const { artistArtworkMap, ensureArtistArtwork } = useLibrary();
-  const { searchQuery, setSearchQuery, page, setPage, goToArtist } = useNavigation();
+  const { artistArtworkMap } = useLibrary();
   const { visibleArtists } = useLibraryFilters();
 
-  const [viewMode, setViewMode] = useState("list");
+  const [viewMode, setViewMode] = useState("grid");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
-  const { pageItems, totalPages, page: safePage } = usePagination(
-    visibleArtists,
-    page,
-    ARTISTS_PAGE_SIZE,
-  );
+  // 992 artists is small enough to hold, but not to render at once.
+  const shown = visibleArtists.slice(0, visibleCount);
+  const hasMore = visibleCount < visibleArtists.length;
 
-  // Artwork is only worth fetching for the grid, which is the only view that shows it at
-  // a size where it matters — matching the original behaviour.
-  const signature = pageItems.join("|");
+  const loadMore = useCallback(() => {
+    setVisibleCount((count) => count + PAGE_SIZE);
+  }, []);
 
-  useEffect(() => {
-    if (viewMode === "grid" && pageItems.length > 0) {
-      ensureArtistArtwork(pageItems);
-    }
-  }, [viewMode, signature, ensureArtistArtwork]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { setSentinel } = useInfiniteScroll({ onLoadMore: loadMore, enabled: hasMore });
+
+  if (visibleArtists.length === 0) {
+    return (
+      <div className="state">
+        <div className="state__icon">
+          <Icon name="artists" size={20} />
+        </div>
+        <p className="state__title">No artists found</p>
+        <p className="state__text">Nothing in your library matches that search.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="artists-page">
-      <div className="artists-hero">
-        <div>
-          <div className="artists-eyebrow">Library artists</div>
-          <h2>Artists</h2>
-          <p>Browse your collection by artist in list or visual grid view.</p>
-        </div>
-
-        <div className="artists-hero__stat">
-          <span>{visibleArtists.length}</span>
-          <small>artists</small>
-        </div>
+    <>
+      <div className="filter-row">
+        <ViewToggle value={viewMode} options={VIEW_OPTIONS} onChange={setViewMode} />
       </div>
 
-      <SearchBar value={searchQuery} onChange={setSearchQuery} label="artists" />
-
-      <ViewToggle value={viewMode} options={VIEW_OPTIONS} onChange={setViewMode} />
-
-      {viewMode === "list" ? (
-        <div className="artist-list">
-          {pageItems.map((artist) => (
-            <button
-              key={artist}
-              className="artist-list-row"
-              onClick={() => goToArtist(artist)}
-              type="button"
-            >
-              <div className="artist-list-row__avatar">
-                {artistArtworkMap[artist] ? (
-                  <img
-                    className="artist-list-row__img"
-                    src={artworkUrl(artistArtworkMap[artist])}
-                    alt=""
-                  />
-                ) : (
-                  <span>{artist.slice(0, 1).toUpperCase()}</span>
-                )}
-              </div>
-
-              <div className="artist-list-row__content">
-                <div className="artist-list-row__name">{artist}</div>
-                <div className="artist-list-row__meta">Artist</div>
-              </div>
-
-              <div className="artist-list-row__arrow">›</div>
-            </button>
+      {viewMode === "grid" ? (
+        <div className="entity-grid">
+          {shown.map((artist) => (
+            <Link key={artist} to={buildArtistPath(artist)} className="entity-card">
+              <Artwork
+                artwork={resolveArtistArtwork(artist, artistArtworkMap)}
+                className="entity-card__art entity-card__art--round"
+                size={160}
+              />
+              <span className="entity-card__body">
+                <span className="entity-card__name">{artist}</span>
+                <span className="entity-card__meta">Artist</span>
+              </span>
+            </Link>
           ))}
         </div>
       ) : (
-        <div className="artist-grid artist-grid--polished">
-          {pageItems.map((artist) => (
-            <button
-              key={artist}
-              className="artist-grid-card"
-              onClick={() => goToArtist(artist)}
-              type="button"
-            >
-              <div className="artist-grid-card__image">
-                {artistArtworkMap[artist] ? (
-                  <img
-                    className="artist-grid-card__img"
-                    src={artworkUrl(artistArtworkMap[artist])}
-                    alt=""
-                  />
-                ) : (
-                  <span>{artist.slice(0, 1).toUpperCase()}</span>
-                )}
-              </div>
-
-              <div className="artist-grid-card__name">{artist}</div>
-              <div className="artist-grid-card__meta">Artist</div>
-            </button>
+        <div className="entity-list">
+          {shown.map((artist) => (
+            <Link key={artist} to={buildArtistPath(artist)} className="entity-row">
+              <Artwork
+                artwork={resolveArtistArtwork(artist, artistArtworkMap)}
+                className="entity-row__art entity-row__art--round"
+                size={44}
+              />
+              <span className="entity-card__body">
+                <span className="entity-row__name">{artist}</span>
+                <span className="entity-row__meta">Artist</span>
+              </span>
+              <Icon name="chevronRight" size={16} className="entity-row__chevron" />
+            </Link>
           ))}
         </div>
       )}
 
-      <Pagination page={safePage} totalPages={totalPages} onChange={setPage} />
-    </div>
+      {hasMore && (
+        <div className="load-more" ref={setSentinel}>
+          <span className="load-more__status">
+            {shown.length.toLocaleString()} of {visibleArtists.length.toLocaleString()}
+          </span>
+        </div>
+      )}
+    </>
   );
 }

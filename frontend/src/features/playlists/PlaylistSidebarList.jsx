@@ -1,15 +1,19 @@
 import { useState } from "react";
+import { NavLink } from "react-router-dom";
 
+import { Artwork } from "../../components/Artwork";
 import { ArtworkUploadModal } from "../../components/ArtworkUploadModal";
+import { Icon } from "../../components/Icon";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { usePlayer } from "../../contexts/PlayerContext";
 import { useArtworkUpload } from "../../hooks/useArtworkUpload";
-import { useNavigation } from "../../hooks/useNavigation";
+import { useDismissable } from "../../hooks/useDismissable";
+import { buildPlaylistPath } from "../../hooks/useNavigation";
 import { getPlaylistTracks } from "../../services/playlistsService";
 import { resolvePlaylistArtwork } from "../../utils/artwork";
 
-export function PlaylistSidebarList() {
+export function PlaylistSidebarList({ onNavigate }) {
   const {
     playlists,
     createPlaylist,
@@ -18,7 +22,6 @@ export function PlaylistSidebarList() {
     updatePlaylistArtwork,
   } = useLibrary();
   const { playTracks } = usePlayer();
-  const { activeView, selectedPlaylistId, goToPlaylist, clearFilters } = useNavigation();
   const { notify } = useNotifications();
 
   const [isCreating, setIsCreating] = useState(false);
@@ -30,6 +33,7 @@ export function PlaylistSidebarList() {
   const [isSavingArtwork, setIsSavingArtwork] = useState(false);
 
   const upload = useArtworkUpload();
+  useDismissable(openMenuId !== null, () => setOpenMenuId(null));
 
   async function handleCreate() {
     const trimmed = newName.trim();
@@ -39,6 +43,7 @@ export function PlaylistSidebarList() {
       await createPlaylist(trimmed);
       setNewName("");
       setIsCreating(false);
+      notify(`Created "${trimmed}".`);
     } catch (error) {
       notify(error.message || "Could not create that playlist.");
     }
@@ -49,7 +54,6 @@ export function PlaylistSidebarList() {
 
     if (!trimmed) {
       setEditingId(null);
-      setEditingName("");
       return;
     }
 
@@ -63,13 +67,10 @@ export function PlaylistSidebarList() {
     }
   }
 
-  async function handleDelete(playlistId) {
+  async function handleDelete(playlist) {
     try {
-      await deletePlaylist(playlistId);
-
-      if (selectedPlaylistId === playlistId) {
-        clearFilters();
-      }
+      await deletePlaylist(playlist.id);
+      notify(`Deleted "${playlist.name}".`);
     } catch (error) {
       notify(error.message || "Could not delete that playlist.");
     } finally {
@@ -77,7 +78,7 @@ export function PlaylistSidebarList() {
     }
   }
 
-  /** Clicking the artwork plays the playlist; clicking the name just opens it. */
+  /** Clicking the artwork plays the playlist; clicking the name opens it. */
   async function handlePlay(playlist) {
     try {
       const tracks = await getPlaylistTracks(playlist.id);
@@ -87,12 +88,9 @@ export function PlaylistSidebarList() {
         return;
       }
 
-      goToPlaylist(playlist.id);
       playTracks(tracks, { source_type: "playlist", source_id: playlist.id });
     } catch (error) {
       notify(error.message || "Could not play that playlist.");
-    } finally {
-      setOpenMenuId(null);
     }
   }
 
@@ -102,11 +100,6 @@ export function PlaylistSidebarList() {
     setOpenMenuId(null);
   }
 
-  function closeArtworkEditor() {
-    setArtworkPlaylist(null);
-    upload.reset();
-  }
-
   async function saveArtwork() {
     if (!artworkPlaylist || !upload.file) return;
 
@@ -114,35 +107,37 @@ export function PlaylistSidebarList() {
 
     try {
       await updatePlaylistArtwork(artworkPlaylist.id, upload.file);
-      closeArtworkEditor();
+      setArtworkPlaylist(null);
+      upload.reset();
     } catch (error) {
-      notify(error.message || "Could not upload the playlist artwork.");
+      notify(error.message || "Could not upload the artwork.");
     } finally {
       setIsSavingArtwork(false);
     }
   }
 
   return (
-    <div className="sidebar__section sidebar__section--playlists">
+    <div className="sidebar__section">
       <div className="sidebar__section-header">
-        <div className="sidebar__section-title">Playlists</div>
+        <span className="sidebar__section-title">Playlists</span>
 
         <button
           className="sidebar__section-action"
           type="button"
           aria-label="Create playlist"
-          onClick={() => setIsCreating((previous) => !previous)}
+          onClick={() => setIsCreating((open) => !open)}
         >
-          +
+          <Icon name="plus" size={16} />
         </button>
       </div>
 
       {isCreating && (
         <div className="playlist-create">
           <input
-            className="playlist-create__input"
+            className="input"
+            style={{ height: 32, fontSize: "var(--text-xs)" }}
             type="text"
-            placeholder="New Playlist"
+            placeholder="Playlist name"
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
             onKeyDown={(event) => {
@@ -154,148 +149,128 @@ export function PlaylistSidebarList() {
             }}
             autoFocus
           />
-
-          <button className="playlist-create__button" type="button" onClick={handleCreate}>
-            Create
-          </button>
         </div>
       )}
 
       {playlists.length === 0 ? (
-        <div className="sidebar__stat">No playlists yet</div>
+        <p className="sidebar__stat">No playlists yet</p>
       ) : (
-        playlists.map((playlist) => {
-          const artwork = resolvePlaylistArtwork(playlist);
-          const isActive = activeView === "playlist" && selectedPlaylistId === playlist.id;
-
-          return (
-            <div key={playlist.id} className="playlist-sidebar-item">
-              {editingId === playlist.id ? (
-                <input
-                  className="playlist-sidebar-item__input"
-                  type="text"
-                  value={editingName}
-                  autoFocus
-                  onChange={(event) => setEditingName(event.target.value)}
-                  onBlur={() => {
-                    setEditingId(null);
-                    setEditingName("");
+        playlists.map((playlist) => (
+          <div className="playlist-item" key={playlist.id}>
+            {editingId === playlist.id ? (
+              <input
+                className="input"
+                style={{ height: 32, fontSize: "var(--text-xs)" }}
+                type="text"
+                value={editingName}
+                autoFocus
+                onChange={(event) => setEditingName(event.target.value)}
+                onBlur={() => setEditingId(null)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") handleRename(playlist.id);
+                  if (event.key === "Escape") setEditingId(null);
+                }}
+              />
+            ) : (
+              <NavLink
+                to={buildPlaylistPath(playlist.id)}
+                onClick={onNavigate}
+                className={({ isActive }) =>
+                  `playlist-item__main ${isActive ? "playlist-item--active" : ""}`
+                }
+              >
+                <span
+                  className="playlist-item__art"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Play ${playlist.name}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    handlePlay(playlist);
                   }}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") handleRename(playlist.id);
-                    if (event.key === "Escape") {
-                      setEditingId(null);
-                      setEditingName("");
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      handlePlay(playlist);
                     }
                   }}
-                />
-              ) : (
-                <div
-                  className={`playlist-sidebar-item__main ${
-                    isActive ? "sidebar__link--active" : ""
-                  }`}
                 >
-                  <div
-                    className="playlist-art-wrapper"
-                    onClick={() => handlePlay(playlist)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        handlePlay(playlist);
-                      }
-                    }}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`Play ${playlist.name}`}
-                  >
-                    {artwork.type === "image" ? (
-                      <img className="playlist-art" src={artwork.src} alt="" />
-                    ) : (
-                      <div className={`playlist-art ${artwork.gradientClass}`}>
-                        <span className="playlist-art__initials">{artwork.initials}</span>
-                      </div>
-                    )}
+                  <Artwork artwork={resolvePlaylistArtwork(playlist)} size={36} />
+                  <span className="playlist-item__art-overlay">
+                    <Icon name="play" size={14} />
+                  </span>
+                </span>
 
-                    <div className="playlist-art__overlay" />
-                  </div>
+                <span className="playlist-item__name">{playlist.name}</span>
+              </NavLink>
+            )}
 
-                  <button
-                    className="playlist-sidebar-item__name-button"
-                    type="button"
-                    onClick={() => goToPlaylist(playlist.id)}
-                  >
-                    {playlist.name}
-                  </button>
-                </div>
-              )}
+            {!playlist.is_system && (
+              <div data-dismissable-root={openMenuId === playlist.id ? "" : undefined}>
+                <button
+                  className="playlist-item__menu-button"
+                  type="button"
+                  aria-label={`Actions for ${playlist.name}`}
+                  aria-expanded={openMenuId === playlist.id}
+                  onClick={() =>
+                    setOpenMenuId((current) =>
+                      current === playlist.id ? null : playlist.id,
+                    )
+                  }
+                >
+                  <Icon name="more" size={14} />
+                </button>
 
-              {!playlist.is_system && (
-                <div className="playlist-sidebar-item__actions">
-                  <button
-                    className="playlist-sidebar-item__menu-button"
-                    type="button"
-                    aria-label={`Actions for ${playlist.name}`}
-                    aria-expanded={openMenuId === playlist.id}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setOpenMenuId((previous) =>
-                        previous === playlist.id ? null : playlist.id,
-                      );
-                    }}
-                  >
-                    ⋯
-                  </button>
-
-                  {openMenuId === playlist.id && (
-                    <div
-                      className="playlist-sidebar-item__menu"
-                      onClick={(event) => event.stopPropagation()}
+                {openMenuId === playlist.id && (
+                  <div className="menu menu--right menu--down">
+                    <button
+                      className="menu__item"
+                      type="button"
+                      onClick={() => openArtworkEditor(playlist)}
                     >
-                      <button
-                        className="playlist-sidebar-item__menu-item"
-                        type="button"
-                        onClick={() => openArtworkEditor(playlist)}
-                      >
-                        Change Artwork
-                      </button>
-
-                      <button
-                        className="playlist-sidebar-item__menu-item"
-                        type="button"
-                        onClick={() => {
-                          setEditingId(playlist.id);
-                          setEditingName(playlist.name);
-                          setOpenMenuId(null);
-                        }}
-                      >
-                        Rename Playlist
-                      </button>
-
-                      <button
-                        className="playlist-sidebar-item__menu-item"
-                        type="button"
-                        onClick={() => handleDelete(playlist.id)}
-                      >
-                        Delete Playlist
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })
+                      Change artwork
+                    </button>
+                    <button
+                      className="menu__item"
+                      type="button"
+                      onClick={() => {
+                        setEditingId(playlist.id);
+                        setEditingName(playlist.name);
+                        setOpenMenuId(null);
+                      }}
+                    >
+                      Rename
+                    </button>
+                    <div className="menu__divider" />
+                    <button
+                      className="menu__item menu__item--danger"
+                      type="button"
+                      onClick={() => handleDelete(playlist)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))
       )}
 
       {artworkPlaylist && (
         <ArtworkUploadModal
-          title="Change Artwork"
+          title="Change playlist artwork"
           previewLabel={artworkPlaylist.name}
           previewUrl={upload.previewUrl}
           fileName={upload.file?.name}
           onSelectFile={upload.selectFile}
           onSave={saveArtwork}
-          onClose={closeArtworkEditor}
+          onClose={() => {
+            setArtworkPlaylist(null);
+            upload.reset();
+          }}
           isSaving={isSavingArtwork}
         />
       )}

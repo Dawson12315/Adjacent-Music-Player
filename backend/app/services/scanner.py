@@ -85,6 +85,7 @@ def scan_directory(base_path: str, limit: int = 20) -> dict:
                 raw_album=raw_album,
                 raw_genre=raw_genre,
                 file_path=metadata["file_path"],
+                duration_seconds=metadata.get("duration_seconds"),
             )
 
             db.add(track)

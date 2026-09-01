@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { LibraryContext } from "./LibraryContext";
 import { useAuth } from "./AuthContext";
-import { useArtworkCache } from "../hooks/useArtworkCache";
 import * as albumsService from "../services/albumsService";
 import * as artistsService from "../services/artistsService";
 import * as genresService from "../services/genresService";
@@ -11,54 +10,62 @@ import * as tracksService from "../services/tracksService";
 import { sortPlaylistsWithSystemFirst, upsertPlaylist } from "../utils/playlists";
 
 /**
- * Owns the library catalogue and the artwork caches.
+ * Owns the catalogue metadata that is small enough to hold in memory, and nothing else.
  *
- * The whole library is still loaded up front and filtered in the browser, matching the
- * previous behaviour — search here also matches genre and needs no further round trips,
- * and changing that would change what users see. The oversized initial payload is worth
- * revisiting on its own.
+ * The tracks themselves are NOT loaded here any more. Fetching all 36,534 of them meant
+ * 21 MB of uncompressed JSON on every startup, parsed into 36,534 objects and filtered in
+ * JavaScript on every keystroke. Tracks are now paged from the server by whichever view
+ * needs them (see useTrackFeed).
  *
- * Two calls the old startup sequence made are gone: the liked-songs playlist, fetched
- * into state nothing ever read yet still gating the entire load, and the admin-only
- * settings and readiness reads, which now load with the settings screen that uses them.
+ * What stays: the artist, album and genre name lists — roughly 125 KB combined, and used
+ * for browsing and for the metadata editor's pickers — plus playlists and the two artwork
+ * lookup tables, each of which is now a single request instead of one per entity.
  */
 export function LibraryProvider({ children }) {
   const { currentUser } = useAuth();
 
-  const [tracks, setTracks] = useState([]);
   const [artists, setArtists] = useState([]);
   const [albums, setAlbums] = useState([]);
   const [genres, setGenres] = useState([]);
   const [playlists, setPlaylists] = useState([]);
+  const [trackCount, setTrackCount] = useState(0);
+  const [albumArtworkMap, setAlbumArtworkMap] = useState({});
+  const [artistArtworkMap, setArtistArtworkMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Which track the metadata editor is open for. Lives here because the editor is opened
-  // from two different views and commits through this context's update path.
+  /** Which track the metadata editor is open for. */
   const [editingTrack, setEditingTrack] = useState(null);
 
-  // Tracks of the playlist currently open. Shared because the page header shows the
-  // count while the view below it renders the rows.
+  /** Tracks of the playlist currently open — the header shows the count. */
   const [playlistTracks, setPlaylistTracks] = useState([]);
 
-  const albumArtwork = useArtworkCache(albumsService.getAlbumArtwork);
-  const artistArtwork = useArtworkCache(artistsService.getArtistArtwork);
+  const loadLibrary = useCallback(async (signal) => {
+    const [
+      artistsData,
+      albumsData,
+      genresData,
+      playlistsData,
+      countData,
+      albumArtwork,
+      artistArtwork,
+    ] = await Promise.all([
+      artistsService.listArtists({ signal }),
+      albumsService.listAlbums({ signal }),
+      genresService.listGenres({ signal }),
+      playlistsService.listPlaylists({ signal }),
+      tracksService.getTrackCount({ signal }),
+      albumsService.getAllAlbumArtwork({ signal }),
+      artistsService.getAllArtistArtwork({ signal }),
+    ]);
 
-  const loadLibrary = useCallback(async () => {
-    const [tracksData, artistsData, albumsData, genresData, playlistsData] =
-      await Promise.all([
-        tracksService.listTracks(),
-        artistsService.listArtists(),
-        albumsService.listAlbums(),
-        genresService.listGenres(),
-        playlistsService.listPlaylists(),
-      ]);
-
-    setTracks(tracksData);
     setArtists(artistsData);
     setAlbums(albumsData);
     setGenres(genresData);
     setPlaylists(sortPlaylistsWithSystemFirst(playlistsData));
+    setTrackCount(countData.count ?? 0);
+    setAlbumArtworkMap(albumArtwork);
+    setArtistArtworkMap(artistArtwork);
   }, []);
 
   useEffect(() => {
@@ -66,17 +73,17 @@ export function LibraryProvider({ children }) {
       return undefined;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
 
     async function run() {
       try {
-        await loadLibrary();
+        await loadLibrary(controller.signal);
       } catch (err) {
-        if (!cancelled) {
-          setError(err.message || "Could not load tracks.");
+        if (err.name !== "AbortError") {
+          setError(err.message || "Could not load your library.");
         }
       } finally {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setLoading(false);
         }
       }
@@ -84,66 +91,45 @@ export function LibraryProvider({ children }) {
 
     run();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [currentUser, loadLibrary]);
 
-  /**
-   * Re-read the catalogue after an operation that can change it wholesale — a scan,
-   * a cleanup, or an artist rename. This block was previously pasted into three handlers.
-   */
+  /** Re-read after a scan, cleanup or artist rename changes the catalogue wholesale. */
   const refreshLibrary = useCallback(async () => {
     await loadLibrary();
   }, [loadLibrary]);
 
-  /** Apply a track edit everywhere it appears, without a full reload. */
-  const applyTrackUpdate = useCallback((updatedTrack) => {
-    setTracks((previous) => {
-      const next = previous.map((track) =>
-        track.id === updatedTrack.id ? updatedTrack : track,
-      );
-
-      // Derived from the updated list, not the pre-edit one.
-      setArtists(
-        Array.from(new Set(next.map((track) => track.artist).filter(Boolean))).sort(
-          (a, b) => a.localeCompare(b),
-        ),
-      );
-
-      setAlbums(
-        Array.from(new Set(next.map((track) => track.album).filter(Boolean))).sort(
-          (a, b) => a.localeCompare(b),
-        ),
-      );
-
-      return next;
-    });
-  }, []);
-
   const clearTracks = useCallback(() => {
-    setTracks([]);
     setArtists([]);
     setAlbums([]);
     setGenres([]);
+    setTrackCount(0);
     setPlaylistTracks([]);
   }, []);
 
   /**
    * Open the metadata editor.
    *
-   * Tracks reaching this from a playlist or the similar-tracks list come from endpoints
-   * that return raw ORM rows with an empty `genres` array. Resolving against the library
-   * copy first is what stops the editor from seeding an empty genre list and then wiping
-   * the track's genres on save, since `PATCH /api/tracks/{id}` replaces rather than merges.
+   * Tracks reaching this from a playlist or the similar list come from endpoints that
+   * return raw ORM rows with an empty `genres` array. The authoritative copy is fetched
+   * first, which is what stops the editor seeding an empty genre list and then wiping the
+   * track's genres on save — `PATCH /api/tracks/{id}` replaces rather than merges.
    */
-  const openTrackEditor = useCallback(
-    (track) => {
-      const authoritative = tracks.find((item) => item.id === track.id);
-      setEditingTrack(authoritative || track);
-    },
-    [tracks],
-  );
+  const openTrackEditor = useCallback(async (track) => {
+    setEditingTrack(track);
+
+    if (track.metadataComplete) {
+      return;
+    }
+
+    try {
+      const full = await tracksService.getTrack(track.id);
+      setEditingTrack((current) => (current?.id === full.id ? full : current));
+    } catch (err) {
+      // Leave the partial track in place; the editor will not submit genres for it.
+      console.error("Could not load full track metadata", err);
+    }
+  }, []);
 
   const closeTrackEditor = useCallback(() => setEditingTrack(null), []);
 
@@ -151,6 +137,22 @@ export function LibraryProvider({ children }) {
     const data = await playlistsService.getPlaylistTracks(playlistId, options);
     setPlaylistTracks(data);
     return data;
+  }, []);
+
+  /* ---------- artwork ---------- */
+
+  const setAlbumArtwork = useCallback((key, path) => {
+    setAlbumArtworkMap((previous) => ({
+      ...previous,
+      [key]: path ? `${path}?v=${Date.now()}` : "",
+    }));
+  }, []);
+
+  const setArtistArtwork = useCallback((key, path) => {
+    setArtistArtworkMap((previous) => ({
+      ...previous,
+      [key]: path ? `${path}?v=${Date.now()}` : "",
+    }));
   }, []);
 
   /* ---------- playlist mutations ---------- */
@@ -180,21 +182,18 @@ export function LibraryProvider({ children }) {
 
   const value = useMemo(
     () => ({
-      tracks,
       artists,
       albums,
       genres,
       playlists,
+      trackCount,
       loading,
       error,
-      albumArtworkMap: albumArtwork.map,
-      ensureAlbumArtwork: albumArtwork.ensure,
-      setAlbumArtwork: albumArtwork.set,
-      artistArtworkMap: artistArtwork.map,
-      ensureArtistArtwork: artistArtwork.ensure,
-      setArtistArtwork: artistArtwork.set,
+      albumArtworkMap,
+      artistArtworkMap,
+      setAlbumArtwork,
+      setArtistArtwork,
       refreshLibrary,
-      applyTrackUpdate,
       clearTracks,
       editingTrack,
       openTrackEditor,
@@ -208,21 +207,18 @@ export function LibraryProvider({ children }) {
       updatePlaylistArtwork,
     }),
     [
-      tracks,
       artists,
       albums,
       genres,
       playlists,
+      trackCount,
       loading,
       error,
-      albumArtwork.map,
-      albumArtwork.ensure,
-      albumArtwork.set,
-      artistArtwork.map,
-      artistArtwork.ensure,
-      artistArtwork.set,
+      albumArtworkMap,
+      artistArtworkMap,
+      setAlbumArtwork,
+      setArtistArtwork,
       refreshLibrary,
-      applyTrackUpdate,
       clearTracks,
       editingTrack,
       openTrackEditor,
