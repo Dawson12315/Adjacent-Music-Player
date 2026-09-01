@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config import settings
 from app.db import SessionLocal
@@ -31,6 +31,9 @@ def run_scan(
         result = scan_directory(settings.music_library_path, limit=limit)
         logger.info(f"Manual scan finished. Added {result['added']} tracks.")
         return result
+    except ValueError as exc:
+        # Unmounted or misconfigured library path — a client problem, not a crash.
+        raise HTTPException(status_code=400, detail=str(exc))
     finally:
         release_job_lock(db, "scan")
         db.close()

@@ -29,7 +29,9 @@ def scan_directory(base_path: str, limit: int = 20) -> dict:
     base = Path(base_path)
 
     if not base.exists():
-        raise ValueError(f"Path does not exist: {base_path}")
+        raise ValueError(
+            f"Music library path does not exist: {base_path} — is the volume mounted?"
+        )
 
     db = SessionLocal()
 
