@@ -16,6 +16,9 @@ services:
       - AUTH_SECRET_KEY=${AUTH_SECRET_KEY}
       - APP_ENV=${APP_ENV:-production}
       - DEBUG=${DEBUG:-false}
+      # Secure cookies break login on plain-HTTP LAN deployments (browsers
+      # refuse to send them). Set true only when serving behind TLS.
+      - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-false}
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
       interval: 30s

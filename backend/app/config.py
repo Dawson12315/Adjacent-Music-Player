@@ -25,11 +25,27 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60 * 24 * 7
     auth_cookie_name: str = "adjacent_access_token"
 
+    # Whether the auth cookie carries the Secure flag. Self-hosted deployments
+    # are usually plain HTTP on a LAN IP, where browsers refuse to send Secure
+    # cookies at all — so this must be an explicit switch, not implied by
+    # APP_ENV. Unset, it follows the environment (secure in production).
+    # Set AUTH_COOKIE_SECURE=false for HTTP deployments, true behind TLS.
+    auth_cookie_secure: bool | None = None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
+
+    @field_validator("auth_cookie_secure", mode="before")
+    @classmethod
+    def _empty_cookie_secure_means_unset(cls, value):
+        # Compose interpolation can hand us AUTH_COOKIE_SECURE="" — treat that
+        # as "not configured" instead of failing bool validation at boot.
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("auth_secret_key")
     @classmethod
@@ -45,6 +61,12 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"
+
+    @property
+    def cookie_secure(self) -> bool:
+        if self.auth_cookie_secure is not None:
+            return self.auth_cookie_secure
+        return self.is_production
 
 
 settings = Settings()

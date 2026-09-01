@@ -40,6 +40,9 @@ services:
       - FRONTEND_ORIGIN=http://YOUR_IP:5173
       - MUSICBRAINZ_EMAIL=Your_Music_Brainz_Account_Email
       - AUTH_SECRET_KEY=YOUR_GENERATED_SECRET
+      # Keep false unless serving over HTTPS — browsers never send Secure
+      # cookies to plain-HTTP LAN addresses, which breaks login.
+      - AUTH_COOKIE_SECURE=false
     restart: unless-stopped
 
   frontend:
