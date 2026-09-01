@@ -2,7 +2,7 @@ import json
 import secrets
 
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -26,23 +26,38 @@ from app.services.auth import (
     hash_password,
     verify_password,
 )
+from app.services.rate_limit import login_limiter, recovery_limiter
 
 
 router = APIRouter(tags=["auth"])
 
 
 def set_auth_cookie(response: Response, token: str):
-    is_production = settings.app_env.lower() == "production"
-
     response.set_cookie(
         key=settings.auth_cookie_name,
         value=token,
         httponly=True,
-        secure=is_production,
+        secure=settings.is_production,
         samesite="lax",
         max_age=settings.access_token_expire_minutes * 60,
         path="/",
     )
+
+
+def rate_limit_key(request: Request, username: str) -> str:
+    client_host = request.client.host if request.client else "unknown"
+    return f"{client_host}:{username.strip().lower()}"
+
+
+def raise_if_rate_limited(limiter, key: str):
+    retry_after = limiter.retry_after_seconds(key)
+
+    if retry_after:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
 
 def generate_recovery_codes(count: int = 10) -> list[str]:
     return [secrets.token_hex(4).upper() for _ in range(count)]
@@ -127,12 +142,17 @@ def setup_admin(
 @router.post("/auth/login", response_model=AuthResponse)
 def login(
     payload: LoginRequest,
+    request: Request,
     response: Response,
     db: Session = Depends(get_db),
 ):
+    limiter_key = rate_limit_key(request, payload.username)
+    raise_if_rate_limited(login_limiter, limiter_key)
+
     user = get_user_by_username(db, payload.username.strip())
 
     if not user or not verify_password(payload.password, user.password_hash):
+        login_limiter.record_failure(limiter_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
@@ -143,6 +163,8 @@ def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User is inactive",
         )
+
+    login_limiter.record_success(limiter_key)
 
     token = create_access_token(user)
     set_auth_cookie(response, token)
@@ -219,8 +241,12 @@ def regenerate_recovery_codes(
 @router.post("/auth/recover-password")
 def recover_password(
     payload: PasswordRecoveryRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
+    limiter_key = rate_limit_key(request, payload.username)
+    raise_if_rate_limited(recovery_limiter, limiter_key)
+
     if payload.new_password != payload.confirm_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -230,16 +256,20 @@ def recover_password(
     user = get_user_by_username(db, payload.username.strip())
 
     if not user or not user.is_active:
+        recovery_limiter.record_failure(limiter_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or recovery code",
         )
 
     if not verify_and_consume_recovery_code(user, payload.recovery_code):
+        recovery_limiter.record_failure(limiter_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or recovery code",
         )
+
+    recovery_limiter.record_success(limiter_key)
 
     user.password_hash = hash_password(payload.new_password)
 
@@ -249,9 +279,13 @@ def recover_password(
 
 @router.post("/auth/logout")
 def logout(response: Response):
+    # Attributes must match set_auth_cookie or some browsers keep the cookie.
     response.delete_cookie(
         key=settings.auth_cookie_name,
         path="/",
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
     )
 
     return {"message": "Logged out"}
