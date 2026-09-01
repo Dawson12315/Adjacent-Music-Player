@@ -317,11 +317,19 @@ describe("Adjacent", () => {
   it("pins the system playlist above the others in the sidebar", async () => {
     await renderAt("/");
 
-    const names = Array.from(
-      document.querySelectorAll(".playlist-item__name"),
-    ).map((node) => node.textContent);
+    // The playlist fetch resolves after the shell renders; read the list only
+    // once both names are actually in the DOM.
+    const readNames = () =>
+      Array.from(document.querySelectorAll(".playlist-item__name")).map(
+        (node) => node.textContent,
+      );
 
-    expect(names).toContain("Ducking Good");
+    await waitFor(() => {
+      expect(readNames()).toContain("Ducking Good");
+      expect(readNames()).toContain("Road Trip");
+    });
+
+    const names = readNames();
     expect(names.indexOf("Ducking Good")).toBeLessThan(names.indexOf("Road Trip"));
   });
 
