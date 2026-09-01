@@ -73,6 +73,7 @@ def build_mobile_album_track_response(track: Track, db: Session) -> TrackRespons
         raw_genre=track.raw_genre,
         musicbrainz_recording_id=track.musicbrainz_recording_id,
         lastfm_tags_enriched=track.lastfm_tags_enriched,
+        duration_seconds=track.duration_seconds,
     )
 
 
@@ -136,6 +137,36 @@ def get_mobile_album_tracks(
     )
 
     return [build_mobile_album_track_response(track, db) for track in tracks]
+
+
+@router.get("/albums/artwork", tags=["albums"])
+def get_all_album_artwork(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    artwork_rows = db.query(AlbumArtwork).all()
+
+    return {
+        "artwork": {
+            artwork.album_key: artwork.artwork_path
+            for artwork in artwork_rows
+            if artwork.artwork_path
+        }
+    }
+
+
+@router.get("/albums/{album_name:path}/tracks", response_model=list[TrackResponse], tags=["albums"])
+def get_album_tracks(
+    album_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return get_mobile_album_tracks(
+        album_name=album_name,
+        db=db,
+        current_user=current_user,
+    )
+
 
 @router.get("/albums/{album_name:path}/artwork", tags=["albums"])
 def get_album_artwork(

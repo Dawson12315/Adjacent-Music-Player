@@ -1,20 +1,15 @@
 import { useState } from "react";
 
+import { DuckMark } from "../../components/DuckMark";
 import { useAuth } from "../../contexts/AuthContext";
 import { recoverPassword } from "../../services/authService";
 
-/**
- * Sign-in, first-run admin setup, and recovery-code password reset.
- *
- * Markup and class names are unchanged from the original inline version so the existing
- * stylesheet applies as-is.
- */
 export function AuthScreen({ mode }) {
   const { login, setupAdmin, authError, sessionExpired } = useAuth();
 
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
-  const [isRecoveringPassword, setIsRecoveringPassword] = useState(false);
+  const [isRecovering, setIsRecovering] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -35,36 +30,29 @@ export function AuthScreen({ mode }) {
         await login(username, password);
       }
     } catch (error) {
-      // AuthContext surfaces the message through authError.
       console.error(error);
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  async function handleRecoverPassword(event) {
+  async function handleRecover(event) {
     event.preventDefault();
-
     setRecoveryError("");
     setRecoverySuccess("");
     setIsSubmitting(true);
 
     try {
-      await recoverPassword({
-        username,
-        recoveryCode,
-        newPassword,
-        confirmPassword,
-      });
+      await recoverPassword({ username, recoveryCode, newPassword, confirmPassword });
 
-      setRecoverySuccess("Password reset successfully. You can now sign in.");
+      setRecoverySuccess("Password reset. You can sign in now.");
       setPassword("");
       setRecoveryCode("");
       setNewPassword("");
       setConfirmPassword("");
-      setIsRecoveringPassword(false);
+      setIsRecovering(false);
     } catch (error) {
-      setRecoveryError(error.message || "Failed to reset password.");
+      setRecoveryError(error.message || "Could not reset your password.");
     } finally {
       setIsSubmitting(false);
     }
@@ -73,42 +61,36 @@ export function AuthScreen({ mode }) {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <div className="auth-logo-wrap">
-          <img className="auth-logo" src="/Adjacent.svg" alt="Adjacent logo" />
-        </div>
-
-        <div className="auth-brand">Adjacent</div>
+        <DuckMark tile className="auth-mark" />
+        <span className="auth-brand">Adjacent</span>
 
         <h1 className="auth-title">
-          {isSetup
-            ? "Create admin account"
-            : isRecoveringPassword
-            ? "Recover password"
-            : "Welcome back"}
+          {isSetup ? "Create your account" : isRecovering ? "Reset password" : "Welcome back"}
         </h1>
 
         <p className="auth-subtitle">
           {isSetup
-            ? "Create the first admin account to secure your music library."
-            : isRecoveringPassword
-            ? "Use one of your saved recovery codes to reset your password."
-            : "Sign in to continue to your music library."}
+            ? "Set up the first admin account to secure your library."
+            : isRecovering
+            ? "Use one of your saved recovery codes."
+            : "Sign in to get back to your music."}
         </p>
 
-        <div aria-live="polite">
-          {sessionExpired && !isRecoveringPassword && (
+        <div aria-live="polite" style={{ width: "100%" }}>
+          {sessionExpired && !isRecovering && (
             <div className="auth-error">Your session expired. Please sign in again.</div>
           )}
-          {authError && !isRecoveringPassword && <div className="auth-error">{authError}</div>}
+          {authError && !isRecovering && <div className="auth-error">{authError}</div>}
           {recoveryError && <div className="auth-error">{recoveryError}</div>}
           {recoverySuccess && <div className="settings-success">{recoverySuccess}</div>}
         </div>
 
-        {!isRecoveringPassword ? (
+        {!isRecovering ? (
           <form className="auth-form" onSubmit={handleSubmit}>
-            <label className="auth-field">
-              <span>Username</span>
+            <label className="field">
+              <span className="field__label">Username</span>
               <input
+                className="input"
                 type="text"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
@@ -116,9 +98,10 @@ export function AuthScreen({ mode }) {
               />
             </label>
 
-            <label className="auth-field">
-              <span>Password</span>
+            <label className="field">
+              <span className="field__label">Password</span>
               <input
+                className="input"
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
@@ -126,8 +109,8 @@ export function AuthScreen({ mode }) {
               />
             </label>
 
-            <button className="auth-button" type="submit" disabled={isSubmitting}>
-              {isSetup ? "Create admin" : "Sign in"}
+            <button className="btn btn--primary btn--lg btn--block" type="submit" disabled={isSubmitting}>
+              {isSetup ? "Create account" : "Sign in"}
             </button>
 
             {!isSetup && (
@@ -137,18 +120,19 @@ export function AuthScreen({ mode }) {
                 onClick={() => {
                   setRecoveryError("");
                   setRecoverySuccess("");
-                  setIsRecoveringPassword(true);
+                  setIsRecovering(true);
                 }}
               >
-                Forgot password?
+                Forgot your password?
               </button>
             )}
           </form>
         ) : (
-          <form className="auth-form" onSubmit={handleRecoverPassword}>
-            <label className="auth-field">
-              <span>Username</span>
+          <form className="auth-form" onSubmit={handleRecover}>
+            <label className="field">
+              <span className="field__label">Username</span>
               <input
+                className="input"
                 type="text"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
@@ -156,9 +140,10 @@ export function AuthScreen({ mode }) {
               />
             </label>
 
-            <label className="auth-field">
-              <span>Recovery code</span>
+            <label className="field">
+              <span className="field__label">Recovery code</span>
               <input
+                className="input"
                 type="text"
                 value={recoveryCode}
                 onChange={(event) => setRecoveryCode(event.target.value)}
@@ -166,9 +151,10 @@ export function AuthScreen({ mode }) {
               />
             </label>
 
-            <label className="auth-field">
-              <span>New password</span>
+            <label className="field">
+              <span className="field__label">New password</span>
               <input
+                className="input"
                 type="password"
                 value={newPassword}
                 onChange={(event) => setNewPassword(event.target.value)}
@@ -176,9 +162,10 @@ export function AuthScreen({ mode }) {
               />
             </label>
 
-            <label className="auth-field">
-              <span>Confirm new password</span>
+            <label className="field">
+              <span className="field__label">Confirm new password</span>
               <input
+                className="input"
                 type="password"
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
@@ -186,7 +173,7 @@ export function AuthScreen({ mode }) {
               />
             </label>
 
-            <button className="auth-button" type="submit" disabled={isSubmitting}>
+            <button className="btn btn--primary btn--lg btn--block" type="submit" disabled={isSubmitting}>
               Reset password
             </button>
 
@@ -194,7 +181,7 @@ export function AuthScreen({ mode }) {
               className="auth-link-button"
               type="button"
               onClick={() => {
-                setIsRecoveringPassword(false);
+                setIsRecovering(false);
                 setRecoveryError("");
               }}
             >

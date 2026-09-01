@@ -1,17 +1,20 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { Link } from "react-router-dom";
 
+import { Artwork } from "../../components/Artwork";
 import { ArtworkUploadModal } from "../../components/ArtworkUploadModal";
-import { SearchBar } from "../../components/SearchBar";
+import { Icon } from "../../components/Icon";
 import { ViewToggle } from "../../components/ViewToggle";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { useArtworkUpload } from "../../hooks/useArtworkUpload";
-import { useNavigation } from "../../hooks/useNavigation";
+import { useInfiniteScroll } from "../../hooks/useInfiniteScroll";
+import { buildAlbumPath } from "../../hooks/useNavigation";
 import { uploadAlbumArtwork } from "../../services/albumsService";
 import { getAlbumKey, resolveAlbumArtwork } from "../../utils/artwork";
 import { useLibraryFilters } from "./useLibraryFilters";
 
-const ARTWORK_PREFETCH_LIMIT = 80;
+const PAGE_SIZE = 60;
 
 const VIEW_OPTIONS = [
   { value: "grid", label: "Grid" },
@@ -19,25 +22,26 @@ const VIEW_OPTIONS = [
 ];
 
 export function AlbumsView() {
-  const { albumArtworkMap, ensureAlbumArtwork, setAlbumArtwork } = useLibrary();
-  const { searchQuery, setSearchQuery, goToAlbum } = useNavigation();
+  const { albumArtworkMap, setAlbumArtwork } = useLibrary();
   const { notify } = useNotifications();
   const { visibleAlbums } = useLibraryFilters();
 
   const [viewMode, setViewMode] = useState("grid");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [artworkAlbum, setArtworkAlbum] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
 
   const upload = useArtworkUpload();
 
-  const prefetchAlbums = visibleAlbums.slice(0, ARTWORK_PREFETCH_LIMIT);
-  const signature = prefetchAlbums.join("|");
+  /*
+   * Rendered in pages. This view previously rendered every album card in one pass — 4,240
+   * of them on a real library — while the tracks and artists views paginated.
+   */
+  const shown = visibleAlbums.slice(0, visibleCount);
+  const hasMore = visibleCount < visibleAlbums.length;
 
-  useEffect(() => {
-    if (prefetchAlbums.length > 0) {
-      ensureAlbumArtwork(prefetchAlbums.map(getAlbumKey));
-    }
-  }, [signature, ensureAlbumArtwork]); // eslint-disable-line react-hooks/exhaustive-deps
+  const loadMore = useCallback(() => setVisibleCount((count) => count + PAGE_SIZE), []);
+  const { setSentinel } = useInfiniteScroll({ onLoadMore: loadMore, enabled: hasMore });
 
   function openArtworkEditor(album) {
     setArtworkAlbum(album);
@@ -50,15 +54,14 @@ export function AlbumsView() {
   }
 
   async function saveArtwork() {
-    if (!artworkAlbum || !upload.file) {
-      return;
-    }
+    if (!artworkAlbum || !upload.file) return;
 
     setIsSaving(true);
 
     try {
       const result = await uploadAlbumArtwork(artworkAlbum, upload.file);
       setAlbumArtwork(getAlbumKey(artworkAlbum), result.artwork_path || "");
+      notify("Album artwork updated.");
       closeArtworkEditor();
     } catch (error) {
       notify(error.message || "Could not upload the album artwork.");
@@ -67,93 +70,88 @@ export function AlbumsView() {
     }
   }
 
-  function renderArtwork(album, sizeClass) {
-    const artwork = resolveAlbumArtwork(album, albumArtworkMap);
-    const base = viewMode === "grid" ? "album-card__art" : "album-list-row__art";
-
-    if (artwork.type === "image") {
-      return <img className={`${base} ${sizeClass}`} src={artwork.src} alt="" />;
-    }
-
+  if (visibleAlbums.length === 0) {
     return (
-      <div className={`${base} ${base}--generated ${sizeClass} ${artwork.gradientClass}`}>
-        <span>{artwork.initials}</span>
+      <div className="state">
+        <div className="state__icon">
+          <Icon name="albums" size={20} />
+        </div>
+        <p className="state__title">No albums found</p>
+        <p className="state__text">Nothing in your library matches that search.</p>
       </div>
     );
   }
 
   return (
-    <div className="albums-page">
-      <div className="albums-hero">
-        <div>
-          <div className="albums-eyebrow">Library collection</div>
-          <h2>Albums</h2>
-          <p>Browse your albums by artwork or switch to a compact list view.</p>
-        </div>
-
-        <div className="albums-hero__stat">
-          <span>{visibleAlbums.length}</span>
-          <small>albums</small>
-        </div>
+    <>
+      <div className="filter-row">
+        <ViewToggle value={viewMode} options={VIEW_OPTIONS} onChange={setViewMode} />
       </div>
 
-      <SearchBar value={searchQuery} onChange={setSearchQuery} label="albums" />
-
-      <ViewToggle value={viewMode} options={VIEW_OPTIONS} onChange={setViewMode} />
-
       {viewMode === "grid" ? (
-        <div className="album-grid">
-          {visibleAlbums.map((album) => (
-            <div key={album} className="album-card">
-              <button
-                className="album-card__main"
-                onClick={() => goToAlbum(album)}
-                type="button"
-              >
-                {renderArtwork(album, "album-artwork-fixed album-artwork-fixed--grid")}
-                <div className="album-card__name">{album}</div>
-              </button>
+        <div className="entity-grid">
+          {shown.map((album) => (
+            <div key={album} className="entity-card">
+              <Link to={buildAlbumPath(album)} style={{ display: "contents" }}>
+                <Artwork
+                  artwork={resolveAlbumArtwork(album, albumArtworkMap)}
+                  className="entity-card__art"
+                  size={160}
+                />
+                <span className="entity-card__body">
+                  <span className="entity-card__name">{album}</span>
+                  <span className="entity-card__meta">Album</span>
+                </span>
+              </Link>
 
               <button
-                className="album-card__menu-button"
+                className="entity-card__menu-button"
                 type="button"
                 onClick={() => openArtworkEditor(album)}
                 aria-label={`Change artwork for ${album}`}
               >
-                ⋯
+                <Icon name="more" size={16} />
               </button>
             </div>
           ))}
         </div>
       ) : (
-        <div className="album-list">
-          {visibleAlbums.map((album) => (
-            <div key={album} className="album-list-row">
+        <div className="entity-list">
+          {shown.map((album) => (
+            <div key={album} className="entity-row">
+              <Artwork
+                artwork={resolveAlbumArtwork(album, albumArtworkMap)}
+                className="entity-row__art"
+                size={44}
+              />
+              <Link to={buildAlbumPath(album)} className="entity-card__body">
+                <span className="entity-row__name">{album}</span>
+                <span className="entity-row__meta">Album</span>
+              </Link>
               <button
-                className="album-list-row__main"
-                onClick={() => goToAlbum(album)}
-                type="button"
-              >
-                {renderArtwork(album, "album-artwork-fixed album-artwork-fixed--list")}
-                <span className="album-list-row__name">{album}</span>
-              </button>
-
-              <button
-                className="album-list-row__menu-button"
+                className="btn btn--icon btn--ghost btn--sm"
                 type="button"
                 onClick={() => openArtworkEditor(album)}
                 aria-label={`Change artwork for ${album}`}
               >
-                ⋯
+                <Icon name="more" size={16} />
               </button>
             </div>
           ))}
         </div>
       )}
 
+      {hasMore && (
+        <div className="load-more" ref={setSentinel}>
+          <span className="load-more__status">
+            {shown.length.toLocaleString()} of {visibleAlbums.length.toLocaleString()}
+          </span>
+        </div>
+      )}
+
       {artworkAlbum && (
         <ArtworkUploadModal
-          title="Change Album Artwork"
+          title="Change album artwork"
           previewLabel={artworkAlbum}
           previewUrl={upload.previewUrl}
           fileName={upload.file?.name}
@@ -163,6 +161,6 @@ export function AlbumsView() {
           isSaving={isSaving}
         />
       )}
-    </div>
+    </>
   );
 }

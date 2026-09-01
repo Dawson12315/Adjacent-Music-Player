@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { StateMessage } from "../../components/StateMessage";
+import { Icon } from "../../components/Icon";
+import { TrackListSkeleton } from "../library/TrackListSkeleton";
 import { TrackRow } from "../library/TrackRow";
 import { useTrackActions } from "../library/useTrackActions";
 import { SimilarTracksSection } from "../recommendations/SimilarTracksSection";
@@ -12,13 +13,8 @@ import * as playlistsService from "../../services/playlistsService";
 import { isLikedSongsPlaylist } from "../../utils/playlists";
 
 export function PlaylistView() {
-  const {
-    playlists,
-    playlistTracks,
-    setPlaylistTracks,
-    loadPlaylistTracks,
-  } = useLibrary();
-  const { currentTrack, playTrack, isLiked } = usePlayer();
+  const { playlists, playlistTracks, setPlaylistTracks, loadPlaylistTracks } = useLibrary();
+  const { currentTrack, isPlaying, playTrack, isLiked } = usePlayer();
   const { selectedPlaylistId } = useNavigation();
   const { notify } = useNotifications();
 
@@ -26,17 +22,14 @@ export function PlaylistView() {
 
   const playlist = playlists.find((item) => item.id === selectedPlaylistId) || null;
   const isLikedPlaylist = isLikedSongsPlaylist(playlist);
+  const actions = useTrackActions();
 
-  const actions = useTrackActions(playlistTracks);
-
-  // Liking or unliking from the player bar changes what belongs in Ducking Good, so that
-  // playlist reloads when the liked state flips while it is open. Other playlists ignore it.
+  // Liking from the player bar changes what belongs in Ducking Good, so that playlist
+  // reloads when the liked state flips while it is open. Others ignore it.
   const likedRevision = isLikedPlaylist ? isLiked : null;
 
   useEffect(() => {
-    if (!selectedPlaylistId) {
-      return undefined;
-    }
+    if (!selectedPlaylistId) return undefined;
 
     const controller = new AbortController();
 
@@ -51,9 +44,7 @@ export function PlaylistView() {
           setPlaylistTracks([]);
         }
       } finally {
-        if (!controller.signal.aborted) {
-          setIsLoading(false);
-        }
+        if (!controller.signal.aborted) setIsLoading(false);
       }
     }
 
@@ -73,13 +64,13 @@ export function PlaylistView() {
     [actions, playTrack, playlistTracks, selectedPlaylistId],
   );
 
-  const handleRemoveFromPlaylist = useCallback(
+  const handleRemove = useCallback(
     async (trackId) => {
       try {
         await playlistsService.removeTrackFromPlaylist(selectedPlaylistId, trackId);
-        setPlaylistTracks((previous) => previous.filter((track) => track.id !== trackId));
+        setPlaylistTracks((previous) => previous.filter((t) => t.id !== trackId));
       } catch (error) {
-        notify(error.message || "Could not remove the track from this playlist.");
+        notify(error.message || "Could not remove the track.");
       } finally {
         actions.closeMenu();
       }
@@ -92,19 +83,40 @@ export function PlaylistView() {
       try {
         await playlistsService.addTrackToPlaylist(selectedPlaylistId, track.id);
         setPlaylistTracks((previous) => [...previous, track]);
+        notify(`Added "${track.title}".`);
       } catch (error) {
-        notify(error.message || "Could not add that track to the playlist.");
+        notify(error.message || "Could not add that track.");
       }
     },
     [selectedPlaylistId, notify, setPlaylistTracks],
   );
 
   if (isLoading) {
-    return <StateMessage>Loading playlist...</StateMessage>;
+    return <TrackListSkeleton />;
   }
 
   if (playlistTracks.length === 0) {
-    return <StateMessage>This Playlist is empty.</StateMessage>;
+    return (
+      <>
+        <div className="state">
+          <div className="state__icon">
+            <Icon name="music" size={20} />
+          </div>
+          <p className="state__title">This playlist is empty</p>
+          <p className="state__text">
+            {isLikedPlaylist
+              ? "Tap the heart on any track and it will show up here."
+              : "Use the ⋯ menu on any track to add it to this playlist."}
+          </p>
+        </div>
+
+        <SimilarTracksSection
+          playlistId={selectedPlaylistId}
+          onPlay={handlePlay}
+          onAdd={handleAddRecommendation}
+        />
+      </>
+    );
   }
 
   return (
@@ -116,6 +128,7 @@ export function PlaylistView() {
             track={track}
             index={index}
             isActive={currentTrack?.id === track.id}
+            isPlaying={isPlaying}
             artwork={actions.artworkFor(track)}
             playlists={actions.playlists}
             isMenuOpen={actions.openMenuTrackId === track.id}
@@ -125,7 +138,7 @@ export function PlaylistView() {
             onEdit={actions.handleEdit}
             onAddToQueue={actions.handleAddToQueue}
             onAddToPlaylist={actions.handleAddToPlaylist}
-            onRemoveFromPlaylist={handleRemoveFromPlaylist}
+            onRemoveFromPlaylist={handleRemove}
           />
         ))}
       </div>

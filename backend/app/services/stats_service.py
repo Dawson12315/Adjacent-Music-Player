@@ -4,6 +4,8 @@ from app.models.listening_event import ListeningEvent
 from app.models.track import Track
 from app.models.track_user_stats import TrackUserStats
 
+RECENTLY_PLAYED_EVENT_SCAN_MULTIPLIER = 20
+
 
 def get_top_played_tracks(db: Session, user_id: int, limit: int = 20) -> list[Track]:
     return (
@@ -47,7 +49,28 @@ def get_most_liked_tracks(db: Session, user_id: int, limit: int = 20) -> list[Tr
     )
 
 
-def get_recently_played_tracks(db: Session, user_id: int, limit: int = 20) -> list[Track]:
+def get_most_skipped_tracks(db: Session, user_id: int, limit: int = 10) -> list[Track]:
+    return (
+        db.query(Track)
+        .join(TrackUserStats, TrackUserStats.track_id == Track.id)
+        .options(
+            selectinload(Track.track_genres),
+            selectinload(Track.track_artists),
+        )
+        .filter(
+            TrackUserStats.user_id == user_id,
+            TrackUserStats.skip_count > 0,
+        )
+        .order_by(
+            TrackUserStats.skip_count.desc(),
+            TrackUserStats.updated_at.desc(),
+        )
+        .limit(limit)
+        .all()
+    )
+
+
+def get_recently_played_track_ids(db: Session, user_id: int, limit: int = 20) -> list[int]:
     recent_track_ids = (
         db.query(ListeningEvent.track_id)
         .filter(
@@ -55,6 +78,7 @@ def get_recently_played_tracks(db: Session, user_id: int, limit: int = 20) -> li
             ListeningEvent.event_type == "play_started",
         )
         .order_by(ListeningEvent.created_at.desc())
+        .limit(max(limit, 1) * RECENTLY_PLAYED_EVENT_SCAN_MULTIPLIER)
         .all()
     )
 
@@ -71,6 +95,12 @@ def get_recently_played_tracks(db: Session, user_id: int, limit: int = 20) -> li
         if len(ordered_unique_ids) >= limit:
             break
 
+    return ordered_unique_ids
+
+
+def get_recently_played_tracks(db: Session, user_id: int, limit: int = 20) -> list[Track]:
+    ordered_unique_ids = get_recently_played_track_ids(db, user_id, limit=limit)
+
     if not ordered_unique_ids:
         return []
 
@@ -86,3 +116,117 @@ def get_recently_played_tracks(db: Session, user_id: int, limit: int = 20) -> li
 
     track_map = {track.id: track for track in tracks}
     return [track_map[track_id] for track_id in ordered_unique_ids if track_id in track_map]
+
+
+def get_top_played_tracks_with_stats(
+    db: Session,
+    user_id: int,
+    limit: int = 20,
+) -> list[tuple[Track, TrackUserStats | None]]:
+    return (
+        db.query(Track, TrackUserStats)
+        .join(TrackUserStats, TrackUserStats.track_id == Track.id)
+        .options(
+            selectinload(Track.track_genres),
+            selectinload(Track.track_artists),
+        )
+        .filter(
+            TrackUserStats.user_id == user_id,
+            TrackUserStats.play_count > 0,
+        )
+        .order_by(
+            TrackUserStats.play_count.desc(),
+            TrackUserStats.last_played_at.desc(),
+        )
+        .limit(limit)
+        .all()
+    )
+
+
+def get_most_liked_tracks_with_stats(
+    db: Session,
+    user_id: int,
+    limit: int = 20,
+) -> list[tuple[Track, TrackUserStats | None]]:
+    return (
+        db.query(Track, TrackUserStats)
+        .join(TrackUserStats, TrackUserStats.track_id == Track.id)
+        .options(
+            selectinload(Track.track_genres),
+            selectinload(Track.track_artists),
+        )
+        .filter(
+            TrackUserStats.user_id == user_id,
+            TrackUserStats.like_count > 0,
+        )
+        .order_by(
+            TrackUserStats.like_count.desc(),
+            TrackUserStats.last_played_at.desc(),
+        )
+        .limit(limit)
+        .all()
+    )
+
+
+def get_most_skipped_tracks_with_stats(
+    db: Session,
+    user_id: int,
+    limit: int = 10,
+) -> list[tuple[Track, TrackUserStats | None]]:
+    return (
+        db.query(Track, TrackUserStats)
+        .join(TrackUserStats, TrackUserStats.track_id == Track.id)
+        .options(
+            selectinload(Track.track_genres),
+            selectinload(Track.track_artists),
+        )
+        .filter(
+            TrackUserStats.user_id == user_id,
+            TrackUserStats.skip_count > 0,
+        )
+        .order_by(
+            TrackUserStats.skip_count.desc(),
+            TrackUserStats.updated_at.desc(),
+        )
+        .limit(limit)
+        .all()
+    )
+
+
+def get_recently_played_tracks_with_stats(
+    db: Session,
+    user_id: int,
+    limit: int = 20,
+) -> list[tuple[Track, TrackUserStats | None]]:
+    ordered_unique_ids = get_recently_played_track_ids(db, user_id, limit=limit)
+
+    if not ordered_unique_ids:
+        return []
+
+    tracks = (
+        db.query(Track)
+        .options(
+            selectinload(Track.track_genres),
+            selectinload(Track.track_artists),
+        )
+        .filter(Track.id.in_(ordered_unique_ids))
+        .all()
+    )
+
+    stats_rows = (
+        db.query(TrackUserStats)
+        .filter(
+            TrackUserStats.user_id == user_id,
+            TrackUserStats.track_id.in_(ordered_unique_ids),
+        )
+        .all()
+    )
+
+    track_map = {track.id: track for track in tracks}
+    stats_map = {stats.track_id: stats for stats in stats_rows}
+
+    return [
+        (track_map[track_id], stats_map.get(track_id))
+        for track_id in ordered_unique_ids
+        if track_id in track_map
+    ]

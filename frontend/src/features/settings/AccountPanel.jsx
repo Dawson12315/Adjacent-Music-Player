@@ -95,11 +95,11 @@ export function AccountPanel() {
           {success && <div className="settings-success">{success}</div>}
         </div>
 
-        <div className="account-settings-grid">
-          <label className="settings-field">
-            <span className="settings-field__label">Username</span>
+        <div className="account-grid">
+          <label className="field">
+            <span className="field__label">Username</span>
             <input
-              className="settings-text-input"
+              className="input"
               type="text"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
@@ -108,10 +108,10 @@ export function AccountPanel() {
             />
           </label>
 
-          <label className="settings-field">
-            <span className="settings-field__label">Current password</span>
+          <label className="field">
+            <span className="field__label">Current password</span>
             <input
-              className="settings-text-input"
+              className="input"
               type="password"
               value={currentPassword}
               onChange={(event) => setCurrentPassword(event.target.value)}
@@ -120,10 +120,10 @@ export function AccountPanel() {
             />
           </label>
 
-          <label className="settings-field">
-            <span className="settings-field__label">New password</span>
+          <label className="field">
+            <span className="field__label">New password</span>
             <input
-              className="settings-text-input"
+              className="input"
               type="password"
               value={newPassword}
               onChange={(event) => setNewPassword(event.target.value)}
@@ -132,10 +132,10 @@ export function AccountPanel() {
             />
           </label>
 
-          <label className="settings-field">
-            <span className="settings-field__label">Confirm new password</span>
+          <label className="field">
+            <span className="field__label">Confirm new password</span>
             <input
-              className="settings-text-input"
+              className="input"
               type="password"
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
@@ -147,7 +147,7 @@ export function AccountPanel() {
 
         <div className="settings-card__actions">
           <button
-            className="settings-button"
+            className="btn btn--primary"
             type="button"
             onClick={handleSave}
             disabled={isSaving}
@@ -155,7 +155,7 @@ export function AccountPanel() {
             {isSaving ? "Saving..." : "Save account"}
           </button>
 
-          <button className="logout-button" type="button" onClick={logout}>
+          <button className="btn btn--danger" type="button" onClick={logout}>
             Sign out
           </button>
         </div>
@@ -171,7 +171,7 @@ export function AccountPanel() {
 
         <div className="settings-card__actions">
           <button
-            className="settings-button settings-button--secondary"
+            className="btn"
             type="button"
             onClick={handleGenerateRecoveryCodes}
             disabled={isGenerating}
@@ -183,7 +183,7 @@ export function AccountPanel() {
         {recoveryError && <div className="settings-error">{recoveryError}</div>}
 
         {recoveryCodes.length > 0 && (
-          <div className="recovery-codes-box">
+          <div className="recovery-codes">
             {recoveryCodes.map((code) => (
               <code key={code} className="recovery-code">
                 {code}

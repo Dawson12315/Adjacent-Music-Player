@@ -1,65 +1,59 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { useLibrary } from "../../contexts/LibraryContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { usePlayer } from "../../contexts/PlayerContext";
-import { getAlbumKey, resolveAlbumArtwork } from "../../utils/artwork";
+import { useDismissable } from "../../hooks/useDismissable";
+import { resolveAlbumArtwork } from "../../utils/artwork";
 import * as playlistsService from "../../services/playlistsService";
 
 /**
- * The row-menu behaviour shared by the tracks and playlist views: which menu is open,
- * which way it opens, and the actions the menu offers.
+ * Row-menu behaviour shared by the track lists: which menu is open, which way it opens,
+ * and the actions it offers.
  *
- * Album artwork for the visible rows is requested here too, keyed off a stable signature
- * so the effect fires when the visible set actually changes rather than on every render.
+ * Artwork no longer needs fetching here — the whole album artwork table arrives in one
+ * request at startup, replacing one request per visible album.
  */
-export function useTrackActions(visibleTracks) {
-  const { playlists, albumArtworkMap, ensureAlbumArtwork, openTrackEditor } = useLibrary();
+export function useTrackActions() {
+  const { playlists, albumArtworkMap, openTrackEditor } = useLibrary();
   const { addToQueue } = usePlayer();
   const { notify } = useNotifications();
 
   const [openMenuTrackId, setOpenMenuTrackId] = useState(null);
   const [menuDirection, setMenuDirection] = useState("down");
 
-  const albumKeys = visibleTracks
-    .map((track) => getAlbumKey(track.album))
-    .filter(Boolean);
+  const closeMenu = useCallback(() => setOpenMenuTrackId(null), []);
 
-  const albumSignature = albumKeys.join("|");
-
-  useEffect(() => {
-    if (albumKeys.length > 0) {
-      ensureAlbumArtwork(albumKeys);
-    }
-  }, [albumSignature, ensureAlbumArtwork]); // eslint-disable-line react-hooks/exhaustive-deps
+  useDismissable(openMenuTrackId !== null, closeMenu);
 
   const toggleMenu = useCallback((trackId, direction) => {
     setMenuDirection(direction);
     setOpenMenuTrackId((previous) => (previous === trackId ? null : trackId));
   }, []);
 
-  const closeMenu = useCallback(() => setOpenMenuTrackId(null), []);
-
   const handleAddToQueue = useCallback(
     (track) => {
       addToQueue(track);
+      notify(`Added "${track.title}" to the queue.`);
       closeMenu();
     },
-    [addToQueue, closeMenu],
+    [addToQueue, notify, closeMenu],
   );
 
   const handleAddToPlaylist = useCallback(
     async (trackId, playlistId) => {
+      const playlist = playlists.find((item) => item.id === playlistId);
+
       try {
         await playlistsService.addTrackToPlaylist(playlistId, trackId);
-        notify("Added to playlist.");
+        notify(`Added to ${playlist?.name || "playlist"}.`);
       } catch (error) {
         notify(error.message || "Could not add the track to that playlist.");
       } finally {
         closeMenu();
       }
     },
-    [notify, closeMenu],
+    [playlists, notify, closeMenu],
   );
 
   const handleEdit = useCallback(
@@ -71,7 +65,7 @@ export function useTrackActions(visibleTracks) {
   );
 
   const artworkFor = useCallback(
-    (track) => (track.album ? resolveAlbumArtwork(track.album, albumArtworkMap) : null),
+    (track) => resolveAlbumArtwork(track.album, albumArtworkMap),
     [albumArtworkMap],
   );
 

@@ -2,8 +2,26 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/Adjacent.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0A0C11" />
+    <meta name="description" content="Adjacent — your music, next to each other." />
+    <meta name="color-scheme" content="dark" />
+
+    <link rel="icon" type="image/svg+xml" href="/mark.svg" />
+    <link rel="apple-touch-icon" href="/Adjacent.svg" />
+
+    <!--
+      Fonts are loaded explicitly. The previous stylesheet asked for Inter and never
+      loaded it, so the app silently rendered in system-ui and its three deliberately
+      different heading weights came out identical.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+
     <title>Adjacent</title>
     <script src="/config.js"></script>
   </head>

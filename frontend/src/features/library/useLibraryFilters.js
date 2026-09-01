@@ -4,71 +4,34 @@ import { useLibrary } from "../../contexts/LibraryContext";
 import { useNavigation } from "../../hooks/useNavigation";
 
 /**
- * Derives the visible slice of the library from the current route and search term.
+ * Client-side filtering for the entity name lists.
  *
- * Filtering stays client-side, matching the previous behaviour: search covers genre as
- * well as title/artist/album and needs no round trip. The backend does support server-side
- * search and pagination, and moving to it would cut the startup payload considerably, but
- * it would also change what a search matches — worth doing on its own, not as a side
- * effect of this refactor.
+ * These stay in the browser deliberately: artists, albums and genres are roughly 125 KB
+ * of strings combined, so filtering them locally is instant and costs nothing. Tracks are
+ * the opposite case and are paged from the server — see useTrackFeed.
  */
 export function useLibraryFilters() {
-  const { tracks, artists, albums, genres } = useLibrary();
-  const { selectedArtist, selectedAlbum, selectedGenre, searchQuery } = useNavigation();
+  const { artists, albums, genres } = useLibrary();
+  const { searchQuery } = useNavigation();
 
   const query = searchQuery.trim().toLowerCase();
 
-  const visibleTracks = useMemo(() => {
-    return tracks.filter((track) => {
-      const matchesArtist = selectedArtist
-        ? track.artists?.includes(selectedArtist) || track.artist === selectedArtist
-        : true;
-
-      const matchesAlbum = selectedAlbum ? track.album === selectedAlbum : true;
-
-      const matchesGenre = selectedGenre
-        ? (track.genres || []).includes(selectedGenre)
-        : true;
-
-      const matchesSearch =
-        query === "" ||
-        track.title?.toLowerCase().includes(query) ||
-        track.artist?.toLowerCase().includes(query) ||
-        track.album?.toLowerCase().includes(query) ||
-        track.genre?.toLowerCase().includes(query);
-
-      return matchesArtist && matchesAlbum && matchesGenre && matchesSearch;
-    });
-  }, [tracks, selectedArtist, selectedAlbum, selectedGenre, query]);
-
   const visibleArtists = useMemo(
-    () => artists.filter((artist) => artist.toLowerCase().includes(query)),
+    () => (query ? artists.filter((a) => a.toLowerCase().includes(query)) : artists),
     [artists, query],
   );
 
   const visibleAlbums = useMemo(
-    () => albums.filter((album) => album.toLowerCase().includes(query)),
+    () => (query ? albums.filter((a) => a.toLowerCase().includes(query)) : albums),
     [albums, query],
   );
 
   const visibleGenres = useMemo(
-    () => genres.filter((genre) => genre.toLowerCase().includes(query)),
+    () => (query ? genres.filter((g) => g.toLowerCase().includes(query)) : genres),
     [genres, query],
   );
 
-  const genreCounts = useMemo(() => {
-    const counts = new Map();
-
-    tracks.forEach((track) => {
-      (track.genres || []).forEach((genre) => {
-        counts.set(genre, (counts.get(genre) || 0) + 1);
-      });
-    });
-
-    return counts;
-  }, [tracks]);
-
-  return { visibleTracks, visibleArtists, visibleAlbums, visibleGenres, genreCounts };
+  return { visibleArtists, visibleAlbums, visibleGenres };
 }
 
 /** Slice a list for the current page and report how many pages there are. */

@@ -3,6 +3,8 @@ import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from starlette.types import Receive, Scope, Send
 
 from app import models
 from app.config import settings
@@ -15,6 +17,7 @@ from app.routes.artist_genres import router as artist_genres_router
 from app.routes.auth import router as auth_router
 from app.routes.genres import router as genres_router
 from app.routes.health import router as health_router
+from app.routes.home import router as home_router
 from app.routes.listening import router as listening_router
 from app.routes.maintenance import router as maintenance_router
 from app.routes.playback import router as playback_router
@@ -31,6 +34,33 @@ from app.routes import recommendation_evaluation
 
 UPLOADS_DIR = "data/uploads"
 LEGACY_UPLOADS_DIR = "app/uploads"
+
+# GZipMiddleware has no path exclusions and will compress 206 Partial Content
+# bodies, which leaves the Content-Range byte offsets describing the
+# uncompressed file and breaks seeking in the audio players. Audio payloads are
+# already compressed, so nothing is lost by passing them through untouched.
+# Audio streaming must bypass gzip: compressing a 206 response leaves Content-Range
+# describing uncompressed offsets, which breaks seeking. Uploaded artwork is already
+# JPEG/PNG/WebP, so re-compressing it costs CPU and can grow the payload.
+GZIP_EXCLUDED_PATH_MARKERS = (
+    "/stream",
+    "/mobile-stream",
+    "/hls/",
+    "/uploads",
+    "/legacy-uploads",
+)
+
+
+class StreamSafeGZipMiddleware(GZipMiddleware):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and any(
+            marker in scope.get("path", "")
+            for marker in GZIP_EXCLUDED_PATH_MARKERS
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        await super().__call__(scope, receive, send)
 
 
 app = FastAPI(
@@ -68,6 +98,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(
+    StreamSafeGZipMiddleware,
+    minimum_size=1000,
+)
+
 
 @app.on_event("startup")
 def on_startup():
@@ -96,4 +131,5 @@ app.include_router(genres_router, prefix="/api")
 app.include_router(similar_tracks_router, prefix="/api")
 app.include_router(listening_router, prefix="/api")
 app.include_router(stats_router, prefix="/api")
+app.include_router(home_router, prefix="/api")
 app.include_router(recommendation_evaluation.router, prefix="/api")

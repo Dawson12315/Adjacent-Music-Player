@@ -9,55 +9,55 @@ export function MusicbrainzReadinessCard({ readiness, isResuming, onResume }) {
     !isResuming;
 
   return (
-    <div className="lastfm-readiness-card">
-      <div className="lastfm-readiness-card__title">
+    <div className="progress-card">
+      <div className="progress-card__title">
         {readiness.musicbrainz_backfill_running
           ? "MusicBrainz tagging is running"
           : "Waiting for MusicBrainz tagging to finish"}
       </div>
 
-      <div className="lastfm-readiness-card__text">
+      <div className="progress-card__text">
         Last.fm genre enrichment becomes available once every scanned track has been
         processed for MusicBrainz recording IDs.
       </div>
 
-      <div className="lastfm-readiness-card__bar">
+      <div className="progress-bar">
         <div
-          className="lastfm-readiness-card__bar-fill"
+          className="progress-bar__fill"
           style={{ width: `${readiness.progress_percent || 0}%` }}
         />
       </div>
 
-      <div className="lastfm-readiness-card__stats">
-        <div className="lastfm-readiness-card__stat">
-          <span className="lastfm-readiness-card__label">Tagged</span>
-          <span className="lastfm-readiness-card__value">{readiness.tracks_with_mbid}</span>
+      <div className="progress-stats">
+        <div className="progress-stat">
+          <span className="progress-stat__label">Tagged</span>
+          <span className="progress-stat__value">{readiness.tracks_with_mbid}</span>
         </div>
 
-        <div className="lastfm-readiness-card__stat">
-          <span className="lastfm-readiness-card__label">Remaining</span>
-          <span className="lastfm-readiness-card__value">
+        <div className="progress-stat">
+          <span className="progress-stat__label">Remaining</span>
+          <span className="progress-stat__value">
             {readiness.tracks_missing_mbid}
           </span>
         </div>
 
-        <div className="lastfm-readiness-card__stat">
-          <span className="lastfm-readiness-card__label">Total</span>
-          <span className="lastfm-readiness-card__value">{readiness.total_tracks}</span>
+        <div className="progress-stat">
+          <span className="progress-stat__label">Total</span>
+          <span className="progress-stat__value">{readiness.total_tracks}</span>
         </div>
 
-        <div className="lastfm-readiness-card__stat">
-          <span className="lastfm-readiness-card__label">Progress</span>
-          <span className="lastfm-readiness-card__value">
+        <div className="progress-stat">
+          <span className="progress-stat__label">Progress</span>
+          <span className="progress-stat__value">
             {readiness.progress_percent}%
           </span>
         </div>
       </div>
 
       {canResume && (
-        <div className="lastfm-readiness-card__actions">
+        <div className="settings-card__actions">
           <button
-            className="settings-button settings-button--secondary"
+            className="btn"
             type="button"
             onClick={onResume}
           >

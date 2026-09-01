@@ -190,6 +190,9 @@ def run_simple_migrations():
                 text("ALTER TABLE tracks ADD COLUMN lastfm_tags_enriched BOOLEAN NOT NULL DEFAULT 0")
             )
 
+        if "duration_seconds" not in track_column_names:
+            connection.execute(text("ALTER TABLE tracks ADD COLUMN duration_seconds REAL"))
+
         connection.execute(
             text(
                 """

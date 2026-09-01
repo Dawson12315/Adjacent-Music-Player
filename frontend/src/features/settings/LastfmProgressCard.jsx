@@ -15,84 +15,84 @@ export function LastfmProgressCard({ progress }) {
   );
 
   return (
-    <div className="lastfm-readiness-card">
-      <div className="lastfm-progress-card__header">
-        <span className={`lastfm-status-pill lastfm-status-pill--${status.modifier}`}>
+    <div className="progress-card">
+      <div className="progress-card__header">
+        <span className={`pill pill--${status.modifier}`}>
           {status.text}
         </span>
 
-        <span className="lastfm-progress-card__batch">
+        <span className="progress-card__text">
           Batch {progress.current_batch || 0}
         </span>
       </div>
 
-      <div className="lastfm-readiness-card__title">Last.fm enrichment progress</div>
+      <div className="progress-card__title">Last.fm enrichment progress</div>
 
-      <div className="lastfm-readiness-card__text">
+      <div className="progress-card__text">
         Pulling genre tags, similar tracks, and similar artists from Last.fm.
       </div>
 
-      <div className="lastfm-readiness-card__bar">
-        <div className="lastfm-readiness-card__bar-fill" style={{ width: `${percent}%` }} />
+      <div className="progress-bar">
+        <div className="progress-bar__fill" style={{ width: `${percent}%` }} />
       </div>
 
-      <div className="lastfm-readiness-card__stats">
-        <div className="lastfm-readiness-card__stat">
-          <span className="lastfm-readiness-card__label">Processed</span>
-          <span className="lastfm-readiness-card__value">
+      <div className="progress-stats">
+        <div className="progress-stat">
+          <span className="progress-stat__label">Processed</span>
+          <span className="progress-stat__value">
             {progress.processed_tracks || 0}
           </span>
         </div>
 
-        <div className="lastfm-readiness-card__stat">
-          <span className="lastfm-readiness-card__label">Remaining</span>
-          <span className="lastfm-readiness-card__value">{remaining}</span>
+        <div className="progress-stat">
+          <span className="progress-stat__label">Remaining</span>
+          <span className="progress-stat__value">{remaining}</span>
         </div>
 
-        <div className="lastfm-readiness-card__stat">
-          <span className="lastfm-readiness-card__label">Total</span>
-          <span className="lastfm-readiness-card__value">
+        <div className="progress-stat">
+          <span className="progress-stat__label">Total</span>
+          <span className="progress-stat__value">
             {progress.total_tracks || 0}
           </span>
         </div>
 
-        <div className="lastfm-readiness-card__stat">
-          <span className="lastfm-readiness-card__label">Progress</span>
-          <span className="lastfm-readiness-card__value">{percent}%</span>
+        <div className="progress-stat">
+          <span className="progress-stat__label">Progress</span>
+          <span className="progress-stat__value">{percent}%</span>
         </div>
       </div>
 
-      <div className="lastfm-progress-card__track">
-        <span className="lastfm-progress-card__label">Current track</span>
-        <div className="lastfm-progress-card__value">
+      <div className="progress-card__text">
+        <span className="progress-stat__label">Current track</span>
+        <div className="progress-stat__value">
           {progress.current_title
             ? `${progress.current_index}/${progress.current_total} — ${progress.current_title}`
             : "None"}
         </div>
       </div>
 
-      <div className="lastfm-progress-grid">
-        <div className="lastfm-progress-stat">
-          <div className="lastfm-progress-stat__label">Tagged</div>
-          <div className="lastfm-progress-stat__value">
+      <div className="progress-stats">
+        <div className="progress-stat">
+          <div className="progress-stat__label">Tagged</div>
+          <div className="progress-stat__value">
             {progress.total_processed || 0}
           </div>
         </div>
 
-        <div className="lastfm-progress-stat">
-          <div className="lastfm-progress-stat__label">Skipped</div>
-          <div className="lastfm-progress-stat__value">{progress.total_skipped || 0}</div>
+        <div className="progress-stat">
+          <div className="progress-stat__label">Skipped</div>
+          <div className="progress-stat__value">{progress.total_skipped || 0}</div>
         </div>
 
-        <div className="lastfm-progress-stat">
-          <div className="lastfm-progress-stat__label">Checked</div>
-          <div className="lastfm-progress-stat__value">{progress.total_checked || 0}</div>
+        <div className="progress-stat">
+          <div className="progress-stat__label">Checked</div>
+          <div className="progress-stat__value">{progress.total_checked || 0}</div>
         </div>
       </div>
 
-      <div className="lastfm-progress-card__footer">
-        <span className="lastfm-progress-card__label">Last result</span>
-        <span className="lastfm-progress-card__result">
+      <div className="progress-card__header">
+        <span className="progress-stat__label">Last result</span>
+        <span className="progress-stat__value">
           {progress.last_result || "None"}
         </span>
       </div>

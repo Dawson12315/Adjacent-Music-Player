@@ -99,7 +99,7 @@ export function SettingsView() {
             {confirmAction === "scan_library" ? (
               <div className="settings-card__actions">
                 <button
-                  className="settings-button settings-button--secondary"
+                  className="btn"
                   type="button"
                   onClick={() => setConfirmAction(null)}
                 >
@@ -107,7 +107,7 @@ export function SettingsView() {
                 </button>
 
                 <button
-                  className="settings-button"
+                  className="btn btn--primary"
                   type="button"
                   onClick={handleScan}
                   disabled={isScanning}
@@ -118,7 +118,7 @@ export function SettingsView() {
             ) : (
               <div className="settings-card__actions">
                 <button
-                  className="settings-button"
+                  className="btn btn--primary"
                   type="button"
                   onClick={() => setConfirmAction("scan_library")}
                   disabled={isScanning}
@@ -138,7 +138,7 @@ export function SettingsView() {
 
             <div className="settings-card__actions">
               <button
-                className="settings-button"
+                className="btn btn--primary"
                 type="button"
                 onClick={handleCleanup}
                 disabled={isCleaning}
@@ -164,7 +164,7 @@ export function SettingsView() {
               database.
             </div>
 
-            <label className="settings-field settings-field--inline">
+            <label className="field field--inline">
               <input
                 type="checkbox"
                 checked={settings.scan_enabled}
@@ -173,10 +173,10 @@ export function SettingsView() {
               <span>Enable daily scan</span>
             </label>
 
-            <label className="settings-field">
-              <span className="settings-field__label">Run time</span>
+            <label className="field">
+              <span className="field__label">Run time</span>
               <input
-                className="settings-time-input"
+                className="input"
                 type="time"
                 value={settings.scan_time}
                 onChange={(event) => updateField("scan_time", event.target.value)}
@@ -191,7 +191,7 @@ export function SettingsView() {
               files from the database and track lists.
             </div>
 
-            <label className="settings-field settings-field--inline">
+            <label className="field field--inline">
               <input
                 type="checkbox"
                 checked={settings.cleanup_enabled}
@@ -200,10 +200,10 @@ export function SettingsView() {
               <span>Enable daily cleanup</span>
             </label>
 
-            <label className="settings-field">
-              <span className="settings-field__label">Run time</span>
+            <label className="field">
+              <span className="field__label">Run time</span>
               <input
-                className="settings-time-input"
+                className="input"
                 type="time"
                 value={settings.cleanup_time}
                 onChange={(event) => updateField("cleanup_time", event.target.value)}
@@ -236,7 +236,7 @@ export function SettingsView() {
           {confirmAction === "purge_tracks" ? (
             <div className="settings-card__actions">
               <button
-                className="settings-button settings-button--secondary"
+                className="btn"
                 type="button"
                 onClick={() => setConfirmAction(null)}
               >
@@ -244,7 +244,7 @@ export function SettingsView() {
               </button>
 
               <button
-                className="settings-button settings-button--danger"
+                className="btn btn--danger"
                 type="button"
                 onClick={handlePurge}
               >
@@ -254,7 +254,7 @@ export function SettingsView() {
           ) : (
             <div className="settings-card__actions">
               <button
-                className="settings-button settings-button--danger"
+                className="btn btn--danger"
                 type="button"
                 onClick={() => setConfirmAction("purge_tracks")}
               >
@@ -267,7 +267,7 @@ export function SettingsView() {
 
       <div className="settings-card__actions settings-card__actions--footer">
         <button
-          className="settings-button"
+          className="btn btn--primary"
           type="button"
           onClick={save}
           disabled={isSaving}

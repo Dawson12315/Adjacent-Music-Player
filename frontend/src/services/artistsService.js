@@ -19,6 +19,12 @@ export function getArtistGenres(artistName, options) {
   return apiClient.get(`/api/artists/${encode(artistName)}/genres`, options);
 }
 
+/** The whole artist-artwork lookup table in one request, keyed by artist key. */
+export async function getAllArtistArtwork(options) {
+  const data = await apiClient.get("/api/artists/artwork", options);
+  return data.artwork || {};
+}
+
 /** Always 200; `artwork_path` is null when the artist has no artwork. */
 export function getArtistArtwork(artistName, options) {
   return apiClient.get(`/api/artists/${encode(artistName)}/artwork`, options);

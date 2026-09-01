@@ -1,3 +1,5 @@
+import { Artwork } from "../../components/Artwork";
+import { Icon } from "../../components/Icon";
 import { PlayerProgress } from "./PlayerProgress";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { usePlayer } from "../../contexts/PlayerContext";
@@ -26,35 +28,35 @@ export function PlayerBar() {
     toggleLike,
   } = usePlayer();
 
-  const artwork = currentTrack?.album
-    ? resolveAlbumArtwork(currentTrack.album, albumArtworkMap)
-    : null;
+  const artwork = currentTrack ? resolveAlbumArtwork(currentTrack.album, albumArtworkMap) : null;
 
   return (
     <footer className="player-bar">
       <div className="player-bar__left">
         {currentTrack ? (
           <>
-            {artwork?.type === "image" ? (
-              <img
-                className="player-bar__art"
-                src={artwork.src}
-                alt={currentTrack.album || currentTrack.title}
-              />
-            ) : (
-              <div className="player-bar__art player-bar__art--placeholder">♪</div>
-            )}
+            <Artwork artwork={artwork} className="player-bar__art" size={52} />
 
             <div className="player-bar__track-info">
-              <div className="player-bar__title">{currentTrack.title}</div>
-              <div className="player-bar__meta">
-                {currentTrack.artist || "Unknown Artist"} •{" "}
-                {currentTrack.album || "Unknown Album"}
+              <div className="player-bar__title-row">
+                {isPlaying && (
+                  <span className="eq" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                )}
+                <span className="player-bar__title">{currentTrack.title}</span>
               </div>
+              <span className="player-bar__meta">
+                {currentTrack.artist || "Unknown Artist"} ·{" "}
+                {currentTrack.album || "Unknown Album"}
+              </span>
             </div>
           </>
         ) : (
-          <div className="player-bar__meta">Nothing playing</div>
+          <span className="player-bar__empty">Nothing playing</span>
         )}
       </div>
 
@@ -70,7 +72,7 @@ export function PlayerBar() {
             onClick={toggleLike}
             disabled={!currentTrack}
           >
-            {isLiked ? "♥" : "♡"}
+            <Icon name={isLiked ? "heartFilled" : "heart"} size={18} />
           </button>
 
           <button
@@ -82,7 +84,7 @@ export function PlayerBar() {
             aria-pressed={isShuffle}
             onClick={toggleShuffle}
           >
-            ⇄
+            <Icon name="shuffle" size={18} />
           </button>
 
           <button
@@ -90,8 +92,9 @@ export function PlayerBar() {
             type="button"
             aria-label="Previous track"
             onClick={previous}
+            disabled={!currentTrack}
           >
-            ⏮
+            <Icon name="previous" size={20} />
           </button>
 
           <button
@@ -99,8 +102,9 @@ export function PlayerBar() {
             onClick={togglePlay}
             type="button"
             aria-label={isPlaying ? "Pause" : "Play"}
+            disabled={!currentTrack}
           >
-            {isPlaying ? "❚❚" : "▶"}
+            <Icon name={isPlaying ? "pause" : "play"} size={18} />
           </button>
 
           <button
@@ -108,8 +112,9 @@ export function PlayerBar() {
             type="button"
             aria-label="Next track"
             onClick={next}
+            disabled={!currentTrack}
           >
-            ⏭
+            <Icon name="next" size={20} />
           </button>
 
           <button
@@ -117,11 +122,11 @@ export function PlayerBar() {
               isLoop ? "player-bar__icon-button--active" : ""
             }`}
             type="button"
-            aria-label="Loop"
+            aria-label="Repeat"
             aria-pressed={isLoop}
             onClick={toggleLoop}
           >
-            ↺
+            <Icon name="repeat" size={18} />
           </button>
         </div>
 
@@ -138,7 +143,7 @@ export function PlayerBar() {
           aria-pressed={isQueueOpen}
           onClick={toggleQueue}
         >
-          ☰
+          <Icon name="queue" size={18} />
         </button>
 
         <button
@@ -147,7 +152,7 @@ export function PlayerBar() {
           aria-label={isMuted ? "Unmute" : "Mute"}
           onClick={toggleMute}
         >
-          {isMuted || volume === 0 ? "🔇" : "🔊"}
+          <Icon name={isMuted || volume === 0 ? "volumeMute" : "volume"} size={18} />
         </button>
 
         <input

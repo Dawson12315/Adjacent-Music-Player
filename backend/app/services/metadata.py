@@ -47,4 +47,5 @@ def extract_track_metadata(file_path: str) -> dict:
         "raw_album": album,
         "raw_genre": genre,
         "file_path": str(path),
+        "duration_seconds": getattr(getattr(audio, "info", None), "length", None),
     }

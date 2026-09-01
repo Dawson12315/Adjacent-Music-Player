@@ -69,12 +69,12 @@ export function EditArtistModal({ artistName, artworkPath, onClose }) {
 
   return (
     <Modal
-      title="Edit Artist"
+      title="Edit artist"
       onClose={onClose}
       actions={
         <>
           <button
-            className="settings-button settings-button--secondary"
+            className="btn"
             type="button"
             onClick={onClose}
           >
@@ -82,7 +82,7 @@ export function EditArtistModal({ artistName, artworkPath, onClose }) {
           </button>
 
           <button
-            className="settings-button"
+            className="btn btn--primary"
             type="button"
             onClick={handleSave}
             disabled={isSaving}
@@ -97,12 +97,12 @@ export function EditArtistModal({ artistName, artworkPath, onClose }) {
 
         {upload.previewUrl ? (
           <img
-            className="artist-banner-preview"
+            className="artwork-preview artwork-preview--banner"
             src={upload.previewUrl}
             alt="Artist banner preview"
           />
         ) : (
-          <div className="artist-banner-preview artist-banner-preview--empty">
+          <div className="artwork-preview artwork-preview--banner artwork-preview--empty">
             No artist artwork selected
           </div>
         )}
@@ -124,18 +124,18 @@ export function EditArtistModal({ artistName, artworkPath, onClose }) {
         </div>
       </div>
 
-      <label className="modal__field">
-        <span className="modal__label">Rename artist</span>
+      <label className="field">
+        <span className="field__label">Rename artist</span>
         <input
-          className="modal__input"
+          className="input"
           type="text"
           value={name}
           onChange={(event) => setName(event.target.value)}
         />
       </label>
 
-      <label className="modal__field">
-        <span className="modal__label">Transfer all songs and albums to</span>
+      <label className="field">
+        <span className="field__label">Transfer all songs and albums to</span>
 
         <div className="modal__select-row">
           <button

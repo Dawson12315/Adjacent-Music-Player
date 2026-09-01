@@ -38,6 +38,8 @@ router = APIRouter()
 
 STREAM_TOKEN_EXPIRE_SECONDS = 60 * 60 * 12
 
+MAX_TRACKS_BY_IDS = 500
+
 MOBILE_STREAM_PROFILES = {
     "mp3_128": {
         "label": "MP3 128",
@@ -724,7 +726,31 @@ def build_track_response(track: Track, db: Session | None = None) -> TrackRespon
         raw_genre=track.raw_genre,
         musicbrainz_recording_id=track.musicbrainz_recording_id,
         lastfm_tags_enriched=track.lastfm_tags_enriched,
+        duration_seconds=track.duration_seconds,
     )
+
+
+def build_track_responses_for_ids(track_ids: list[int], db: Session) -> list[TrackResponse]:
+    if not track_ids:
+        return []
+
+    tracks = (
+        db.query(Track)
+        .options(
+            selectinload(Track.track_artists),
+            selectinload(Track.track_genres),
+        )
+        .filter(Track.id.in_(track_ids))
+        .all()
+    )
+
+    track_by_id = {track.id: track for track in tracks}
+
+    return [
+        build_track_response(track_by_id[track_id], db)
+        for track_id in track_ids
+        if track_id in track_by_id
+    ]
 
 
 @router.get("/tracks/count", tags=["tracks"])
@@ -1358,6 +1384,53 @@ def purge_tracks(
         "message": "All stored tracks purged",
         "deleted_count": deleted_tracks,
     }
+
+
+@router.get("/tracks/by-ids", response_model=list[TrackResponse], tags=["tracks"])
+def get_tracks_by_ids(
+    ids: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    track_ids = []
+
+    for raw_track_id in ids.split(","):
+        cleaned_track_id = raw_track_id.strip()
+
+        if not cleaned_track_id:
+            continue
+
+        try:
+            track_ids.append(int(cleaned_track_id))
+        except ValueError:
+            continue
+
+        if len(track_ids) >= MAX_TRACKS_BY_IDS:
+            break
+
+    return build_track_responses_for_ids(track_ids, db)
+
+
+@router.get("/tracks/{track_id}", response_model=TrackResponse, tags=["tracks"])
+def get_track(
+    track_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    track = (
+        db.query(Track)
+        .options(
+            selectinload(Track.track_artists),
+            selectinload(Track.track_genres),
+        )
+        .filter(Track.id == track_id)
+        .first()
+    )
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    return build_track_response(track, db)
 
 
 @router.patch("/tracks/{track_id}", response_model=TrackResponse, tags=["tracks"])

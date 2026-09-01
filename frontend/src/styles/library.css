@@ -1,0 +1,488 @@
+/*
+ * Library surfaces — track lists, entity grids, rails, pagination.
+ */
+
+/* ================================================================== *
+ * Track row — one component. There were four variants before, with
+ * different displays, radii, title weights and opposite hover behaviour.
+ * ================================================================== */
+
+.track-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/*
+ * The row is a container, not a button. Previously the whole row was a <button> with the
+ * actions <button> nested inside it — invalid HTML that made two elements share one
+ * accessible name and behave unpredictably in assistive technology.
+ */
+.track-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  transition: var(--transition-colors);
+}
+
+.track-row__main {
+  display: grid;
+  grid-template-columns: 28px 40px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  text-align: left;
+}
+
+.track-row:hover {
+  background: var(--wash);
+}
+
+.track-row--active {
+  background: var(--blue-wash);
+}
+
+.track-row__index {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  display: grid;
+  place-items: center;
+}
+
+/* The playing row swaps its index for the equalizer */
+.track-row--active .track-row__index {
+  color: var(--yellow);
+}
+
+.track-row__art {
+  width: 40px;
+  height: 40px;
+  font-size: 40px;
+  border-radius: var(--radius-xs);
+}
+
+.track-row__content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.track-row__title {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-row--active .track-row__title {
+  display: block;
+  color: var(--yellow);
+}
+
+.track-row__meta {
+  display: block;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-row__reason {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-3xs);
+  color: var(--blue-300);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-row__actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+
+.track-row__count {
+  font-family: var(--font-mono);
+  font-size: var(--text-3xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.track-row__menu-button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  opacity: 0;
+  transition: var(--transition-colors), opacity var(--duration) var(--ease-out);
+}
+
+.track-row:hover .track-row__menu-button,
+.track-row__menu-button:focus-visible,
+.track-row__menu-button[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.track-row__menu-button:hover {
+  background: var(--wash-strong);
+  color: var(--text);
+}
+
+/* ================================================================== *
+ * Entity cards — artists, albums, genres. One card, three shapes.
+ * ================================================================== */
+
+.entity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--space-4);
+}
+
+.entity-grid--wide {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+.entity-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition: var(--transition-colors);
+}
+
+.entity-card:hover {
+  background: var(--wash);
+}
+
+.entity-card__art {
+  width: 100%;
+  aspect-ratio: 1;
+  font-size: min(100px, 14vw);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+
+.entity-card__art--round {
+  border-radius: var(--radius-pill);
+}
+
+.entity-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.entity-card__name {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entity-card__meta {
+  display: block;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entity-card__menu-button {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  opacity: 0;
+  transition: opacity var(--duration) var(--ease-out);
+}
+
+.entity-card:hover .entity-card__menu-button,
+.entity-card__menu-button:focus-visible {
+  opacity: 1;
+}
+
+/* List variant of the same entities */
+.entity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.entity-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: var(--transition-colors);
+}
+
+.entity-row:hover {
+  background: var(--wash);
+}
+
+.entity-row__art {
+  width: 44px;
+  height: 44px;
+  font-size: 44px;
+  border-radius: var(--radius-xs);
+}
+
+.entity-row__art--round {
+  border-radius: var(--radius-pill);
+}
+
+.entity-row__name {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entity-row__meta {
+  display: block;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.entity-row__chevron {
+  color: var(--text-disabled);
+  flex: none;
+}
+
+/* ================================================================== *
+ * Genre cards — text-led, no artwork
+ * ================================================================== */
+
+.genre-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--space-3);
+}
+
+.genre-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  min-height: 104px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  text-align: left;
+  overflow: hidden;
+  transition: var(--transition-colors), var(--transition-transform);
+}
+
+.genre-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.5;
+  transition: opacity var(--duration) var(--ease-out);
+}
+
+.genre-card:hover {
+  border-color: var(--border);
+  transform: translateY(-2px);
+}
+
+.genre-card:hover::before {
+  opacity: 0.8;
+}
+
+.genre-card__rank {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: var(--text-3xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.genre-card__title {
+  position: relative;
+  margin-top: auto;
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.genre-card__meta {
+  position: relative;
+  font-size: var(--text-2xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Genre tint cycles through the same ten-tone arc as the artwork */
+.genre-card--1::before  { background: var(--art-1); }
+.genre-card--2::before  { background: var(--art-2); }
+.genre-card--3::before  { background: var(--art-3); }
+.genre-card--4::before  { background: var(--art-4); }
+.genre-card--5::before  { background: var(--art-5); }
+.genre-card--6::before  { background: var(--art-6); }
+.genre-card--7::before  { background: var(--art-7); }
+.genre-card--8::before  { background: var(--art-8); }
+.genre-card--9::before  { background: var(--art-9); }
+.genre-card--10::before { background: var(--art-10); }
+
+/* ================================================================== *
+ * Horizontal rails — used by Home
+ * ================================================================== */
+
+.rail {
+  margin-bottom: var(--space-8);
+}
+
+.rail__scroller {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 168px;
+  gap: var(--space-4);
+  padding-bottom: var(--space-2);
+}
+
+.rail__scroller--wide {
+  grid-auto-columns: 200px;
+}
+
+/* ================================================================== *
+ * Filter pills and view toggle
+ * ================================================================== */
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.view-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--wash);
+}
+
+.view-toggle__button {
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+  transition: var(--transition-colors);
+}
+
+.view-toggle__button:hover {
+  color: var(--text);
+}
+
+.view-toggle__button--active {
+  background: var(--surface-active);
+  color: var(--text);
+}
+
+/* ================================================================== *
+ * Pagination / infinite scroll sentinel
+ * ================================================================== */
+
+.load-more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8) 0 var(--space-4);
+}
+
+.load-more__status {
+  font-family: var(--font-mono);
+  font-size: var(--text-3xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================================================================== *
+ * Similar / recommendations section
+ * ================================================================== */
+
+.similar-section {
+  margin-top: var(--space-10);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.similar-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.similar-section__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ================================================================== *
+ * Track list skeleton
+ * ================================================================== */
+
+.track-skeleton {
+  display: grid;
+  grid-template-columns: 28px 40px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+}
+
+.track-skeleton__art {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-xs);
+}
+
+.track-skeleton__lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
