@@ -306,8 +306,11 @@
 }
 
 .main-content__body {
-  flex: 1;
-  min-height: 0;
+  /* Grow from content size, never shrink below it. `flex: 1` set flex-basis
+     to 0, which froze the body at the scroller's height — tall pages then
+     overflowed it, and overflow doesn't push the scroller's bottom padding,
+     so the player bar covered the last ~88px of every long view. */
+  flex: 1 0 auto;
   padding: 0 var(--space-8) var(--space-8);
   max-width: var(--content-max);
   width: 100%;
@@ -617,5 +620,10 @@
 
   .page-header {
     padding-left: calc(var(--space-4) + 46px);
+  }
+
+  /* Home has no page header, so it clears the fixed drawer toggle itself. */
+  .home__greeting {
+    padding-left: 46px;
   }
 }

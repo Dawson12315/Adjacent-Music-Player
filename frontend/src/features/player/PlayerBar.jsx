@@ -1,8 +1,11 @@
+import { Link } from "react-router-dom";
+
 import { Artwork } from "../../components/Artwork";
 import { Icon } from "../../components/Icon";
 import { PlayerProgress } from "./PlayerProgress";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { usePlayer } from "../../contexts/PlayerContext";
+import { buildAlbumPath, buildArtistPath } from "../../hooks/useNavigation";
 import { resolveAlbumArtwork } from "../../utils/artwork";
 
 export function PlayerBar() {
@@ -50,8 +53,27 @@ export function PlayerBar() {
                 <span className="player-bar__title">{currentTrack.title}</span>
               </div>
               <span className="player-bar__meta">
-                {currentTrack.artist || "Unknown Artist"} ·{" "}
-                {currentTrack.album || "Unknown Album"}
+                {currentTrack.artist ? (
+                  <Link
+                    className="player-bar__meta-link"
+                    to={buildArtistPath(currentTrack.artist)}
+                  >
+                    {currentTrack.artist}
+                  </Link>
+                ) : (
+                  "Unknown Artist"
+                )}
+                {" · "}
+                {currentTrack.album ? (
+                  <Link
+                    className="player-bar__meta-link"
+                    to={buildAlbumPath(currentTrack.album)}
+                  >
+                    {currentTrack.album}
+                  </Link>
+                ) : (
+                  "Unknown Album"
+                )}
               </span>
             </div>
           </>

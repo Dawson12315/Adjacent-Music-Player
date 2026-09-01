@@ -9,6 +9,9 @@
 .home {
   display: flex;
   flex-direction: column;
+  /* Every other view gets its top spacing from the page header; home renders
+     no header, so without this the greeting sat flush against the viewport. */
+  padding-top: var(--space-8);
 }
 
 .home__greeting {

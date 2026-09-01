@@ -67,6 +67,17 @@
   white-space: nowrap;
 }
 
+/* Artist and album in the now-playing readout navigate to their pages. */
+.player-bar__meta-link {
+  transition: var(--transition-colors);
+}
+
+.player-bar__meta-link:hover,
+.player-bar__meta-link:focus-visible {
+  color: var(--text);
+  text-decoration: underline;
+}
+
 .player-bar__empty {
   font-size: var(--text-xs);
   color: var(--text-muted);
