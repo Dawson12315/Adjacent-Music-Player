@@ -1,3 +1,4 @@
+import logging
 from collections import Counter
 from itertools import combinations
 
@@ -7,6 +8,9 @@ from app.db import SessionLocal
 from app.models.playlist_track import PlaylistTrack
 from app.models.track_cooccurrence import TrackCooccurrence
 
+
+
+logger = logging.getLogger(__name__)
 
 def rebuild_track_cooccurrence(db: Session) -> dict:
     playlist_rows = (
@@ -57,7 +61,7 @@ def main() -> None:
     db = SessionLocal()
     try:
         result = rebuild_track_cooccurrence(db)
-        print(result)
+        logger.info(result)
     finally:
         db.close()
 

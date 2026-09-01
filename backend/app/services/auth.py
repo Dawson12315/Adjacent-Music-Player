@@ -11,6 +11,8 @@ from app.models.user import User
 password_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
+# bcrypt only reads the first 72 bytes of input; both functions truncate the
+# same way so hashing and verification stay consistent for longer passwords.
 def hash_password(password: str) -> str:
     return password_context.hash(password[:72])
 

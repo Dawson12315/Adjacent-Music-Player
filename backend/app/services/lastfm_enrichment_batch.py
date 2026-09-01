@@ -1,3 +1,4 @@
+import logging
 import time
 from typing import Dict
 
@@ -17,6 +18,7 @@ from app.services.lastfm_enrichment_progress import (
 from app.services.lastfm_track_similarity import ingest_similar_tracks_for_track
 from app.utils.artist_normalization import normalize_artist_name
 
+logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 25
 BATCH_DELAY_SECONDS = 2.0
@@ -66,7 +68,7 @@ def _stop_summary(
     total_track_similarity_skipped: int,
 ) -> Dict:
     mark_stopping()
-    print("\n=== LAST.FM ENRICHMENT STOP REQUESTED ===")
+    logger.info("\n=== LAST.FM ENRICHMENT STOP REQUESTED ===")
 
     summary = {
         "stopped": True,
@@ -131,7 +133,7 @@ def run_lastfm_enrichment() -> Dict:
                 break
 
             batch_number += 1
-            print(f"\n=== LAST.FM BATCH {batch_number} ({len(tracks)} tracks) ===\n")
+            logger.info(f"\n=== LAST.FM BATCH {batch_number} ({len(tracks)} tracks) ===\n")
 
             for index, track in enumerate(tracks, start=1):
                 if should_stop():
@@ -194,7 +196,7 @@ def run_lastfm_enrichment() -> Dict:
 
                 if track_similarity_result["success"]:
                     total_track_similarity_ingested += 1
-                    print(
+                    logger.info(
                         f"[lastfm track similarity] "
                         f"id={track.id} | "
                         f"title={track.title} | "
@@ -202,7 +204,7 @@ def run_lastfm_enrichment() -> Dict:
                     )
                 else:
                     total_track_similarity_skipped += 1
-                    print(
+                    logger.info(
                         f"[lastfm track similarity] "
                         f"id={track.id} | "
                         f"title={track.title} | "
@@ -264,14 +266,14 @@ def run_lastfm_enrichment() -> Dict:
 
                     if similarity_result["success"]:
                         total_artist_similarity_ingested += 1
-                        print(
+                        logger.info(
                             f"[lastfm artist similarity] "
                             f"artist={artist_name} | "
                             f"stored={similarity_result.get('stored_count', 0)}"
                         )
                     else:
                         total_artist_similarity_skipped += 1
-                        print(
+                        logger.info(
                             f"[lastfm artist similarity] "
                             f"artist={artist_name} | "
                             f"result={similarity_result.get('reason', 'failed')}"
@@ -291,7 +293,7 @@ def run_lastfm_enrichment() -> Dict:
                     last_result=result["reason"],
                 )
 
-                print(
+                logger.info(
                     f"[lastfm batch {batch_number} | {index}/{len(tracks)}] "
                     f"id={track.id} | "
                     f"title={track.title} | "
@@ -314,8 +316,8 @@ def run_lastfm_enrichment() -> Dict:
             "total_track_similarity_skipped": total_track_similarity_skipped,
         }
 
-        print("\n=== LAST.FM FINAL SUMMARY ===")
-        print(summary)
+        logger.info("\n=== LAST.FM FINAL SUMMARY ===")
+        logger.info(summary)
 
         finish_progress()
         return summary

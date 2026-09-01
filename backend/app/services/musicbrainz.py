@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 from pathlib import Path
@@ -6,6 +7,9 @@ from typing import Optional
 import requests
 from dotenv import load_dotenv
 
+
+
+logger = logging.getLogger(__name__)
 
 ROOT_ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(ROOT_ENV_PATH)
@@ -95,7 +99,7 @@ def _search_recordings(query: str) -> list[dict]:
             return data.get("recordings", [])
 
         except requests.RequestException as error:
-            print(f"MusicBrainz lookup failed (attempt {attempt}/{attempts}): {error}")
+            logger.warning(f"MusicBrainz lookup failed (attempt {attempt}/{attempts}): {error}")
 
             if attempt < attempts:
                 time.sleep(1.5 * attempt)

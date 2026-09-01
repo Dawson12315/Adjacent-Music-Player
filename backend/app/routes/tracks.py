@@ -1,10 +1,10 @@
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+import logging
 import mimetypes
 import re
 import subprocess
 import threading
-import time
 import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -36,6 +36,8 @@ from app.services.metadata_normalizer import normalize_genre_list
 from app.services.musicbrainz import find_recording_mbid
 from app.utils.artist_normalization import normalize_artist_name
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 # One hour covers any single listening session for a track; tokens ride in URLs
@@ -43,6 +45,11 @@ router = APIRouter()
 STREAM_TOKEN_EXPIRE_SECONDS = 60 * 60
 
 MAX_TRACKS_BY_IDS = 500
+
+# Ceiling for the legacy no-limit flat listing. Far above any realistic library,
+# it exists to bound the worst-case response, not to paginate: clients that can
+# paginate should pass `limit`.
+MAX_UNPAGED_TRACKS = 50_000
 
 MOBILE_STREAM_PROFILES = {
     "mp3_128": {
@@ -156,6 +163,12 @@ MOBILE_STREAM_PROFILES = {
 # Mobile stream cache locking
 MOBILE_CACHE_LOCKS: dict[str, threading.Lock] = {}
 MOBILE_CACHE_LOCKS_GUARD = threading.Lock()
+MOBILE_CACHE_LOCKS_MAX = 512
+
+# ffmpeg is CPU-bound; without a global cap one client asking for many tracks
+# spawns one transcode per request and starves the host. Threads queue here.
+TRANSCODE_CONCURRENCY = 2
+TRANSCODE_SEMAPHORE = threading.BoundedSemaphore(TRANSCODE_CONCURRENCY)
 
 # HLS streaming constants
 HLS_SEGMENT_DURATION_SECONDS = 4
@@ -176,6 +189,12 @@ def get_mobile_cache_lock(cache_key: str) -> threading.Lock:
         lock = MOBILE_CACHE_LOCKS.get(cache_key)
 
         if lock is None:
+            # One lock per (track, quality) accumulates forever on a large
+            # library; drop idle ones once the table gets big.
+            if len(MOBILE_CACHE_LOCKS) >= MOBILE_CACHE_LOCKS_MAX:
+                for key in [k for k, v in MOBILE_CACHE_LOCKS.items() if not v.locked()]:
+                    del MOBILE_CACHE_LOCKS[key]
+
             lock = threading.Lock()
             MOBILE_CACHE_LOCKS[cache_key] = lock
 
@@ -222,56 +241,18 @@ def get_hls_ffmpeg_args(profile: dict) -> list[str]:
 
 
 def iter_file_range(file_path: Path, start: int, end: int, chunk_size: int = 256 * 1024):
-    started_at = time.perf_counter()
-    bytes_sent = 0
-    chunk_count = 0
-    expected_bytes = end - start + 1
+    with file_path.open("rb") as file:
+        file.seek(start)
+        remaining = end - start + 1
 
-    print(
-        f"[MOBILE STREAM BODY] start file={file_path.name} bytes={start}-{end} expected={expected_bytes}",
-        flush=True,
-    )
+        while remaining > 0:
+            chunk = file.read(min(chunk_size, remaining))
 
-    try:
-        with file_path.open("rb") as file:
-            file.seek(start)
-            remaining = expected_bytes
+            if not chunk:
+                break
 
-            while remaining > 0:
-                chunk = file.read(min(chunk_size, remaining))
-
-                if not chunk:
-                    print(
-                        f"[MOBILE STREAM BODY] empty-read file={file_path.name} sent={bytes_sent}/{expected_bytes}",
-                        flush=True,
-                    )
-                    break
-
-                chunk_count += 1
-                bytes_sent += len(chunk)
-                remaining -= len(chunk)
-
-                if chunk_count <= 3 or remaining <= 0:
-                    print(
-                        f"[MOBILE STREAM BODY] chunk file={file_path.name} chunk={chunk_count} size={len(chunk)} sent={bytes_sent}/{expected_bytes}",
-                        flush=True,
-                    )
-
-                yield chunk
-
-    except GeneratorExit:
-        print(
-            f"[MOBILE STREAM BODY] client-disconnected file={file_path.name} sent={bytes_sent}/{expected_bytes} chunks={chunk_count}",
-            flush=True,
-        )
-        raise
-
-    finally:
-        elapsed_ms = (time.perf_counter() - started_at) * 1000
-        print(
-            f"[MOBILE STREAM BODY] finish file={file_path.name} sent={bytes_sent}/{expected_bytes} chunks={chunk_count} elapsed_ms={elapsed_ms:.1f}",
-            flush=True,
-        )
+            remaining -= len(chunk)
+            yield chunk
 
 
 def range_file_response(
@@ -283,10 +264,6 @@ def range_file_response(
 ):
     file_size = file_path.stat().st_size
     range_header = request.headers.get("range")
-    print(
-        f"[MOBILE STREAM] file={file_path.name} range={range_header or 'none'} size={file_size}",
-        flush=True,
-    )
 
     base_headers = {
         "Accept-Ranges": "bytes",
@@ -299,11 +276,6 @@ def range_file_response(
             **base_headers,
             "Content-Length": str(file_size),
         }
-
-        print(
-            f"[MOBILE STREAM] serving full file file={file_path.name} status=200 bytes=0-{file_size - 1}/{file_size}",
-            flush=True,
-        )
 
         return StreamingResponse(
             iter_file_range(file_path, 0, file_size - 1),
@@ -346,11 +318,6 @@ def range_file_response(
         "Content-Length": str(content_length),
     }
 
-    print(
-        f"[MOBILE STREAM] serving range file={file_path.name} status=206 bytes={start}-{end}/{file_size}",
-        flush=True,
-    )
-
     return StreamingResponse(
         iter_file_range(file_path, start, end),
         media_type=media_type,
@@ -368,7 +335,6 @@ def ensure_mobile_stream_cache(
     quality: str,
 ) -> Path:
     source_mtime = file_path.stat().st_mtime
-    ensure_started_at = time.perf_counter()
     cache_dir = Path("data/mobile_cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -376,6 +342,7 @@ def ensure_mobile_stream_cache(
     cache_version = profile.get("cache_version", "v1")
     cached_file_path = cache_dir / f"track_{track.id}_{quality}_{cache_version}{output_extension}"
     temp_file_path = cache_dir / f"track_{track.id}_{quality}_{cache_version}_{uuid4().hex}.tmp{output_extension}"
+
     def is_cache_valid() -> bool:
         return (
             cached_file_path.exists()
@@ -384,25 +351,13 @@ def ensure_mobile_stream_cache(
         )
 
     if is_cache_valid():
-        print(
-            f"[MOBILE CACHE] hit track={track.id} quality={quality} file={cached_file_path.name} size={cached_file_path.stat().st_size}",
-            flush=True,
-        )
         return cached_file_path
 
     cache_key = f"{track.id}:{quality}:{cache_version}"
     cache_lock = get_mobile_cache_lock(cache_key)
-    print(
-        f"[MOBILE CACHE] miss track={track.id} quality={quality} file={cached_file_path.name}",
-        flush=True,
-    )
 
     with cache_lock:
         if is_cache_valid():
-            print(
-                f"[MOBILE CACHE] hit-after-lock track={track.id} quality={quality} file={cached_file_path.name} size={cached_file_path.stat().st_size}",
-                flush=True,
-            )
             return cached_file_path
 
         if temp_file_path.exists():
@@ -421,41 +376,34 @@ def ensure_mobile_stream_cache(
             str(temp_file_path),
         ]
 
-        print(
-            f"[MOBILE CACHE] transcode-start track={track.id} quality={quality} source={file_path.name} temp={temp_file_path.name}",
-            flush=True,
-        )
+        logger.info("Transcoding track %s (%s) for mobile cache", track.id, quality)
 
-        transcode_started_at = time.perf_counter()
-
-        result = subprocess.run(
-            ffmpeg_command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        transcode_ms = (time.perf_counter() - transcode_started_at) * 1000
-        print(
-            f"[MOBILE CACHE] transcode-finished track={track.id} quality={quality} returncode={result.returncode} transcode_ms={transcode_ms:.1f}",
-            flush=True,
-        ) 
+        with TRANSCODE_SEMAPHORE:
+            result = subprocess.run(
+                ffmpeg_command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
 
         if result.returncode != 0:
             if temp_file_path.exists():
                 temp_file_path.unlink()
 
+            # ffmpeg stderr contains absolute library paths; log it, don't return it.
+            logger.error(
+                "Mobile transcode failed for track %s (%s): %s",
+                track.id,
+                quality,
+                result.stderr.strip(),
+            )
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to create mobile stream: {result.stderr.strip()}",
+                detail="Failed to create mobile stream",
             )
 
         if temp_file_path.exists():
             temp_file_path.replace(cached_file_path)
-            print(
-                f"[MOBILE CACHE] write-complete track={track.id} quality={quality} file={cached_file_path.name} size={cached_file_path.stat().st_size} ensure_ms={(time.perf_counter() - ensure_started_at) * 1000:.1f}",
-                flush=True,
-            )
         elif not cached_file_path.exists():
             raise HTTPException(
                 status_code=500,
@@ -496,18 +444,10 @@ def ensure_hls_stream_cache(
         )
 
     if is_cache_valid():
-        print(
-            f"[HLS CACHE] hit track={track.id} quality={quality}",
-            flush=True,
-        )
         return playlist_path
 
     with cache_lock:
         if is_cache_valid():
-            print(
-                f"[HLS CACHE] hit-after-lock track={track.id} quality={quality}",
-                flush=True,
-            )
             return playlist_path
 
         if track_dir.exists():
@@ -536,24 +476,29 @@ def ensure_hls_stream_cache(
             str(playlist_path),
         ]
 
-        print(
-            f"[HLS CACHE] generate-start track={track.id} quality={quality}",
-            flush=True,
-        )
+        logger.info("Generating HLS stream for track %s (%s)", track.id, quality)
 
-        result = subprocess.run(
-            ffmpeg_command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        with TRANSCODE_SEMAPHORE:
+            result = subprocess.run(
+                ffmpeg_command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
 
         if result.returncode != 0:
             shutil.rmtree(track_dir, ignore_errors=True)
 
+            # ffmpeg stderr contains absolute library paths; log it, don't return it.
+            logger.error(
+                "HLS generation failed for track %s (%s): %s",
+                track.id,
+                quality,
+                result.stderr.strip(),
+            )
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to create HLS stream: {result.stderr.strip()}",
+                detail="Failed to create HLS stream",
             )
 
         if not playlist_path.exists():
@@ -561,11 +506,6 @@ def ensure_hls_stream_cache(
                 status_code=500,
                 detail="HLS playlist generation failed",
             )
-
-        print(
-            f"[HLS CACHE] generate-finished track={track.id} quality={quality}",
-            flush=True,
-        )
 
     return playlist_path
 
@@ -625,10 +565,9 @@ def prepare_hls_variants_in_background(track_id: int, file_path_text: str):
                 profile=profile,
                 quality=quality,
             )
-        except Exception as error:
-            print(
-                f"[HLS CACHE] background-generate-failed track={track_id} quality={quality} error={error}",
-                flush=True,
+        except Exception:
+            logger.exception(
+                "Background HLS generation failed for track %s (%s)", track_id, quality
             )
 
 
@@ -863,6 +802,11 @@ def list_tracks(
     
     if limit is not None:
         query = query.offset(offset).limit(limit)
+    else:
+        # Legacy flat listing (used by clients that load the whole library).
+        # Bounded so a single request can never build an arbitrarily large
+        # response; real libraries sit far below this.
+        query = query.limit(MAX_UNPAGED_TRACKS)
 
     tracks = query.all()
 

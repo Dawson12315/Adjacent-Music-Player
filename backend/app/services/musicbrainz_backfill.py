@@ -1,3 +1,4 @@
+import logging
 import time
 from typing import Optional
 
@@ -5,6 +6,9 @@ from app.db import SessionLocal
 from app.models.track import Track
 from app.services.musicbrainz import find_recording_mbid
 
+
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_BATCH_SIZE = 50
 DEFAULT_REQUEST_DELAY_SECONDS = 1.25
@@ -43,7 +47,7 @@ def backfill_musicbrainz_recording_ids(
             batch_matched = 0
             batch_missing = 0
 
-            print(f"\n=== MBID BATCH {batch_number} ({len(tracks)} tracks) ===\n")
+            logger.info(f"\n=== MBID BATCH {batch_number} ({len(tracks)} tracks) ===\n")
 
             for index, track in enumerate(tracks, start=1):
                 mbid = find_recording_mbid(
@@ -63,7 +67,7 @@ def backfill_musicbrainz_recording_ids(
 
                 total_checked += 1
 
-                print(
+                logger.info(
                     f"[mbid batch {batch_number} | {index}/{len(tracks)}] "
                     f"id={track.id} | "
                     f"title={track.title} | "
@@ -74,10 +78,10 @@ def backfill_musicbrainz_recording_ids(
                 db.commit()
                 time.sleep(request_delay_seconds)
 
-            print(f"\n--- MBID BATCH {batch_number} SUMMARY ---")
-            print(f"Checked: {len(tracks)}")
-            print(f"Matched and saved: {batch_matched}")
-            print(f"No match: {batch_missing}")
+            logger.info(f"\n--- MBID BATCH {batch_number} SUMMARY ---")
+            logger.info(f"Checked: {len(tracks)}")
+            logger.info(f"Matched and saved: {batch_matched}")
+            logger.info(f"No match: {batch_missing}")
 
             time.sleep(batch_delay_seconds)
 
@@ -88,8 +92,8 @@ def backfill_musicbrainz_recording_ids(
             "total_missing": total_missing,
         }
 
-        print("\n=== MBID FINAL SUMMARY ===")
-        print(summary)
+        logger.info("\n=== MBID FINAL SUMMARY ===")
+        logger.info(summary)
 
         return summary
 
