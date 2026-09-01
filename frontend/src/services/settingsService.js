@@ -51,9 +51,17 @@ export async function saveSettings(settings) {
 
 /* ---------- library maintenance ---------- */
 
-/** Long-running and fully blocking; there is no progress endpoint. */
+/**
+ * Starts a background scan; resolves to { started, reason }. The scan itself can run
+ * for a long time on a big library — poll getScanProgress() to follow it.
+ */
 export function scanLibrary(limit = 100000) {
-  return apiClient.post("/api/scan", undefined, { params: { limit } });
+  return apiClient.post("/api/scan", undefined, { params: { limit }, noStore: true });
+}
+
+/** In-memory on the server: { is_running, files_seen, added, last_result, error }. */
+export function getScanProgress(options) {
+  return apiClient.get("/api/scan/progress", { ...options, noStore: true });
 }
 
 export function runCleanup() {

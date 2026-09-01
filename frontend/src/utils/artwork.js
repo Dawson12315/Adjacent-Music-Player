@@ -8,9 +8,40 @@ import { isLikedSongsPlaylist } from "./playlists";
  */
 const TONE_COUNT = 10;
 
-/** Album artwork is cached under a trimmed name; keep the key derivation in one place. */
+/**
+ * The artwork maps from `/api/albums/artwork` and `/api/artists/artwork` are keyed by
+ * the backend's *normalized* names, not display names. These two mirror the Python
+ * normalizers (`normalize_album_name`, `normalize_artist_name`) — look up with a raw
+ * display name and every "AC/DC" or "Awaken, My Love!" silently misses its photo.
+ */
 export function getAlbumKey(albumName) {
-  return (albumName || "").trim();
+  // Python: " ".join(name.strip().casefold().split())
+  return (albumName || "").trim().toLowerCase().split(/\s+/).join(" ");
+}
+
+export function getArtistKey(artistName) {
+  if (!artistName) {
+    return "";
+  }
+
+  return (
+    artistName
+      .trim()
+      .normalize("NFKC")
+      .toLowerCase()
+      .replaceAll("&", " and ")
+      .replace(/[‘’`´]/g, "'")
+      .replace(/[.\-_/]+/g, " ")
+      // Python's \w is unicode-aware; \p{L}\p{N}_ is the JS equivalent.
+      .replace(/[^\p{L}\p{N}_\s']/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
+/** The header hero needs the raw path (not a descriptor) for its backdrop image. */
+export function getArtistArtworkPath(artistName, artworkMap) {
+  return artworkMap?.[getArtistKey(artistName)] || null;
 }
 
 export function getInitials(name) {
@@ -66,7 +97,7 @@ export function resolveAlbumArtwork(albumName, artworkMap) {
 }
 
 export function resolveArtistArtwork(artistName, artworkMap) {
-  const path = artworkMap?.[artistName];
+  const path = getArtistArtworkPath(artistName, artworkMap);
 
   if (path) {
     return { type: "image", src: artworkUrl(path), alt: artistName || "" };

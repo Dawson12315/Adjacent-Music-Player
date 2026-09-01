@@ -134,10 +134,27 @@
   gap: var(--space-8);
 }
 
+/*
+ * Deterministic columns. auto-fit picked a different column count at every
+ * width, so six tiles wrapped 4+2 and four panels wrapped 3+1 — the "all over
+ * the place" look. Fixed counts per breakpoint keep every row full.
+ */
 .insights__summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-3);
+}
+
+@media (min-width: 760px) {
+  .insights__summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .insights__summary {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
 }
 
 .stat-tile {
@@ -179,11 +196,36 @@
   color: var(--text-muted);
 }
 
+/* Panels stretch to the row height (grid default), so edges line up. */
 .insights__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
-  align-items: start;
+}
+
+/* Four bar panels: a clean 2×2 once there is room. */
+@media (min-width: 820px) {
+  .insights__grid--quad {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Three track panels: side by side only when all three fit. */
+@media (min-width: 1180px) {
+  .insights__grid--trio {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 820px) and (max-width: 1179.98px) {
+  .insights__grid--trio {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* 2+1 with a hole reads as broken; let the odd panel span the last row. */
+  .insights__grid--trio > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
 }
 
 .insights__panel {

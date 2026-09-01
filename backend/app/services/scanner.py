@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 SCAN_COMMIT_BATCH_SIZE = 200
 
 
-def scan_directory(base_path: str, limit: int = 20) -> dict:
+def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> dict:
     base = Path(base_path)
 
     if not base.exists():
@@ -36,7 +36,12 @@ def scan_directory(base_path: str, limit: int = 20) -> dict:
     db = SessionLocal()
 
     count = 0
+    files_seen = 0
     pending_in_batch = 0
+
+    def report_progress():
+        if progress_callback:
+            progress_callback(files_seen=files_seen, added=count)
 
     try:
         # One query instead of one per file; 36k existence SELECTs was most of
@@ -49,6 +54,10 @@ def scan_directory(base_path: str, limit: int = 20) -> dict:
 
             if not is_supported_audio_file(file_path):
                 continue
+
+            files_seen += 1
+            if files_seen % 100 == 0:
+                report_progress()
 
             if str(file_path) in known_file_paths:
                 continue
@@ -126,6 +135,7 @@ def scan_directory(base_path: str, limit: int = 20) -> dict:
                 db.commit()
                 pending_in_batch = 0
                 logger.info("Scan progress: %s tracks added", count)
+                report_progress()
 
             if count >= limit:
                 break
@@ -133,6 +143,7 @@ def scan_directory(base_path: str, limit: int = 20) -> dict:
         if pending_in_batch:
             db.commit()
 
+        report_progress()
         logger.info("Scan complete. Added %s tracks.", count)
 
         if count > 0:

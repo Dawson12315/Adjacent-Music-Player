@@ -203,6 +203,15 @@
   cursor: pointer;
 }
 
+/* The Artwork tile inside carries no sizing class of its own here; without
+   this it collapses to content height and uploaded covers squash upward. */
+.playlist-item__art > .art {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  font-size: inherit;
+}
+
 .playlist-item__art-overlay {
   position: absolute;
   inset: 0;
@@ -354,6 +363,16 @@
   font-size: var(--text-xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* Without an explicit box the cover renders at its natural size — a full
+   album scan filling the header. */
+.page-header__album-art {
+  width: 72px;
+  height: 72px;
+  font-size: 72px;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
 }
 
 .page-header__badges {

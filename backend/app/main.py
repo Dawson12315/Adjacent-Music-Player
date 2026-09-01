@@ -28,6 +28,7 @@ from app.routes.settings import router as settings_router
 from app.routes.similar_tracks import router as similar_tracks_router
 from app.routes.stats import router as stats_router
 from app.routes.tracks import router as tracks_router
+from app.services.job_locking import release_all_job_locks
 from app.services.scheduler import start_scheduler
 
 from app.routes import recommendation_evaluation
@@ -123,6 +124,9 @@ def on_startup():
 
     Base.metadata.create_all(bind=engine)
     run_simple_migrations()
+
+    # Jobs die with the process; their locks must not survive it.
+    release_all_job_locks()
 
     start_scheduler()
 
