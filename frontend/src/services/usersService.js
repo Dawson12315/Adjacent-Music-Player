@@ -21,3 +21,7 @@ export function updateUser(userId, changes) {
 export function resetUserPassword(userId) {
   return apiClient.post(`/api/users/${userId}/reset-password`);
 }
+
+export function deleteUser(userId) {
+  return apiClient.delete(`/api/users/${userId}`);
+}

@@ -156,6 +156,84 @@ def update_user(
     return user
 
 
+@router.delete("/users/{user_id}", tags=["users"])
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+    _multi_user: None = Depends(require_multi_user),
+):
+    """Permanently remove a profile and everything that is theirs.
+
+    Deactivation is the reversible tool; this one erases. The shared library
+    is untouched — what goes is the account plus its playlists, likes (their
+    Ducking Good is just a playlist), listening history, per-track stats and
+    playback state. The user_id foreign keys carry no DB-level cascade, so
+    dependents are removed explicitly, ORM-side where relationship cascades
+    (playlist → entries, session → queue) do the child cleanup.
+    """
+    from app.models.listening_event import ListeningEvent
+    from app.models.playback_session import PlaybackSession
+    from app.models.playlist import Playlist
+    from app.models.track_user_stats import TrackUserStats
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot delete your own account.",
+        )
+
+    if user.role == "admin" and user.is_active and _active_admin_count(db) <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This is the last active admin — promote someone else first.",
+        )
+
+    events_removed = (
+        db.query(ListeningEvent)
+        .filter(ListeningEvent.user_id == user.id)
+        .delete(synchronize_session=False)
+    )
+    stats_removed = (
+        db.query(TrackUserStats)
+        .filter(TrackUserStats.user_id == user.id)
+        .delete(synchronize_session=False)
+    )
+
+    playlists = db.query(Playlist).filter(Playlist.user_id == user.id).all()
+    for playlist in playlists:
+        db.delete(playlist)
+
+    playback_session = (
+        db.query(PlaybackSession).filter(PlaybackSession.user_id == user.id).first()
+    )
+    if playback_session:
+        db.delete(playback_session)
+
+    # No relationship is mapped between User and these rows, so the unit of
+    # work won't order the deletes on its own — flush the dependents before
+    # the user row or Postgres raises on the FK.
+    db.flush()
+
+    username = user.username
+    db.delete(user)
+    db.commit()
+
+    return {
+        "deleted": True,
+        "username": username,
+        "removed": {
+            "playlists": len(playlists),
+            "listening_events": events_removed,
+            "track_stats": stats_removed,
+        },
+    }
+
+
 @router.post(
     "/users/{user_id}/reset-password",
     response_model=TempPasswordResponse,

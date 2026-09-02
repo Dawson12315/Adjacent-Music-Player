@@ -16,7 +16,7 @@ const EMPTY_SETTINGS = settingsService.toAppSettings({});
  * previous version rebuilt state from only four of the ten fields, so a second save sent
  * the missing ones as false and silently cancelled scheduled Last.fm enrichment.
  */
-export function useAppSettings() {
+export function useAppSettings({ enabled = true } = {}) {
   const { notify } = useNotifications();
 
   const [settings, setSettings] = useState(EMPTY_SETTINGS);
@@ -24,6 +24,13 @@ export function useAppSettings() {
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
+    // Non-admins never fetch: the endpoint is admin-only and the 403 toast
+    // ("Admin access required") is noise on a page they legitimately opened.
+    if (!enabled) {
+      setIsLoading(false);
+      return undefined;
+    }
+
     const controller = new AbortController();
 
     async function load() {
@@ -47,7 +54,7 @@ export function useAppSettings() {
     load();
 
     return () => controller.abort();
-  }, [notify]);
+  }, [notify, enabled]);
 
   const updateField = useCallback((key, value) => {
     setSettings((previous) => ({ ...previous, [key]: value }));

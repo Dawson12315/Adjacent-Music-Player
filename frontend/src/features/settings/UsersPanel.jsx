@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { Modal } from "../../components/Modal";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import {
   createUser,
+  deleteUser,
   listUsers,
   resetUserPassword,
   updateUser,
@@ -27,6 +29,8 @@ export function UsersPanel() {
   const [newRole, setNewRole] = useState("user");
   const [isSaving, setIsSaving] = useState(false);
   const [revealed, setRevealed] = useState(null); // {username, tempPassword, kind}
+  const [deleting, setDeleting] = useState(null); // the user object being confirmed
+  const [deleteWord, setDeleteWord] = useState("");
 
   const refresh = useCallback(() => {
     return listUsers()
@@ -85,6 +89,25 @@ export function UsersPanel() {
       refresh();
     } catch (error) {
       notify(error.message || "Could not update the user.");
+    }
+  }
+
+  async function handleDelete() {
+    const target = deleting;
+    setDeleting(null);
+    setDeleteWord("");
+
+    try {
+      const result = await deleteUser(target.id);
+      const removed = result.removed || {};
+      notify(
+        `${target.username} was permanently deleted ` +
+          `(${removed.playlists ?? 0} playlists, ` +
+          `${(removed.listening_events ?? 0).toLocaleString()} listening events).`,
+      );
+      refresh();
+    } catch (error) {
+      notify(error.message || "Could not delete the user.");
     }
   }
 
@@ -217,6 +240,16 @@ export function UsersPanel() {
                           >
                             {user.is_active ? "Deactivate" : "Reactivate"}
                           </button>
+                          <button
+                            className="btn btn--sm btn--danger"
+                            type="button"
+                            onClick={() => {
+                              setDeleteWord("");
+                              setDeleting(user);
+                            }}
+                          >
+                            Delete
+                          </button>
                         </>
                       )}
                     </td>
@@ -280,6 +313,60 @@ export function UsersPanel() {
           </div>
         )}
       </div>
+
+      {deleting && (
+        <Modal
+          title={`Delete ${deleting.username} permanently?`}
+          onClose={() => {
+            setDeleting(null);
+            setDeleteWord("");
+          }}
+          actions={
+            <>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  setDeleting(null);
+                  setDeleteWord("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn--danger"
+                type="button"
+                disabled={deleteWord.trim() !== deleting.username}
+                onClick={handleDelete}
+              >
+                Delete forever
+              </button>
+            </>
+          }
+        >
+          <p className="settings-card__text">
+            This erases the account and everything that is theirs — playlists
+            (including their Ducking Good), likes, listening history and
+            stats. The shared music library is not touched.
+          </p>
+          <p className="settings-card__text server-modal-warning">
+            There is no undo. If you just want to lock them out, use
+            Deactivate instead — it keeps their data and can be reversed.
+          </p>
+          <label className="field">
+            <span className="field__label">
+              Type <b>{deleting.username}</b> to confirm
+            </span>
+            <input
+              className="input"
+              type="text"
+              value={deleteWord}
+              placeholder={deleting.username}
+              onChange={(event) => setDeleteWord(event.target.value)}
+            />
+          </label>
+        </Modal>
+      )}
     </section>
   );
 }

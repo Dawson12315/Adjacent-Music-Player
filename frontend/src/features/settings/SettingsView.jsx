@@ -4,6 +4,7 @@ import { AccountPanel } from "./AccountPanel";
 import { LastfmPanel } from "./LastfmPanel";
 import { ServerPanel } from "./ServerPanel";
 import { useAppSettings } from "./useAppSettings";
+import { useAuth } from "../../contexts/AuthContext";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { usePlayer } from "../../contexts/PlayerContext";
@@ -13,9 +14,18 @@ import { purgeTracks } from "../../services/tracksService";
 
 export function SettingsView() {
   const { notice, notify } = useNotifications();
+  const { currentUser } = useAuth();
   const { refreshLibrary, clearTracks } = useLibrary();
   const { clearPlayback } = usePlayer();
-  const { settings, updateField, toggleField, save, isSaving } = useAppSettings();
+
+  // Regular users manage their own account and nothing else: library
+  // maintenance, automation, integrations and the danger zone are the
+  // admin's — the API refuses them anyway, so the page doesn't offer them.
+  const isAdmin = currentUser?.role === "admin";
+
+  const { settings, updateField, toggleField, save, isSaving } = useAppSettings({
+    enabled: isAdmin,
+  });
 
   // Scan progress and polling live in ScanProvider, so the sidebar counts keep
   // updating and the completion toast still fires after navigating away.
@@ -79,6 +89,8 @@ export function SettingsView() {
 
       <ServerPanel />
 
+      {isAdmin && (
+      <>
       <section className="settings-section">
         <div className="settings-section__header">
           <h2>Library</h2>
@@ -274,6 +286,8 @@ export function SettingsView() {
           {isSaving ? "Saving..." : "Save settings"}
         </button>
       </div>
+      </>
+      )}
     </div>
   );
 }
