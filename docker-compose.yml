@@ -27,6 +27,28 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # Optional — only needed for multi-user mode. Start it with:
+  #   docker compose --profile postgres up -d
+  # then point Settings → Server → Multi-user support at host "postgres".
+  postgres:
+    image: postgres:16-alpine
+    container_name: adjacent-postgres
+    profiles: ["postgres"]
+    environment:
+      - POSTGRES_DB=adjacent
+      - POSTGRES_USER=adjacent
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      # Rides inside the same data root as the rest of Adjacent, so existing
+      # backup habits cover it.
+      - ./backend/data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adjacent -d adjacent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend

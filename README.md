@@ -120,6 +120,65 @@ Open:
 
 ---
 
+## Going multi-user (PostgreSQL)
+
+Adjacent starts in single-user mode on SQLite — zero setup, perfect for one
+person. Multi-user mode moves the catalog to PostgreSQL and unlocks additional
+accounts, each with their own playlists, likes, listening history and
+recommendations. The music library itself stays shared.
+
+### 1. Add Postgres to your stack
+
+Paste this alongside the other services in your `docker-compose.yml`, choose a
+database password, and `docker compose up -d`:
+
+```yaml
+  postgres:
+    image: postgres:16-alpine
+    container_name: adjacent-postgres
+    environment:
+      - POSTGRES_DB=adjacent
+      - POSTGRES_USER=adjacent
+      - POSTGRES_PASSWORD=CHOOSE_A_DB_PASSWORD
+    volumes:
+      - /opt/apps/adjacent/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+```
+
+### 2. Migrate from the app
+
+As an admin, go to **Settings → Server** and turn on **Multi-user support**.
+Fill in the connection — host `YOUR_IP` (the backend runs with host
+networking, so `localhost` also works), port `5432`, database `adjacent`,
+username `adjacent`, and the password you chose — then press
+**Test connection**, and **Migrate & enable**.
+
+What happens next, exactly as the confirmation modal says:
+
+- Adjacent goes read-only for about a minute (playback keeps working).
+- Every table is copied to Postgres and verified row-for-row.
+- The backend restarts on the new database; everyone stays signed in.
+- Your SQLite file is kept untouched at `data/app.db.pre-postgres`.
+
+### 3. Add people
+
+A **Users** section appears under Settings → Server. **+ Add user** generates
+a one-time password to hand to them — they choose their own at first sign-in.
+Each new account gets its own empty Ducking Good, insights and
+recommendations against the shared library.
+
+### Notes
+
+- The switch is one-way from the UI. To return to SQLite: stop the stack,
+  delete `data/database.json`, rename `data/app.db.pre-postgres` back to
+  `data/app.db`, and start again.
+- If Postgres is ever unreachable at boot, the backend retries for ~30
+  seconds, then exits with a log message explaining exactly that — it will
+  not silently start empty.
+- Last.fm scrobbling stays a single global account (the admin's) for now.
+
 ---
 
 ## Local development
