@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Modal } from "../../components/Modal";
+import { UsersPanel } from "./UsersPanel";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import {
@@ -196,6 +197,7 @@ export function ServerPanel() {
   const rowCountLabel = status.row_count?.toLocaleString?.() || status.row_count;
 
   return (
+    <>
     <section className="settings-section">
       <div className="settings-section__header">
         <h2>Server</h2>
@@ -461,6 +463,9 @@ export function ServerPanel() {
         </Modal>
       )}
     </section>
+
+    {status.engine === "postgresql" && <UsersPanel />}
+    </>
   );
 }
 

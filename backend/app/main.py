@@ -28,6 +28,7 @@ from app.routes.settings import router as settings_router
 from app.routes.similar_tracks import router as similar_tracks_router
 from app.routes.stats import router as stats_router
 from app.routes.tracks import router as tracks_router
+from app.routes.users import router as users_router
 from app.services.job_locking import release_all_job_locks
 from app.services.scheduler import start_scheduler
 
@@ -251,6 +252,7 @@ def _rebuild_cooccurrence_if_empty():
 
 app.include_router(health_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
+app.include_router(users_router, prefix="/api")
 
 app.include_router(tracks_router, prefix="/api")
 app.include_router(scan_router, prefix="/api")

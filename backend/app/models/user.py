@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy.sql import expression
 
 from app.db import Base
 
@@ -16,3 +17,13 @@ class User(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     recovery_codes_hashes = Column(Text, nullable=True)
+
+    # Set when an admin hands out a generated temp password (new account or
+    # reset); login then routes through the set-a-real-password screen.
+    # expression.false() renders per-dialect (0 on SQLite, false on Postgres).
+    must_change_password = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=expression.false(),
+    )

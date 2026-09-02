@@ -600,6 +600,87 @@
   color: var(--yellow);
 }
 
+/* ---------- users panel ---------- */
+
+.server-chip--admin {
+  background: var(--yellow-wash);
+  color: var(--yellow);
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.users-table th {
+  text-align: left;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: var(--space-2) var(--space-3);
+}
+
+.users-table td {
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+
+.users-self,
+.users-created {
+  color: var(--text-muted);
+}
+
+.users-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.users-reveal {
+  border-color: var(--yellow-glow);
+}
+
+.users-temp-password {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--surface-inset, var(--wash));
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-sm);
+  letter-spacing: 0.04em;
+}
+
+.users-add-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 160px;
+  gap: var(--space-3);
+  align-items: end;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-4);
+}
+
+.users-add-form .settings-card__actions {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+  .users-add-form {
+    grid-template-columns: 1fr;
+  }
+}
+
 .settings-notice {
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);

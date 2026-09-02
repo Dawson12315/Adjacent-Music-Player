@@ -216,6 +216,8 @@ def update_me(
             )
 
         current_user.password_hash = hash_password(payload.new_password)
+        # A real password of their own choosing lifts the temp-password hold.
+        current_user.must_change_password = False
 
     db.commit()
     db.refresh(current_user)

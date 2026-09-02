@@ -728,3 +728,11 @@ def run_simple_migrations():
 
         if "recovery_codes_hashes" not in user_column_names:
             connection.execute(text("ALTER TABLE users ADD COLUMN recovery_codes_hashes TEXT"))
+
+        if "must_change_password" not in user_column_names:
+            connection.execute(
+                text(
+                    "ALTER TABLE users ADD COLUMN must_change_password "
+                    "BOOLEAN NOT NULL DEFAULT 0"
+                )
+            )

@@ -11,6 +11,7 @@ import { PageMetaProvider } from "./contexts/PageMetaProvider";
 import { PlayerProvider } from "./contexts/PlayerProvider";
 import { ScanProvider } from "./contexts/ScanProvider";
 import { AuthScreen } from "./features/auth/AuthScreen";
+import { SetPasswordScreen } from "./features/auth/SetPasswordScreen";
 import { DuckMark } from "./components/DuckMark";
 
 /*
@@ -69,6 +70,12 @@ function AuthenticatedApp() {
 
   if (!currentUser) {
     return <AuthScreen mode="login" />;
+  }
+
+  // An admin-issued temp password gets you in the door and no further:
+  // choose a real password before the app.
+  if (currentUser.must_change_password) {
+    return <SetPasswordScreen />;
   }
 
   return (
