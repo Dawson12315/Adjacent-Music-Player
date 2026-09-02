@@ -27,3 +27,20 @@ def hour_of_day(column):
 
     localized = func.timezone(get_localzone_name(), func.timezone("UTC", column))
     return func.to_char(localized, "HH24")
+
+
+def local_day(column):
+    """Bucket a naive-UTC timestamp column into a server-local "YYYY-MM-DD".
+
+    SQLite's two-argument date(col, 'localtime') has no Postgres counterpart;
+    there it is the same timezone() dance as hour_of_day formatted as a date.
+    Both engines return ISO strings, so GROUP BY, lexicographic >= filters
+    and date.fromisoformat at the call sites behave identically.
+    """
+    if engine.dialect.name == "sqlite":
+        return func.date(column, "localtime")
+
+    from tzlocal import get_localzone_name
+
+    localized = func.timezone(get_localzone_name(), func.timezone("UTC", column))
+    return func.to_char(localized, "YYYY-MM-DD")

@@ -12,7 +12,7 @@ from app.models.track_genre import TrackGenre
 from app.models.track_user_stats import TrackUserStats
 from app.models.user import User
 from app.routes.tracks import build_track_response as build_artwork_track_response
-from app.utils.db_compat import hour_of_day
+from app.utils.db_compat import hour_of_day, local_day
 from app.schemas.track import TrackResponse, TrackWithStatsResponse
 from app.services.recommendations.utils import build_track_response
 from app.services.stats_service import (
@@ -201,13 +201,14 @@ def stats_summary(
     # Timestamps are stored in UTC; days and streaks are a human concept, so
     # bucket them in the server's local timezone or evening listening bleeds
     # into the next day.
+    day_expr = local_day(ListeningEvent.created_at)
     active_day_rows = (
-        db.query(func.date(ListeningEvent.created_at, "localtime").label("day"))
+        db.query(day_expr.label("day"))
         .filter(
             ListeningEvent.user_id == current_user.id,
             ListeningEvent.event_type == "play_started",
         )
-        .group_by(func.date(ListeningEvent.created_at, "localtime"))
+        .group_by(day_expr)
         .all()
     )
 
@@ -273,17 +274,18 @@ def plays_over_time(
     end_day = datetime.now().date()
     start_day = end_day - timedelta(days=days - 1)
 
+    day_expr = local_day(ListeningEvent.created_at)
     play_rows = (
         db.query(
-            func.date(ListeningEvent.created_at, "localtime").label("day"),
+            day_expr.label("day"),
             func.count(ListeningEvent.id).label("plays"),
         )
         .filter(
             ListeningEvent.user_id == current_user.id,
             ListeningEvent.event_type == "play_started",
-            func.date(ListeningEvent.created_at, "localtime") >= start_day.isoformat(),
+            day_expr >= start_day.isoformat(),
         )
-        .group_by(func.date(ListeningEvent.created_at, "localtime"))
+        .group_by(day_expr)
         .all()
     )
 

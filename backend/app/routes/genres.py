@@ -19,9 +19,12 @@ def list_genres(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # GROUP BY instead of DISTINCT: Postgres refuses ORDER BY lower(genre) on
+    # a DISTINCT select that doesn't include the expression, and grouping is
+    # how the artists and albums listings already spell the same query.
     genres = (
         db.query(TrackGenre.genre)
-        .distinct()
+        .group_by(TrackGenre.genre)
         .order_by(func.lower(TrackGenre.genre))
         .all()
     )
