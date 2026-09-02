@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { AccountPanel } from "./AccountPanel";
 import { LastfmPanel } from "./LastfmPanel";
+import { ServerPanel } from "./ServerPanel";
 import { useAppSettings } from "./useAppSettings";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { useNotifications } from "../../contexts/NotificationContext";
@@ -75,6 +76,8 @@ export function SettingsView() {
       </div>
 
       <AccountPanel />
+
+      <ServerPanel />
 
       <section className="settings-section">
         <div className="settings-section__header">

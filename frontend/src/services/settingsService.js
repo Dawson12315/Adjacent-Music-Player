@@ -106,3 +106,28 @@ export function getLastfmReadiness(options) {
 export function resumeMusicbrainzBackfill() {
   return apiClient.post("/api/settings/musicbrainz/resume");
 }
+
+/* ---------- database / multi-user ---------- */
+
+export function getDatabaseStatus(options) {
+  return apiClient.get("/api/settings/database", { ...options, noStore: true });
+}
+
+export function testDatabaseConnection(connection) {
+  return apiClient.post("/api/settings/database/test", connection);
+}
+
+export function startDatabaseMigration(connection) {
+  return apiClient.post("/api/settings/database/migrate", connection);
+}
+
+export function getDatabaseMigrationProgress(options) {
+  return apiClient.get("/api/settings/database/migration", {
+    ...options,
+    noStore: true,
+  });
+}
+
+export function pingHealth(options) {
+  return apiClient.get("/api/health", { ...options, noStore: true });
+}
