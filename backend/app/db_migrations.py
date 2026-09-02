@@ -103,6 +103,15 @@ def _rebuild_track_user_stats_table(connection):
 
 
 def run_simple_migrations():
+    # This runner is the SQLite catch-up path: it is built entirely on PRAGMA
+    # introspection and exists to bring long-lived app.db files up to what the
+    # models describe. A Postgres schema is always born complete from
+    # Base.metadata.create_all at migration time, so it never needs any of
+    # this — and future schema changes for Postgres must be handled engine-
+    # neutrally, not added here.
+    if engine.dialect.name != "sqlite":
+        return
+
     with engine.begin() as connection:
         existing_tables = connection.execute(
             text("SELECT name FROM sqlite_master WHERE type='table'")

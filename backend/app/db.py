@@ -14,6 +14,14 @@ if settings.database_url.startswith("sqlite"):
     engine_kwargs = {
         "pool_pre_ping": True,
     }
+elif settings.database_url.startswith("postgresql"):
+    # Sized for a handful of concurrent users plus the background jobs; none
+    # of the SQLite pragma handling below applies here.
+    engine_kwargs = {
+        "pool_pre_ping": True,
+        "pool_size": 5,
+        "max_overflow": 10,
+    }
 
 engine = create_engine(
     settings.database_url,

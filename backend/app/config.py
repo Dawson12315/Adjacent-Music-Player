@@ -1,5 +1,18 @@
+import json
+import logging
+from pathlib import Path
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+# Written by the Postgres migration's cutover step, never by hand. It outranks
+# DATABASE_URL so a migrated install keeps its database across restarts and
+# image upgrades without anyone having to edit compose files. Deleting it
+# falls the install back to whatever the environment says — that is the
+# documented escape hatch if Postgres is ever unreachable.
+RUNTIME_DATABASE_CONFIG_PATH = Path("data/database.json")
 
 # Placeholder values that have shipped in examples or old defaults. Signing JWTs with
 # any of these means anyone can forge an admin token, so refuse to boot with them.
@@ -69,4 +82,38 @@ class Settings(BaseSettings):
         return self.is_production
 
 
+def load_runtime_database_url() -> str | None:
+    try:
+        raw = RUNTIME_DATABASE_CONFIG_PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        logger.warning(
+            "Could not read %s (%s); using the configured DATABASE_URL",
+            RUNTIME_DATABASE_CONFIG_PATH,
+            error,
+        )
+        return None
+
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        logger.warning(
+            "Ignoring malformed %s; using the configured DATABASE_URL",
+            RUNTIME_DATABASE_CONFIG_PATH,
+        )
+        return None
+
+    url = data.get("database_url")
+
+    if isinstance(url, str) and url.strip():
+        return url.strip()
+
+    return None
+
+
 settings = Settings()
+
+_runtime_database_url = load_runtime_database_url()
+if _runtime_database_url:
+    settings.database_url = _runtime_database_url

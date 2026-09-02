@@ -12,6 +12,7 @@ from app.models.track_genre import TrackGenre
 from app.models.track_user_stats import TrackUserStats
 from app.models.user import User
 from app.routes.tracks import build_track_response as build_artwork_track_response
+from app.utils.db_compat import hour_of_day
 from app.schemas.track import TrackResponse, TrackWithStatsResponse
 from app.services.recommendations.utils import build_track_response
 from app.services.stats_service import (
@@ -400,16 +401,17 @@ def plays_by_hour(
     current_user: User = Depends(get_current_user),
 ):
     # Local hours — "when you listen" in UTC put evening plays at 3 AM.
+    hour_expr = hour_of_day(ListeningEvent.created_at)
     hour_rows = (
         db.query(
-            func.strftime("%H", ListeningEvent.created_at, "localtime").label("hour"),
+            hour_expr.label("hour"),
             func.count(ListeningEvent.id).label("plays"),
         )
         .filter(
             ListeningEvent.user_id == current_user.id,
             ListeningEvent.event_type == "play_started",
         )
-        .group_by(func.strftime("%H", ListeningEvent.created_at, "localtime"))
+        .group_by(hour_expr)
         .all()
     )
 

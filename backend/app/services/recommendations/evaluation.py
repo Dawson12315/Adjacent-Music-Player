@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import random
 from collections import Counter, defaultdict
+from datetime import datetime
 from statistics import mean
 from typing import Any
 
@@ -27,14 +28,17 @@ def persist_eval_run(db: Session, kind: str, params: dict, metrics: dict) -> Non
     db.execute(
         text(
             """
-            INSERT INTO recommendation_eval_runs (kind, params_json, metrics_json)
-            VALUES (:kind, :params_json, :metrics_json)
+            INSERT INTO recommendation_eval_runs (kind, params_json, metrics_json, created_at)
+            VALUES (:kind, :params_json, :metrics_json, :created_at)
             """
         ),
         {
             "kind": kind,
             "params_json": json.dumps(params),
             "metrics_json": json.dumps(metrics),
+            # Explicit rather than relying on a DB-level default, which only
+            # tables born from the SQLite migration runner are guaranteed to have.
+            "created_at": datetime.utcnow(),
         },
     )
     db.commit()
