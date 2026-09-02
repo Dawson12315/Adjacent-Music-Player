@@ -11,6 +11,7 @@ self-hosted app on a home network.
 """
 
 import secrets
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -29,8 +30,14 @@ from app.services.auth import hash_password
 
 router = APIRouter()
 
-# Readable-aloud temp passwords: adjective-bird-9999. ~26M combinations,
-# bcrypt-hashed at rest, single-use by policy (must_change_password).
+# Readable-aloud temp passwords: adjective-bird-adjective-bird-99999.
+#
+# The wordlists and format are public in this repo, so the search space is
+# exactly enumerable: an earlier single-pair form gave 32*32*9000 ≈ 9.2M
+# (~23 bits), which is grindable against an online login. Two independent
+# word pairs plus a five-digit number gives 32^4 * 90000 ≈ 9.4e10 (~36.5
+# bits), and the accompanying per-username rate limiter plus the expiry below
+# put online guessing out of reach while keeping the password sayable aloud.
 _ADJECTIVES = (
     "quiet", "amber", "brisk", "calm", "dapper", "eager", "floaty", "gentle",
     "happy", "keen", "lively", "mellow", "nimble", "plucky", "rapid", "sunny",
@@ -47,10 +54,14 @@ _BIRDS = (
 
 
 def generate_temp_password() -> str:
-    adjective = secrets.choice(_ADJECTIVES)
-    bird = secrets.choice(_BIRDS)
-    number = secrets.randbelow(9000) + 1000
-    return f"{adjective}-{bird}-{number}"
+    words = [
+        secrets.choice(_ADJECTIVES),
+        secrets.choice(_BIRDS),
+        secrets.choice(_ADJECTIVES),
+        secrets.choice(_BIRDS),
+    ]
+    number = secrets.randbelow(90000) + 10000
+    return f"{'-'.join(words)}-{number}"
 
 
 def require_multi_user():
@@ -108,6 +119,7 @@ def create_user(
         role=payload.role,
         is_active=True,
         must_change_password=True,
+        temp_password_issued_at=datetime.utcnow(),
     )
 
     db.add(user)
@@ -252,6 +264,7 @@ def reset_user_password(
     temp_password = generate_temp_password()
     user.password_hash = hash_password(temp_password)
     user.must_change_password = True
+    user.temp_password_issued_at = datetime.utcnow()
 
     db.commit()
 

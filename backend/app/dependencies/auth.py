@@ -4,7 +4,11 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import get_db
 from app.models.user import User
-from app.services.auth import decode_access_token, get_user_by_id
+from app.services.auth import (
+    decode_access_token,
+    get_user_by_id,
+    password_fingerprint,
+)
 
 
 def get_current_user(
@@ -25,6 +29,17 @@ def get_current_user(
             detail="Invalid authentication token",
         )
 
+    # Stream tokens are signed with the same key but are deliberately allowed
+    # to travel in URLs (HLS playlists, query params), so they end up in proxy
+    # logs and shared links. They carry a "purpose" claim; session tokens never
+    # do. Without this check a leaked stream URL is a full API session for
+    # whoever it was minted for — admin included.
+    if payload.get("purpose"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+        )
+
     try:
         user_id = int(payload["sub"])
     except (TypeError, ValueError):
@@ -39,6 +54,19 @@ def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User is inactive or missing",
+        )
+
+    # A password change or recovery reset re-fingerprints the credential, so
+    # sessions minted under the old one stop working. Tokens predating this
+    # feature carry no "pwd" claim and are accepted until they expire.
+    token_fingerprint = payload.get("pwd")
+
+    if token_fingerprint and token_fingerprint != password_fingerprint(
+        user.password_hash
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired — sign in again",
         )
 
     return user

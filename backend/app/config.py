@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     # Set AUTH_COOKIE_SECURE=false for HTTP deployments, true behind TLS.
     auth_cookie_secure: bool | None = None
 
+    # Optional shared secret for first-run admin creation. Unset (the default)
+    # keeps the original behaviour: the first person to reach an admin-less
+    # instance creates the admin. Set it before exposing a fresh install to the
+    # internet, where that race is against scanners rather than housemates.
+    setup_token: str | None = None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

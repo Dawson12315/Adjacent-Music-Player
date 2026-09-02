@@ -16,7 +16,7 @@ httptools==0.7.1
 idna==3.11
 mutagen==1.47.0
 packaging==26.1
-passlib[bcrypt]
+passlib[bcrypt]==1.7.4
 psycopg[binary]==3.3.5
 pyasn1==0.6.3
 pycparser==3.0
@@ -24,8 +24,10 @@ pydantic==2.12.5
 pydantic-settings==2.11.0
 pydantic_core==2.41.5
 python-dotenv==1.2.1
-python-jose[cryptography]
-python-multipart==0.0.9
+# Pinned: 3.5.0 carries the fixes for CVE-2024-33663/33664. Unpinned, a future
+# rebuild could resolve to anything — including a yanked or regressed release.
+python-jose[cryptography]==3.5.0
+python-multipart==0.0.20
 pytz==2026.1.post1
 PyYAML==6.0.3
 requests==2.32.5

@@ -27,3 +27,9 @@ class User(Base):
         default=False,
         server_default=expression.false(),
     )
+
+    # When the current one-time password was issued. An unredeemed temp
+    # password is a standing low-entropy target, so login refuses it after
+    # TEMP_PASSWORD_TTL_HOURS and the admin re-issues. NULL means "no temp
+    # password pending" — including for every account that predates this.
+    temp_password_issued_at = Column(DateTime, nullable=True)

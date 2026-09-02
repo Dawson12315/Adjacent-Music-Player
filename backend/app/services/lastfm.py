@@ -8,7 +8,10 @@ from typing import Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
 
-LASTFM_BASE_URL = "http://ws.audioscrobbler.com/2.0/"
+# HTTPS, not HTTP: the session key is a non-expiring bearer credential for the
+# linked Last.fm account and rides in request bodies, and the API key rides in
+# query strings — over plaintext both are readable by any host on the path.
+LASTFM_BASE_URL = "https://ws.audioscrobbler.com/2.0/"
 LASTFM_MIN_REQUEST_INTERVAL_SECONDS = 1.05
 
 _lastfm_rate_limit_lock = threading.Lock()

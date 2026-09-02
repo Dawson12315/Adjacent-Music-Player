@@ -5,6 +5,9 @@ from pydantic import BaseModel, Field
 
 class SetupStatusResponse(BaseModel):
     admin_exists: bool
+    # True when the server requires a SETUP_TOKEN to create the first admin,
+    # so the setup screen knows to ask for one. Never echoes the token itself.
+    setup_token_required: bool = False
 
 
 class UserResponse(BaseModel):
@@ -25,6 +28,9 @@ class StreamTokenResponse(BaseModel):
 class AdminSetupRequest(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     password: str = Field(min_length=8, max_length=128)
+    # Only consulted when the server has SETUP_TOKEN configured; installs
+    # without it never send or need this.
+    setup_token: str | None = Field(default=None, max_length=256)
 
 
 class LoginRequest(BaseModel):

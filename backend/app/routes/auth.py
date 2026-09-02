@@ -1,5 +1,12 @@
 import json
+import logging
 import secrets
+from datetime import datetime, timedelta
+
+# How long an admin-issued one-time password stays usable before the admin
+# must re-issue it. Long enough to hand someone a password in the evening and
+# have them sign in the next day.
+TEMP_PASSWORD_TTL_HOURS = 48
 
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -26,8 +33,13 @@ from app.services.auth import (
     hash_password,
     verify_password,
 )
-from app.services.rate_limit import login_limiter, recovery_limiter
+from app.services.rate_limit import (
+    login_limiter,
+    recovery_limiter,
+    username_login_limiter,
+)
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["auth"])
 
@@ -47,6 +59,11 @@ def set_auth_cookie(response: Response, token: str):
 def rate_limit_key(request: Request, username: str) -> str:
     client_host = request.client.host if request.client else "unknown"
     return f"{client_host}:{username.strip().lower()}"
+
+
+def username_key(username: str) -> str:
+    """Key for the per-username ceiling, which ignores the client address."""
+    return username.strip().lower()
 
 
 def raise_if_rate_limited(limiter, key: str):
@@ -95,12 +112,16 @@ def verify_and_consume_recovery_code(user: User, recovery_code: str) -> bool:
 
 @router.get("/auth/setup-status", response_model=SetupStatusResponse)
 def get_setup_status(db: Session = Depends(get_db)):
-    return {"admin_exists": admin_exists(db)}
+    return {
+        "admin_exists": admin_exists(db),
+        "setup_token_required": bool(settings.setup_token),
+    }
 
 
 @router.post("/auth/setup-admin", response_model=AuthResponse)
 def setup_admin(
     payload: AdminSetupRequest,
+    request: Request,
     response: Response,
     db: Session = Depends(get_db),
 ):
@@ -111,6 +132,21 @@ def setup_admin(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Admin account already exists",
         )
+
+    # First-run setup is otherwise first-come-first-served: whoever reaches an
+    # admin-less instance owns it. Harmless on a LAN, a race against scanners
+    # once the app is on the internet. Setting SETUP_TOKEN closes that window;
+    # leaving it unset preserves the original zero-config behaviour.
+    if settings.setup_token:
+        if not secrets.compare_digest(payload.setup_token or "", settings.setup_token):
+            logger.warning(
+                "Rejected setup-admin attempt from %s (bad or missing setup token)",
+                request.client.host if request.client else "unknown",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="A setup token is required to create the first admin account.",
+            )
 
     existing_user = get_user_by_username(db, username)
     if existing_user:
@@ -133,6 +169,14 @@ def setup_admin(
     db.commit()
     db.refresh(user)
 
+    # A hijacked first-run is otherwise invisible; this is the one line that
+    # tells the owner an admin was created and from where.
+    logger.warning(
+        "First-run admin account %r created from %s",
+        user.username,
+        request.client.host if request.client else "unknown",
+    )
+
     token = create_access_token(user)
     set_auth_cookie(response, token)
 
@@ -149,10 +193,16 @@ def login(
     limiter_key = rate_limit_key(request, payload.username)
     raise_if_rate_limited(login_limiter, limiter_key)
 
+    # Second tier: survives an attacker rotating source addresses, and covers
+    # the case where a misconfigured proxy makes every client share one key.
+    name_key = username_key(payload.username)
+    raise_if_rate_limited(username_login_limiter, name_key)
+
     user = get_user_by_username(db, payload.username.strip())
 
     if not user or not verify_password(payload.password, user.password_hash):
         login_limiter.record_failure(limiter_key)
+        username_login_limiter.record_failure(name_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
@@ -164,7 +214,23 @@ def login(
             detail="User is inactive",
         )
 
+    # An admin-issued one-time password that was never redeemed is a standing
+    # guessable credential. Past its lifetime the account needs a fresh one.
+    if (
+        user.must_change_password
+        and user.temp_password_issued_at is not None
+        and datetime.utcnow() - user.temp_password_issued_at
+        > timedelta(hours=TEMP_PASSWORD_TTL_HOURS)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "This one-time password has expired. Ask an admin to reset it."
+            ),
+        )
+
     login_limiter.record_success(limiter_key)
+    username_login_limiter.record_success(name_key)
 
     token = create_access_token(user)
     set_auth_cookie(response, token)
@@ -218,6 +284,7 @@ def update_me(
         current_user.password_hash = hash_password(payload.new_password)
         # A real password of their own choosing lifts the temp-password hold.
         current_user.must_change_password = False
+        current_user.temp_password_issued_at = None
 
     db.commit()
     db.refresh(current_user)
@@ -274,6 +341,11 @@ def recover_password(
     recovery_limiter.record_success(limiter_key)
 
     user.password_hash = hash_password(payload.new_password)
+    # Recovering with a code is the user choosing their own password, so any
+    # pending admin-issued temp password is spent. (Changing the hash also
+    # invalidates every outstanding session via the token's "pwd" claim.)
+    user.must_change_password = False
+    user.temp_password_issued_at = None
 
     db.commit()
 

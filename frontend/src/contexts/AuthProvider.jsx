@@ -15,6 +15,9 @@ import { onUnauthorized } from "../services/apiClient";
 export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [setupRequired, setSetupRequired] = useState(false);
+  // True only when the server was started with SETUP_TOKEN, so the first-run
+  // screen knows to ask for it.
+  const [setupTokenRequired, setSetupTokenRequired] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -30,6 +33,7 @@ export function AuthProvider({ children }) {
 
         if (!setupData.admin_exists) {
           setSetupRequired(true);
+          setSetupTokenRequired(Boolean(setupData.setup_token_required));
           setCurrentUser(null);
           return;
         }
@@ -74,11 +78,11 @@ export function AuthProvider({ children }) {
     [],
   );
 
-  const setupAdmin = useCallback(async (username, password) => {
+  const setupAdmin = useCallback(async (username, password, setupToken) => {
     setAuthError("");
 
     try {
-      const user = await authService.setupAdmin(username, password);
+      const user = await authService.setupAdmin(username, password, setupToken);
       setSetupRequired(false);
       setCurrentUser(user);
     } catch (error) {
@@ -122,6 +126,7 @@ export function AuthProvider({ children }) {
       currentUser,
       isAdmin: currentUser?.role === "admin",
       setupRequired,
+      setupTokenRequired,
       authLoading,
       authError,
       sessionExpired,
@@ -133,6 +138,7 @@ export function AuthProvider({ children }) {
     [
       currentUser,
       setupRequired,
+      setupTokenRequired,
       authLoading,
       authError,
       sessionExpired,

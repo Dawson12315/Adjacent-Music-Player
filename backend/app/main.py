@@ -11,6 +11,7 @@ from app import models
 from app.config import settings
 from app.db import Base, engine
 from app.db_migrations import run_simple_migrations
+from app.middleware.body_limit import BodySizeLimitMiddleware
 from app.routes.albums import router as albums_router
 from app.routes.artist_edit import router as artist_edit_router
 from app.routes.artists import router as artists_router
@@ -104,6 +105,15 @@ cors_origins = [settings.frontend_origin]
 
 if not settings.is_production and "http://localhost:5173" not in cors_origins:
     cors_origins.append("http://localhost:5173")
+
+# Added first, so it ends up *inside* CORS: middleware added later wraps
+# middleware added earlier. Nothing outside it reads the request body (CORS
+# and gzip only touch headers and responses), so an oversized body is still
+# refused before routing and authentication — but the 413 now carries CORS
+# headers, which is what lets a browser on a different origin (the LAN
+# deployment, where the UI and API are separate ports) read the error instead
+# of seeing an opaque network failure.
+app.add_middleware(BodySizeLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

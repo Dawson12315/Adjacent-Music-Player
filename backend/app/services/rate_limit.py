@@ -89,3 +89,12 @@ login_limiter = FailureRateLimiter(max_failures=10, window_seconds=15 * 60)
 
 # Recovery codes are short, so the window is tighter.
 recovery_limiter = FailureRateLimiter(max_failures=5, window_seconds=15 * 60)
+
+# Second tier, keyed on the username alone. The per-client limiters above are
+# the primary defence, but they can be sidestepped by an attacker rotating
+# source addresses (trivial on IPv6) — and they collapse into a single shared
+# bucket if the app sits behind a proxy without forwarded-header trust
+# configured. This ceiling is set far above anything a real person types, so
+# it only ever engages under sustained attack, and it is checked *after* the
+# per-client tier so a normal user's mistyping never reaches it.
+username_login_limiter = FailureRateLimiter(max_failures=50, window_seconds=60 * 60)

@@ -5,10 +5,11 @@ import { useAuth } from "../../contexts/AuthContext";
 import { recoverPassword } from "../../services/authService";
 
 export function AuthScreen({ mode }) {
-  const { login, setupAdmin, authError, sessionExpired } = useAuth();
+  const { login, setupAdmin, authError, sessionExpired, setupTokenRequired } = useAuth();
 
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
+  const [setupToken, setSetupToken] = useState("");
   const [isRecovering, setIsRecovering] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -25,7 +26,7 @@ export function AuthScreen({ mode }) {
 
     try {
       if (isSetup) {
-        await setupAdmin(username, password);
+        await setupAdmin(username, password, setupToken);
       } else {
         await login(username, password);
       }
@@ -108,6 +109,23 @@ export function AuthScreen({ mode }) {
                 autoComplete={isSetup ? "new-password" : "current-password"}
               />
             </label>
+
+            {isSetup && setupTokenRequired && (
+              <label className="field">
+                <span className="field__label">Setup token</span>
+                <input
+                  className="input"
+                  type="password"
+                  value={setupToken}
+                  onChange={(event) => setSetupToken(event.target.value)}
+                  autoComplete="off"
+                />
+                <span className="field__hint">
+                  This server requires the SETUP_TOKEN value from its
+                  configuration to create the first account.
+                </span>
+              </label>
+            )}
 
             <button className="btn btn--primary btn--lg btn--block" type="submit" disabled={isSubmitting}>
               {isSetup ? "Create account" : "Sign in"}

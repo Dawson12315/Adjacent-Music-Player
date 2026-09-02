@@ -15,8 +15,14 @@ export function getCurrentUser() {
   return apiClient.get("/api/auth/me", { suppressUnauthorized: true });
 }
 
-export async function setupAdmin(username, password) {
-  const data = await apiClient.post("/api/auth/setup-admin", { username, password });
+export async function setupAdmin(username, password, setupToken) {
+  // setup_token is only meaningful when the server was started with
+  // SETUP_TOKEN set; installs without it send null and behave as before.
+  const data = await apiClient.post("/api/auth/setup-admin", {
+    username,
+    password,
+    setup_token: setupToken || null,
+  });
   return data.user;
 }
 

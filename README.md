@@ -143,15 +143,25 @@ database password, and `docker compose up -d`:
     volumes:
       - /opt/apps/adjacent/postgres:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      # Loopback only. A bare "5432:5432" publishes the database to every
+      # interface — and Docker's port mapping bypasses ufw/firewalld, so a
+      # host firewall does NOT protect it. The backend uses host networking,
+      # so it reaches Postgres over loopback either way.
+      - "127.0.0.1:5432:5432"
     restart: unless-stopped
+```
+
+Generate a real password rather than choosing one by hand:
+
+```bash
+openssl rand -hex 24
 ```
 
 ### 2. Migrate from the app
 
 As an admin, go to **Settings → Server** and turn on **Multi-user support**.
-Fill in the connection — host `YOUR_IP` (the backend runs with host
-networking, so `localhost` also works), port `5432`, database `adjacent`,
+Fill in the connection — host `localhost` (the backend runs with host
+networking, so it reaches the loopback-bound database directly), port `5432`, database `adjacent`,
 username `adjacent`, and the password you chose — then press
 **Test connection**, and **Migrate & enable**.
 
@@ -173,11 +183,178 @@ recommendations against the shared library.
 
 - The switch is one-way from the UI. To return to SQLite: stop the stack,
   delete `data/database.json`, rename `data/app.db.pre-postgres` back to
-  `data/app.db`, and start again.
+  `data/app.db`, and start again. Do that with the stack firewalled — an
+  install that boots with no database and no admin will let the first caller
+  create one.
+- Already migrated with `"5432:5432"`? Change it to `"127.0.0.1:5432:5432"`,
+  and if you entered a LAN IP as the database host, update
+  `data/database.json` to say `localhost` before restarting.
 - If Postgres is ever unreachable at boot, the backend retries for ~30
   seconds, then exits with a log message explaining exactly that — it will
   not silently start empty.
 - Last.fm scrobbling stays a single global account (the admin's) for now.
+
+---
+
+## Exposing Adjacent to the internet
+
+Everything above describes a LAN install: plain HTTP, ports open on your
+network, no TLS. That is fine behind your router and **not** fine on a public
+domain. This section is the safe way to publish it. If you only ever use
+Adjacent at home, skip it — nothing here is required for LAN use.
+
+The shape: **one domain, one origin.** A reverse proxy terminates TLS and
+routes `/api/*` to the backend and everything else to the frontend. Adjacent
+becomes same-origin, so cookies stay first-party and CORS stops mattering.
+Ports 8000, 5173 and 5432 are never reachable from the internet.
+
+### 1. Point the app at your domain
+
+In your backend environment:
+
+```yaml
+      - FRONTEND_ORIGIN=https://music.example.com
+      # Cookies must be HTTPS-only now that TLS exists.
+      - AUTH_COOKIE_SECURE=true
+      # Trust forwarded client IPs ONLY from your proxy's address, so the
+      # login rate limiter sees real clients instead of the proxy. Never "*".
+      - FORWARDED_ALLOW_IPS=127.0.0.1
+```
+
+and in the frontend environment:
+
+```yaml
+      - API_BASE_URL=https://music.example.com
+```
+
+Same-origin means `API_BASE_URL` is just your domain — the proxy sends
+`/api/*` to the backend. The mobile app points at the same URL and needs no
+changes.
+
+> Setting up a brand-new install directly on the internet? Also set
+> `SETUP_TOKEN=$(openssl rand -hex 16)` on the backend. Without it, whoever
+> reaches an install that has no admin yet — a scanner, most likely — can
+> claim it. With it, first-run setup asks for that value.
+
+### 2. Put a TLS proxy in front
+
+**Caddy** (gets and renews certificates automatically):
+
+```caddyfile
+music.example.com {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "frame-ancestors 'none'"
+		-Server
+	}
+
+	request_body {
+		max_size 25MB
+	}
+
+	@backend path /api/* /uploads/* /legacy-uploads/*
+	handle @backend {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:5173
+	}
+}
+```
+
+**nginx** equivalent, with built-in rate limiting:
+
+```nginx
+limit_req_zone $binary_remote_addr zone=adjacent_auth:10m rate=10r/m;
+limit_req_zone $binary_remote_addr zone=adjacent_api:10m  rate=30r/s;
+
+server {
+    listen 80;
+    server_name music.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name music.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/music.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/music.example.com/privkey.pem;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Content-Security-Policy "frame-ancestors 'none'" always;
+
+    client_max_body_size 25m;   # artwork uploads; the 1m default would reject them
+
+    location ~ ^/api/auth/(login|recover-password)$ {
+        limit_req zone=adjacent_auth burst=5 nodelay;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location ~ ^/(api|uploads|legacy-uploads)(/|$) {
+        limit_req zone=adjacent_api burst=60 nodelay;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_buffering off;          # audio Range/HLS: stream, don't spool
+        proxy_read_timeout 300s;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:5173;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+A useful side effect of routing by path: FastAPI's interactive docs at
+`/docs` and `/openapi.json` are not under `/api`, so they never reach the
+internet — they stay available to whoever can reach port 8000 directly.
+
+### 3. Close everything else
+
+Only 80 and 443 should be reachable from outside. With the host-networked
+backend from the quick-start, ufw governs port 8000 normally:
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw deny 8000/tcp
+sudo ufw deny 5173/tcp
+```
+
+**Docker caveat:** for containers that publish ports (`ports:` in compose),
+Docker inserts its own routing *ahead* of ufw, so `ufw deny 5432` does
+nothing. Bind those to loopback in compose instead — `127.0.0.1:5432:5432`,
+as the multi-user section above already does.
+
+### 4. Go-live checklist
+
+1. DNS `A`/`AAAA` record points at your host.
+2. Reverse proxy up, certificate issued, `https://music.example.com` loads.
+3. Backend env: `FRONTEND_ORIGIN`, `AUTH_COOKIE_SECURE=true`,
+   `FORWARDED_ALLOW_IPS` set to your proxy's address.
+4. Frontend env: `API_BASE_URL=https://music.example.com`.
+5. `docker compose up -d` and confirm both containers are healthy.
+6. Sign in over HTTPS; confirm the session cookie shows `Secure`.
+7. Play a track — including a seek — to confirm streaming through the proxy.
+8. Sign in from the mobile app against the new URL.
+9. Firewall: 80/443 open, 8000/5173 denied, 5432 loopback-only.
+10. From another network, confirm `http://your-ip:8000` and `:5173` do not
+    answer.
 
 ---
 

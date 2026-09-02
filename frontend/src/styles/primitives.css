@@ -217,6 +217,13 @@ textarea.input {
   color: var(--text-secondary);
 }
 
+/* Explanatory line under an input, for fields that need a "why". */
+.field__hint {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  line-height: var(--leading-normal);
+}
+
 .field--inline {
   flex-direction: row;
   align-items: center;

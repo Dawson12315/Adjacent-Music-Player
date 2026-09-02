@@ -19,6 +19,14 @@ services:
       # Secure cookies break login on plain-HTTP LAN deployments (browsers
       # refuse to send them). Set true only when serving behind TLS.
       - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-false}
+      # Behind a reverse proxy, set this to the proxy's address so the login
+      # rate limiter keys on real client IPs instead of the proxy's. Empty
+      # (the default) means "trust nobody", which is correct for direct/LAN
+      # access. Never set it to "*" on an internet-exposed install.
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-}
+      # Optional. When set, creating the first admin account requires this
+      # value — closes the first-run land grab on a fresh public install.
+      - SETUP_TOKEN=${SETUP_TOKEN:-}
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
       interval: 30s

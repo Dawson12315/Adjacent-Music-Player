@@ -30,6 +30,19 @@ _HLS_DIR_PATTERN = re.compile(r"^track_(\d+)_([0-9a-f]{12})$")
 _sweep_guard = threading.Lock()
 _sweep_thread: threading.Thread | None = None
 
+# Identity-based sweeping only removes entries nothing could read. It does not
+# bound *valid* growth: any authenticated user can ask for every quality of
+# every track (8 renditions each), so the caches can reach several times the
+# library size and fill the data volume — which is also where the database
+# lives. Past this budget the least-recently-used entries are evicted;
+# eviction is safe by construction because a missing cache entry is simply
+# rebuilt on the next request.
+CACHE_BUDGET_BYTES = 20 * 1024 * 1024 * 1024  # 20 GB across both caches
+
+# Below this much free space on the data volume, refuse new transcodes rather
+# than fill the disk out from under SQLite/Postgres.
+MIN_FREE_DISK_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
+
 
 def clear_stream_caches() -> None:
     """Remove everything. Used by purge, where all tracks are gone anyway."""
@@ -135,14 +148,99 @@ def sweep_stream_caches() -> dict:
             shutil.rmtree(entry, ignore_errors=True)
             removed_dirs += 1
 
+    evicted = _enforce_cache_budget()
+    removed_files += evicted["files"]
+    removed_dirs += evicted["dirs"]
+    reclaimed_bytes += evicted["bytes"]
+
     result = {
         "swept": True,
         "removed_files": removed_files,
         "removed_hls_dirs": removed_dirs,
         "reclaimed_mb": round(reclaimed_bytes / (1024 * 1024), 1),
+        "evicted_for_budget": evicted["files"] + evicted["dirs"],
     }
     logger.info("Stream cache sweep: %s", result)
     return result
+
+
+def _cache_entries() -> list[tuple[float, int, Path, bool]]:
+    """(atime, size, path, is_dir) for every cache entry, oldest use first."""
+    entries: list[tuple[float, int, Path, bool]] = []
+
+    if MOBILE_CACHE_DIR.exists():
+        for entry in MOBILE_CACHE_DIR.iterdir():
+            if not entry.is_file():
+                continue
+            try:
+                stat = entry.stat()
+            except OSError:
+                continue
+            entries.append((stat.st_atime, stat.st_size, entry, False))
+
+    if HLS_CACHE_ROOT.exists():
+        for entry in HLS_CACHE_ROOT.iterdir():
+            if not entry.is_dir():
+                continue
+            try:
+                children = [c for c in entry.rglob("*") if c.is_file()]
+                size = sum(c.stat().st_size for c in children)
+                # A directory's own atime does not move when its segments are
+                # read, so use the newest child access as the entry's age.
+                atime = max((c.stat().st_atime for c in children), default=0.0)
+            except OSError:
+                continue
+            entries.append((atime, size, entry, True))
+
+    entries.sort(key=lambda item: item[0])
+    return entries
+
+
+def _enforce_cache_budget() -> dict:
+    """Evict least-recently-used entries until the caches fit the budget."""
+    entries = _cache_entries()
+    total = sum(size for _, size, _, _ in entries)
+
+    removed = {"files": 0, "dirs": 0, "bytes": 0}
+
+    if total <= CACHE_BUDGET_BYTES:
+        return removed
+
+    logger.info(
+        "Transcode caches at %.1f GB exceed the %.1f GB budget; evicting oldest",
+        total / (1024**3),
+        CACHE_BUDGET_BYTES / (1024**3),
+    )
+
+    for _atime, size, path, is_dir in entries:
+        if total <= CACHE_BUDGET_BYTES:
+            break
+
+        try:
+            if is_dir:
+                shutil.rmtree(path, ignore_errors=True)
+                removed["dirs"] += 1
+            else:
+                path.unlink()
+                removed["files"] += 1
+        except OSError:
+            continue
+
+        removed["bytes"] += size
+        total -= size
+
+    return removed
+
+
+def has_room_for_transcode() -> bool:
+    """False when the data volume is too full to safely write a new entry."""
+    try:
+        usage = shutil.disk_usage(MOBILE_CACHE_DIR.parent)
+    except OSError:
+        # Cannot tell — do not block playback on a stat failure.
+        return True
+
+    return usage.free >= MIN_FREE_DISK_BYTES
 
 
 def start_stream_cache_sweep_background() -> bool:

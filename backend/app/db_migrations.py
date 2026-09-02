@@ -736,3 +736,8 @@ def run_simple_migrations():
                     "BOOLEAN NOT NULL DEFAULT 0"
                 )
             )
+
+        if "temp_password_issued_at" not in user_column_names:
+            connection.execute(
+                text("ALTER TABLE users ADD COLUMN temp_password_issued_at DATETIME")
+            )

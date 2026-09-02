@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -8,7 +9,7 @@ import subprocess
 import threading
 import shutil
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
@@ -181,6 +182,71 @@ MOBILE_CACHE_LOCKS_MAX = 512
 # spawns one transcode per request and starves the host. Threads queue here.
 TRANSCODE_CONCURRENCY = 2
 TRANSCODE_SEMAPHORE = threading.BoundedSemaphore(TRANSCODE_CONCURRENCY)
+
+# Every streaming handler is a sync `def`, so it occupies one of the ~40 AnyIO
+# worker threads for its whole lifetime. Blocking indefinitely on the
+# semaphore therefore converts a CPU queue into a thread-pool outage that
+# takes down *every* endpoint, login included. Waiting requests give up after
+# this long and return 503 + Retry-After, which players retry natively.
+TRANSCODE_WAIT_TIMEOUT_SECONDS = 10
+
+# A single song should transcode in seconds; a hung ffmpeg otherwise holds a
+# semaphore slot forever, permanently halving transcode capacity.
+FFMPEG_TIMEOUT_SECONDS = 180
+
+# Background pre-build threads are fire-and-forget, so repeated requests for
+# the same not-yet-cached variant used to stack one thread per request, all
+# queuing on the same semaphore. Membership here means "already being built".
+_INFLIGHT_BUILDS: set[str] = set()
+_INFLIGHT_GUARD = threading.Lock()
+
+
+@contextmanager
+def transcode_slot(context: str):
+    """Hold one transcode slot, or give up rather than pin a worker thread."""
+    from app.services.stream_cache_maintenance import has_room_for_transcode
+
+    # The caches share a volume with the database; filling it takes the whole
+    # app down, so stop transcoding before that happens. Playback of already
+    # cached or passthrough audio is unaffected.
+    if not has_room_for_transcode():
+        logger.error("Refusing %s: data volume is nearly full", context)
+        raise HTTPException(
+            status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+            detail="The server is out of disk space for audio conversion.",
+        )
+
+    acquired = TRANSCODE_SEMAPHORE.acquire(timeout=TRANSCODE_WAIT_TIMEOUT_SECONDS)
+
+    if not acquired:
+        logger.warning("Transcode queue full; refusing %s", context)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The server is busy preparing audio. Try again in a moment.",
+            headers={"Retry-After": "5"},
+        )
+
+    try:
+        yield
+    finally:
+        TRANSCODE_SEMAPHORE.release()
+
+
+@contextmanager
+def inflight_build(key: str):
+    """Yield True when this caller owns the build, False if one is running."""
+    with _INFLIGHT_GUARD:
+        if key in _INFLIGHT_BUILDS:
+            yield False
+            return
+
+        _INFLIGHT_BUILDS.add(key)
+
+    try:
+        yield True
+    finally:
+        with _INFLIGHT_GUARD:
+            _INFLIGHT_BUILDS.discard(key)
 
 # HLS streaming constants
 HLS_SEGMENT_DURATION_SECONDS = 4
@@ -404,13 +470,26 @@ def ensure_mobile_stream_cache(
 
         logger.info("Transcoding track %s (%s) for mobile cache", track.id, quality)
 
-        with TRANSCODE_SEMAPHORE:
-            result = subprocess.run(
-                ffmpeg_command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
+        with transcode_slot(f"mobile transcode of track {track.id} ({quality})"):
+            try:
+                result = subprocess.run(
+                    ffmpeg_command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=FFMPEG_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired:
+                if temp_file_path.exists():
+                    temp_file_path.unlink()
+
+                logger.error(
+                    "ffmpeg timed out transcoding track %s (%s)", track.id, quality
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                    detail="Audio conversion timed out.",
+                )
 
         if result.returncode != 0:
             if temp_file_path.exists():
@@ -501,13 +580,27 @@ def ensure_hls_stream_cache(
 
         logger.info("Generating HLS stream for track %s (%s)", track.id, quality)
 
-        with TRANSCODE_SEMAPHORE:
-            result = subprocess.run(
-                ffmpeg_command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
+        with transcode_slot(f"HLS build of track {track.id} ({quality})"):
+            try:
+                result = subprocess.run(
+                    ffmpeg_command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=FFMPEG_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired:
+                shutil.rmtree(track_dir, ignore_errors=True)
+
+                logger.error(
+                    "ffmpeg timed out building HLS for track %s (%s)",
+                    track.id,
+                    quality,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                    detail="Audio conversion timed out.",
+                )
 
         if result.returncode != 0:
             shutil.rmtree(track_dir, ignore_errors=True)
@@ -568,30 +661,49 @@ def prepare_hls_variants_in_background(track_id: int, file_path_text: str):
     if not file_path.exists():
         return
 
-    track_stub = Track(id=track_id, file_path=file_path_text)
+    # Callers fire-and-forget one thread per request. Repeated requests for a
+    # track whose variants are still building used to stack threads that all
+    # queued on the transcode semaphore; one build per track is enough.
+    with inflight_build(f"hls:{track_id}") as owner:
+        if not owner:
+            logger.debug("HLS variants for track %s already building", track_id)
+            return
 
-    for variant in HLS_QUALITY_VARIANTS:
-        quality = variant["quality"]
+        track_stub = Track(id=track_id, file_path=file_path_text)
 
-        if quality == HLS_STARTUP_QUALITY:
-            continue
+        for variant in HLS_QUALITY_VARIANTS:
+            quality = variant["quality"]
 
-        profile = MOBILE_STREAM_PROFILES.get(quality)
+            if quality == HLS_STARTUP_QUALITY:
+                continue
 
-        if not profile or profile.get("passthrough"):
-            continue
+            profile = MOBILE_STREAM_PROFILES.get(quality)
 
-        try:
-            ensure_hls_stream_cache(
-                track=track_stub,
-                file_path=file_path,
-                profile=profile,
-                quality=quality,
-            )
-        except Exception:
-            logger.exception(
-                "Background HLS generation failed for track %s (%s)", track_id, quality
-            )
+            if not profile or profile.get("passthrough"):
+                continue
+
+            try:
+                ensure_hls_stream_cache(
+                    track=track_stub,
+                    file_path=file_path,
+                    profile=profile,
+                    quality=quality,
+                )
+            except HTTPException:
+                # Transcode queue was full (503) or ffmpeg timed out — this is
+                # opportunistic pre-building, so drop it and let the next
+                # on-demand request rebuild.
+                logger.info(
+                    "Skipped background HLS variant for track %s (%s): busy",
+                    track_id,
+                    quality,
+                )
+            except Exception:
+                logger.exception(
+                    "Background HLS generation failed for track %s (%s)",
+                    track_id,
+                    quality,
+                )
 
 
 def create_stream_token(track_id: int, user_id: int) -> str:
