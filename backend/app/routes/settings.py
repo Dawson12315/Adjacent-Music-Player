@@ -10,6 +10,7 @@ from app.dependencies.auth import get_current_user, require_admin
 from app.models.app_setting import AppSetting
 from app.models.track import Track
 from app.models.user import User
+from app.schemas.database import DatabaseConnectionRequest
 from app.schemas.settings import AppSettingsResponse, AppSettingsUpdate
 from app.services.lastfm import get_lastfm_session, scrobble_track
 from app.services.lastfm_enrichment_control import request_stop
@@ -281,3 +282,113 @@ def resume_musicbrainz_backfill(
         "started": started,
         "reason": "started" if started else "already_running",
     }
+
+# ---------------------------------------------------------------------------
+# Database — multi-user status, Postgres connection testing, and the
+# SQLite → Postgres migration. All admin-only.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/settings/database", tags=["settings"])
+def database_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    from pathlib import Path
+
+    from app.config import RUNTIME_DATABASE_CONFIG_PATH, settings as app_config
+    from app.db import Base, engine
+    from app.services.pg_migration import get_migration_progress, mask_database_url
+
+    dialect = engine.dialect.name
+    size_bytes = None
+    migrated_at = None
+
+    if dialect == "sqlite":
+        raw_path = app_config.database_url.replace("sqlite:///", "", 1)
+        db_file = Path(raw_path)
+        if db_file.exists():
+            size_bytes = db_file.stat().st_size
+
+    if RUNTIME_DATABASE_CONFIG_PATH.exists():
+        try:
+            import json as json_module
+
+            migrated_at = json_module.loads(
+                RUNTIME_DATABASE_CONFIG_PATH.read_text(encoding="utf-8")
+            ).get("migrated_at")
+        except (OSError, ValueError):
+            migrated_at = None
+
+    from sqlalchemy import select as sa_select
+
+    row_count = 0
+    for table in Base.metadata.sorted_tables:
+        row_count += (
+            db.execute(sa_select(func.count()).select_from(table)).scalar() or 0
+        )
+
+    return {
+        "engine": "postgresql" if dialect == "postgresql" else "sqlite",
+        "multi_user": dialect == "postgresql",
+        "url_masked": mask_database_url(app_config.database_url),
+        "size_bytes": size_bytes,
+        "row_count": row_count,
+        "table_count": len(Base.metadata.sorted_tables),
+        "migrated_at": migrated_at,
+        "migration": get_migration_progress(),
+    }
+
+
+@router.post("/settings/database/test", tags=["settings"])
+def test_database_connection(
+    payload: DatabaseConnectionRequest,
+    current_user: User = Depends(require_admin),
+):
+    from app.services.pg_migration import test_connection
+
+    result = test_connection(payload)
+
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result
+
+
+@router.post("/settings/database/migrate", status_code=202, tags=["settings"])
+def start_database_migration(
+    payload: DatabaseConnectionRequest,
+    current_user: User = Depends(require_admin),
+):
+    from app.services.pg_migration import start_migration_background, test_connection
+
+    # The UI gates on a successful test, but the API must not trust that.
+    preflight = test_connection(payload)
+    if not preflight["ok"]:
+        raise HTTPException(status_code=400, detail=preflight["error"])
+
+    result = start_migration_background(payload)
+
+    if not result["started"]:
+        if result["reason"] == "already_postgres":
+            raise HTTPException(
+                status_code=409, detail="This install already runs on PostgreSQL."
+            )
+        if result["reason"].startswith("job_running:"):
+            job = result["reason"].split(":", 1)[1]
+            raise HTTPException(
+                status_code=409,
+                detail=f"A background job is running ({job}). Wait for it to finish.",
+            )
+        raise HTTPException(status_code=409, detail="A migration is already running.")
+
+    return {"started": True}
+
+
+@router.get("/settings/database/migration", tags=["settings"])
+def database_migration_progress(
+    current_user: User = Depends(require_admin),
+):
+    from app.services.pg_migration import get_migration_progress
+
+    return get_migration_progress()

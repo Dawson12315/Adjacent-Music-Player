@@ -118,9 +118,82 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def maintenance_guard(request, call_next):
+    """503 for anything the Postgres migration must protect.
+
+    During the copy, writes to SQLite would silently miss the move; during the
+    cutover-to-restart window, any database touch could recreate the retired
+    file. The progress poll is answered here directly in that window, because
+    its normal auth dependency would itself hit the database.
+    """
+    from fastapi.responses import JSONResponse as MaintenanceJSONResponse
+
+    from app.services import maintenance_mode
+
+    if maintenance_mode.blocks(request.method, request.url.path):
+        return MaintenanceJSONResponse(
+            status_code=503,
+            content={
+                "detail": "Adjacent is read-only while the database migrates. "
+                "Edits resume in about a minute.",
+                "code": "migration_in_progress",
+            },
+        )
+
+    if (
+        maintenance_mode.current() == maintenance_mode.MODE_RESTARTING
+        and request.url.path.startswith("/api/settings/database/migration")
+    ):
+        from app.services.pg_migration import get_migration_progress
+
+        return MaintenanceJSONResponse(content=get_migration_progress())
+
+    return await call_next(request)
+
+
+def _wait_for_database():
+    """Postgres may still be starting when we are (compose brings both up).
+
+    Retry briefly; if it never answers, refuse to boot with instructions
+    rather than silently creating an empty SQLite and looking like data loss.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+
+    from sqlalchemy import text as sa_text
+
+    last_error = None
+    for _ in range(15):
+        try:
+            with engine.connect() as connection:
+                connection.execute(sa_text("SELECT 1"))
+            return
+        except Exception as error:  # noqa: BLE001
+            last_error = error
+            import time
+
+            time.sleep(2)
+
+    logging.getLogger(__name__).critical(
+        "PostgreSQL is unreachable (%s). Fix the database or delete "
+        "data/database.json to fall back to the SQLite backup "
+        "(data/app.db.pre-postgres — rename it to data/app.db first).",
+        last_error,
+    )
+    raise RuntimeError("Database unreachable at startup") from last_error
+
+
 @app.on_event("startup")
 def on_startup():
     ensure_upload_dirs()
+
+    _wait_for_database()
+
+    # First boot after a migration: move the old SQLite files out of the way.
+    from app.services.pg_migration import retire_legacy_sqlite_file
+
+    retire_legacy_sqlite_file()
 
     Base.metadata.create_all(bind=engine)
     run_simple_migrations()
