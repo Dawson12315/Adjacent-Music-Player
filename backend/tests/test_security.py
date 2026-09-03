@@ -319,6 +319,128 @@ def test_cache_budget_helpers_exist_and_are_sane():
 
 
 # --------------------------------------------------------------------------
+# Playlist permissions are ownership-based, not role-based
+# --------------------------------------------------------------------------
+
+
+def test_playlist_artwork_follows_ownership_not_role(client, db_session_factory):
+    """A user may create, rename and delete their own playlist, so requiring
+    admin only to set its cover was an inconsistency — and it made the mobile
+    app's playlist editor half-functional for non-admins."""
+    from datetime import datetime
+
+    from app.db import engine
+    from app.models.user import User
+    from app.services.auth import hash_password
+
+    if engine.dialect.name != "postgresql":
+        pytest.skip("multi-user accounts require the Postgres leg")
+
+    db = db_session_factory()
+    try:
+        owner = User(
+            username="artwork-owner",
+            password_hash=hash_password("artwork-owner-pw-1"),
+            role="user",
+            is_active=True,
+            must_change_password=False,
+            temp_password_issued_at=None,
+            created_at=datetime.utcnow(),
+        )
+        db.add(owner)
+        db.commit()
+    finally:
+        db.close()
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as owner_client:
+        assert (
+            owner_client.post(
+                "/api/auth/login",
+                json={"username": "artwork-owner", "password": "artwork-owner-pw-1"},
+            ).status_code
+            == 200
+        )
+
+        created = owner_client.post("/api/playlists", json={"name": "cover test"})
+        assert created.status_code == 200
+        playlist_id = created.json()["id"]
+
+        # A one-pixel PNG is enough: the route only checks the content type.
+        png = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00"
+            b"\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+        response = owner_client.post(
+            f"/api/playlists/{playlist_id}/artwork",
+            files={"file": ("cover.png", png, "image/png")},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["artwork_path"]
+
+
+def test_playlist_artwork_still_refuses_someone_elses_playlist(
+    client, db_session_factory
+):
+    """Dropping the admin requirement must not drop the ownership check."""
+    from datetime import datetime
+
+    from app.db import engine
+    from app.models.user import User
+    from app.services.auth import hash_password
+
+    if engine.dialect.name != "postgresql":
+        pytest.skip("multi-user accounts require the Postgres leg")
+
+    db = db_session_factory()
+    try:
+        for name in ("artwork-a", "artwork-b"):
+            db.add(
+                User(
+                    username=name,
+                    password_hash=hash_password(f"{name}-password-1"),
+                    role="user",
+                    is_active=True,
+                    must_change_password=False,
+                    temp_password_issued_at=None,
+                    created_at=datetime.utcnow(),
+                )
+            )
+        db.commit()
+    finally:
+        db.close()
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as first:
+        first.post(
+            "/api/auth/login",
+            json={"username": "artwork-a", "password": "artwork-a-password-1"},
+        )
+        playlist_id = first.post(
+            "/api/playlists", json={"name": "private mix"}
+        ).json()["id"]
+
+    with TestClient(app) as second:
+        second.post(
+            "/api/auth/login",
+            json={"username": "artwork-b", "password": "artwork-b-password-1"},
+        )
+        response = second.post(
+            f"/api/playlists/{playlist_id}/artwork",
+            files={"file": ("cover.png", b"not-really-a-png", "image/png")},
+        )
+        assert response.status_code == 404
+
+
+# --------------------------------------------------------------------------
 # Schema drift (the bug that broke migrated Postgres installs)
 # --------------------------------------------------------------------------
 

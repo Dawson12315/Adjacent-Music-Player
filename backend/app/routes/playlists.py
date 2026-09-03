@@ -270,8 +270,12 @@ def upload_playlist_artwork(
     playlist_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
 ):
+    # Ownership, not role: a user may create, rename and delete their own
+    # playlists, so requiring admin only to set the cover was an inconsistency.
+    # _get_user_playlist_or_404 already scopes to the caller's playlists, which
+    # is what keeps this safe.
     playlist = _get_user_playlist_or_404(db, playlist_id, current_user.id)
 
     if playlist.system_key:
