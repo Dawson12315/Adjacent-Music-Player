@@ -255,11 +255,45 @@ HLS_CACHE_ROOT = Path("data/hls_cache")
 HLS_SEGMENT_NAME_PATTERN = re.compile(r"segment_\d{5}\.ts|index\.m3u8")
 HLS_STARTUP_QUALITY = "aac_320"
 HLS_DEFAULT_QUALITY = "aac_320"
+
+# The advertised ABR ladder.
+#
+# ffmpeg's native `aac` encoder saturates around 224 kbps for 44.1 kHz stereo —
+# measured on deliberately incompressible input, `-b:a 256k` and `-b:a 320k`
+# both land at ~221 kbps — and the runtime image has no libfdk_aac to do
+# better. So `aac_256` and `aac_320` were two rungs carrying the same bytes:
+# the player could "adapt" between identical streams, and every track paid for
+# two transcodes and two cache entries to make that possible. Only aac_320 is
+# advertised now.
+#
+# BANDWIDTH is what a player budgets against, so these are measured off real
+# segments rather than copied from the bitrate we ask ffmpeg for. Both numbers
+# sit above the audio bitrate because MPEG-TS packetisation adds roughly 10%:
+# aac_320 audio lands at ~223 kbps and its segments at ~244, aac_128 at ~130
+# and ~142. The old list declared 320000 for the top rung, which made players
+# on a ~250 kbps link step down to a variant that was not actually smaller.
 HLS_QUALITY_VARIANTS = [
-    {"quality": "aac_320", "bandwidth": 320000, "name": "AAC 320", "codecs": "mp4a.40.2"},
-    {"quality": "aac_256", "bandwidth": 256000, "name": "AAC 256", "codecs": "mp4a.40.2"},
-    {"quality": "aac_128", "bandwidth": 128000, "name": "AAC 128", "codecs": "mp4a.40.2"},
+    {"quality": "aac_320", "bandwidth": 256000, "name": "AAC High", "codecs": "mp4a.40.2"},
+    {"quality": "aac_128", "bandwidth": 152000, "name": "AAC 128", "codecs": "mp4a.40.2"},
 ]
+
+# What an HLS request is allowed to *name*, which is broader than what we
+# advertise: app builds already in the field ask for `aac_256` by name, and
+# rejecting them would turn a cosmetic ladder change into silence on someone
+# else's phone. It still resolves to a real profile — the same one aac_320
+# uses in all but name.
+HLS_ACCEPTED_QUALITIES = {variant["quality"] for variant in HLS_QUALITY_VARIANTS} | {
+    "aac_256",
+}
+
+# Preferences an HLS ladder cannot express, mapped to the rung that comes
+# closest. MP3 320 is a container choice rather than a quality one — it exists
+# for car stereos that will not read AAC — so it maps to the top rung, not to
+# Data Saver.
+HLS_QUALITY_SUBSTITUTIONS = {
+    "mp3_128": "aac_128",
+    "mp3_320": "aac_320",
+}
 
 
 def get_mobile_cache_lock(cache_key: str) -> threading.Lock:
@@ -641,15 +675,23 @@ def build_hls_variant_playlist_url(
 def get_requested_hls_quality(request: Request) -> str:
     requested_quality = request.query_params.get("quality") or HLS_DEFAULT_QUALITY
 
-    if requested_quality == "mp3_128":
-        requested_quality = "aac_128"
+    # An HLS ladder is AAC-only, but a client's *preference* need not be. Map
+    # the MP3 tiers onto their nearest AAC rung rather than refusing them.
+    #
+    # This used to 400 on anything outside the ladder, which meant a phone with
+    # "MP3 320 kbps" selected played nothing at all the moment it left Wi-Fi.
+    # Newer builds resolve the substitution before they ask, but builds already
+    # installed do not, and they are the ones this protects.
+    requested_quality = HLS_QUALITY_SUBSTITUTIONS.get(
+        requested_quality, requested_quality
+    )
 
     profile = MOBILE_STREAM_PROFILES.get(requested_quality)
 
     if not profile or profile.get("passthrough"):
         raise HTTPException(status_code=400, detail="Invalid HLS quality")
 
-    if requested_quality not in {variant["quality"] for variant in HLS_QUALITY_VARIANTS}:
+    if requested_quality not in HLS_ACCEPTED_QUALITIES:
         raise HTTPException(status_code=400, detail="Invalid HLS quality")
 
     return requested_quality
@@ -1301,7 +1343,7 @@ def prepare_hls_stream(
     )
 
     requested_qualities = [
-        "aac_128" if requested_quality == "mp3_128" else requested_quality
+        HLS_QUALITY_SUBSTITUTIONS.get(requested_quality, requested_quality)
         for requested_quality in requested_qualities
     ]
 
