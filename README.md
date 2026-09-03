@@ -67,7 +67,7 @@ services:
 
 Example:
 
-`192.168.86.23`
+`192.168.1.42`
 
 - Replace `YOUR_GENERATED_SECRET` with your own random secret (required — the backend
   refuses to start without one). Generate it with:
@@ -237,6 +237,43 @@ changes.
 > claim it. With it, first-run setup asks for that value.
 
 ### 2. Put a TLS proxy in front
+
+> **If your proxy runs in a container, read this first.** Every example below
+> proxies to `127.0.0.1`, which is correct only when the proxy runs on the
+> host. A containerised proxy has its own network namespace, so `127.0.0.1` is
+> *the proxy itself* — the connection goes nowhere and every request hangs
+> until the proxy times out. It looks like the app loading forever.
+>
+> Two changes fix it. Drop `network_mode: "host"` from the backend — it is in
+> the quick-start only so the backend can reach a Postgres container over
+> loopback, and it is what keeps the backend out of any Docker network your
+> proxy can see. Then put all three containers on one network and address them
+> by name:
+>
+> ```bash
+> docker network create adjacent-net
+> docker network connect adjacent-net <your-proxy-container>
+> ```
+>
+> ```yaml
+> services:
+>   backend:
+>     networks: [adjacent-net]      # instead of network_mode: "host"
+>   frontend:
+>     networks: [adjacent-net]
+>
+> networks:
+>   adjacent-net:
+>     external: true
+> ```
+>
+> Then proxy to `http://adjacent-backend:8000` and
+> `http://adjacent-frontend:8080` rather than to `127.0.0.1`. Docker's embedded
+> DNS resolves those names for containers sharing a network.
+>
+> Running Postgres too? Add it to the same network and point the backend's
+> `DATABASE_URL` at `adjacent-postgres` — that removes the only reason host
+> networking was there.
 
 **Caddy** (gets and renews certificates automatically):
 
