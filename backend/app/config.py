@@ -21,6 +21,28 @@ _FORBIDDEN_SECRET_KEYS = {
     "make-this-a-long-random-secret",
 }
 
+# Words that only appear in a value somebody meant to replace. The exact-match
+# list above missed the obvious near-misses — `PASTE_YOUR_GENERATED_SECRET_HERE`
+# is exactly 32 characters, so it satisfied the length rule and booted a server
+# whose admin tokens anyone reading the README could forge.
+#
+# Safe against false positives: the documented way to generate one is
+# `openssl rand -hex 32`, whose output is only [0-9a-f] and cannot contain any
+# of these. A passphrase that happens to contain one is a small cost against
+# catching the case that actually happens.
+_PLACEHOLDER_SECRET_MARKERS = (
+    "paste",
+    "your",
+    "change",
+    "replace",
+    "example",
+    "placeholder",
+    "generated_secret",
+    "secret_here",
+    "todo",
+    "xxxx",
+)
+
 _MIN_SECRET_KEY_LENGTH = 32
 
 
@@ -66,14 +88,37 @@ class Settings(BaseSettings):
             return None
         return value
 
+    @field_validator("frontend_origin")
+    @classmethod
+    def _normalize_frontend_origin(cls, value: str) -> str:
+        """Strip trailing slashes so a browser's Origin can actually match.
+
+        A browser's `Origin` header is scheme + host + port and never carries a
+        path or a trailing slash, and CORS compares it as an exact string. So
+        `FRONTEND_ORIGIN=https://example.com/` — the form you get by copying the
+        address out of the URL bar — matched nothing, and every request from the
+        real site came back `400 Disallowed CORS origin`, which the UI can only
+        report as "cannot connect to server".
+
+        Normalising here rather than asking people to notice the slash: there is
+        no deployment where the trailing form is the one that was meant.
+        """
+        return value.strip().rstrip("/")
+
     @field_validator("auth_secret_key")
     @classmethod
     def _require_real_secret_key(cls, value: str) -> str:
-        if value in _FORBIDDEN_SECRET_KEYS or len(value) < _MIN_SECRET_KEY_LENGTH:
+        lowered = value.lower()
+
+        looks_like_a_placeholder = value in _FORBIDDEN_SECRET_KEYS or any(
+            marker in lowered for marker in _PLACEHOLDER_SECRET_MARKERS
+        )
+
+        if looks_like_a_placeholder or len(value) < _MIN_SECRET_KEY_LENGTH:
             raise ValueError(
                 "AUTH_SECRET_KEY must be a random secret of at least "
-                f"{_MIN_SECRET_KEY_LENGTH} characters. Generate one with: "
-                "openssl rand -hex 32"
+                f"{_MIN_SECRET_KEY_LENGTH} characters, not a placeholder. "
+                "Generate one with: openssl rand -hex 32"
             )
         return value
 

@@ -107,6 +107,40 @@ describe("apiClient", () => {
     expect(error.message).toMatch(/could not reach the server/i);
   });
 
+  it("names the misconfigured proxy when the web app answers an API path", async () => {
+    // A reverse proxy that sends /api to the frontend gets the SPA fallback:
+    // 200, text/html, index.html. `response.ok` is true, so this used to be
+    // handed to callers as data and the app broke later and elsewhere.
+    globalThis.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+      text: async () => "<!doctype html><html><body><div id=root></div></body></html>",
+      json: async () => {
+        throw new SyntaxError("Unexpected token <");
+      },
+    });
+
+    const error = await request("/api/tracks").catch((thrown) => thrown);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.message).toMatch(/web app instead of API data/i);
+    expect(error.message).toMatch(/reverse proxy/i);
+  });
+
+  it("still allows a non-JSON, non-HTML body through", async () => {
+    // Artwork and audio are binary; only HTML means "this is the SPA".
+    globalThis.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "text/plain" }),
+      text: async () => "ok",
+      json: async () => "ok",
+    });
+
+    await expect(request("/api/health")).resolves.toBe("ok");
+  });
+
   it("broadcasts a 401 so an expired session returns the user to sign-in", async () => {
     globalThis.fetch.mockResolvedValue(
       jsonResponse({ detail: "Not authenticated" }, { status: 401 }),

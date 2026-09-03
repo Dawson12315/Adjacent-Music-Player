@@ -39,7 +39,11 @@ function notifyUnauthorized() {
 }
 
 function buildUrl(path, params) {
-  const url = new URL(`${API_BASE_URL}${path}`);
+  // The second argument is what lets a same-origin deployment work: with
+  // API_BASE_URL empty the first argument is a bare path like "/api/tracks",
+  // and `new URL` throws on those unless it is given a base. An absolute
+  // API_BASE_URL ignores the base entirely, so this is safe either way.
+  const url = new URL(`${API_BASE_URL}${path}`, window.location.origin);
 
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
@@ -165,7 +169,38 @@ export async function request(path, options = {}) {
     );
   }
 
+  assertNotTheWebAppItself(response, path);
+
   return parsed;
+}
+
+/**
+ * Catch the misconfigured-reverse-proxy case, which is otherwise silent.
+ *
+ * When a proxy sends `/api/...` to the web app's own nginx instead of to the
+ * backend, its SPA fallback answers **200 with index.html**. `response.ok` is
+ * true, so nothing here objected: the HTML string was handed back to callers
+ * as though it were the API's response, and the app failed later and
+ * elsewhere — an empty library, a login that neither succeeds nor errors.
+ *
+ * Only `text/html` counts. The API answers JSON, or binary for artwork and
+ * audio; it never answers HTML, so this cannot fire on a legitimate response.
+ */
+function assertNotTheWebAppItself(response, path) {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (!contentType.includes("text/html")) {
+    return;
+  }
+
+  throw new ApiError(
+    `The server returned the web app instead of API data for ${path}. ` +
+      "This usually means the reverse proxy is not forwarding /api to the " +
+      "backend — check that its /api location proxies to the backend port, " +
+      "not to the frontend.",
+    0,
+    null,
+  );
 }
 
 export const apiClient = {
