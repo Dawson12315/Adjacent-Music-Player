@@ -316,3 +316,69 @@ def test_cache_budget_helpers_exist_and_are_sane():
     assert scm.MIN_FREE_DISK_BYTES > 0
     # Never blocks playback when the volume is healthy.
     assert scm.has_room_for_transcode() is True
+
+
+# --------------------------------------------------------------------------
+# Schema drift (the bug that broke migrated Postgres installs)
+# --------------------------------------------------------------------------
+
+
+def test_every_model_column_exists_in_the_database(client):
+    """The models and the live schema must agree on both engines.
+
+    users.temp_password_issued_at was added to the model and to the
+    SQLite-only migration runner, which does not run on PostgreSQL — so
+    migrated installs selected a column that did not exist and every
+    authenticated request 500'd. sync_model_columns() closes that gap; this
+    test fails if any future column reopens it.
+    """
+    from sqlalchemy import inspect
+
+    from app.db import Base, engine
+
+    inspector = inspect(engine)
+    live_tables = set(inspector.get_table_names())
+    missing = []
+
+    for table in Base.metadata.sorted_tables:
+        if table.name not in live_tables:
+            missing.append(f"{table.name} (whole table)")
+            continue
+
+        live_columns = {c["name"] for c in inspector.get_columns(table.name)}
+
+        for column in table.columns:
+            if column.name not in live_columns:
+                missing.append(f"{table.name}.{column.name}")
+
+    assert not missing, f"schema is missing: {missing}"
+
+
+def test_schema_sync_repairs_a_dropped_column(client, db_session_factory):
+    """Drop a column behind SQLAlchemy's back, then prove the boot-time sync
+    puts it back — the exact repair a migrated install needs."""
+    from sqlalchemy import inspect, text
+
+    from app.db import Base, engine
+    from app.db_migrations import sync_model_columns
+
+    if engine.dialect.name != "postgresql":
+        pytest.skip("SQLite cannot drop columns on older versions; PG leg covers this")
+
+    with engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE users DROP COLUMN IF EXISTS temp_password_issued_at")
+        )
+
+    assert "temp_password_issued_at" not in {
+        c["name"] for c in inspect(engine).get_columns("users")
+    }
+
+    sync_model_columns()
+
+    assert "temp_password_issued_at" in {
+        c["name"] for c in inspect(engine).get_columns("users")
+    }
+
+    # And the app works again.
+    assert client.get("/api/auth/setup-status").status_code == 200

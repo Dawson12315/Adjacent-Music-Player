@@ -1,6 +1,71 @@
-from sqlalchemy import text
+import logging
 
-from app.db import engine
+from sqlalchemy import inspect, text
+from sqlalchemy.schema import CreateColumn
+
+from app.db import Base, engine
+
+logger = logging.getLogger(__name__)
+
+
+def sync_model_columns():
+    """Add columns the models declare but the database is missing.
+
+    `create_all` only ever creates missing *tables* — it never alters an
+    existing one. The hand-written migrations below cover that for SQLite,
+    but they are PRAGMA-based and skipped entirely on PostgreSQL, so a column
+    added to a model after an install migrated to Postgres would be selected
+    by the ORM and not exist in the database. (That is exactly how
+    users.temp_password_issued_at broke migrated installs.)
+
+    This runs on every engine and is idempotent: it compares model metadata
+    against the live schema and issues one ALTER TABLE ADD COLUMN per gap,
+    letting SQLAlchemy render the type for the current dialect.
+
+    A NOT NULL column with no server default cannot be added to a table that
+    already has rows, so those are reported loudly and skipped rather than
+    crashing the boot — declare such columns nullable, or give them a
+    server_default, and they will apply cleanly here.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    added = 0
+
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            continue  # create_all builds new tables complete
+
+        existing_columns = {
+            column["name"] for column in inspector.get_columns(table.name)
+        }
+
+        for column in table.columns:
+            if column.name in existing_columns:
+                continue
+
+            if not column.nullable and column.server_default is None:
+                logger.error(
+                    "Cannot add %s.%s automatically: it is NOT NULL with no "
+                    "server default. Give it a server_default or make it "
+                    "nullable.",
+                    table.name,
+                    column.name,
+                )
+                continue
+
+            # CreateColumn renders name + type + constraints for this dialect.
+            column_ddl = CreateColumn(column).compile(dialect=engine.dialect)
+
+            with engine.begin() as connection:
+                connection.execute(
+                    text(f'ALTER TABLE "{table.name}" ADD COLUMN {column_ddl}')
+                )
+
+            added += 1
+            logger.info("Added missing column %s.%s", table.name, column.name)
+
+    if added:
+        logger.info("Schema sync added %s missing column(s)", added)
 
 
 def _track_user_stats_has_track_id_unique_constraint(connection) -> bool:

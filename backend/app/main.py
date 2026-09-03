@@ -10,7 +10,7 @@ from starlette.types import Receive, Scope, Send
 from app import models
 from app.config import settings
 from app.db import Base, engine
-from app.db_migrations import run_simple_migrations
+from app.db_migrations import run_simple_migrations, sync_model_columns
 from app.middleware.body_limit import BodySizeLimitMiddleware
 from app.routes.albums import router as albums_router
 from app.routes.artist_edit import router as artist_edit_router
@@ -208,6 +208,11 @@ def on_startup():
 
     Base.metadata.create_all(bind=engine)
     run_simple_migrations()
+
+    # Engine-neutral catch-all: adds any column the models gained since this
+    # database was created. Required on PostgreSQL, where the SQLite-only
+    # migrations above do not run at all.
+    sync_model_columns()
 
     # Jobs die with the process; their locks must not survive it.
     release_all_job_locks()
