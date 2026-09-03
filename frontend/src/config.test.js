@@ -24,6 +24,15 @@ async function resolveWith(configured) {
   return API_BASE_URL;
 }
 
+
+function setProtocol(protocol) {
+  // jsdom's location is read-only; redefine just the protocol for the test.
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: { ...window.location, protocol, hostname: window.location.hostname },
+  });
+}
+
 describe("API_BASE_URL", () => {
   const original = window.APP_CONFIG;
 
@@ -41,13 +50,27 @@ describe("API_BASE_URL", () => {
     expect(await resolveWith("/")).toBe("");
   });
 
-  it("falls back to the LAN two-port layout when nothing is configured", async () => {
+  it("falls back to the LAN two-port layout over plain HTTP", async () => {
+    // The layout this fallback was written for: frontend on :5173, backend on
+    // :8000, no TLS.
+    setProtocol("http:");
+
     expect(await resolveWith(undefined)).toBe(
-      `${window.location.protocol}//${window.location.hostname}:8000`
+      `http://${window.location.hostname}:8000`
     );
     expect(await resolveWith("")).toBe(
-      `${window.location.protocol}//${window.location.hostname}:8000`
+      `http://${window.location.hostname}:8000`
     );
+  });
+
+  it("assumes same origin over HTTPS when config.js did not arrive", async () => {
+    // Serving over TLS means a proxy is in front, and no proxy publishes the
+    // backend on :8000 of the public hostname — a CDN does not even answer
+    // there, so the old guess failed as a hang rather than as an error.
+    setProtocol("https:");
+
+    expect(await resolveWith(undefined)).toBe("");
+    expect(await resolveWith("")).toBe("");
   });
 
   it("keeps an explicit origin", async () => {

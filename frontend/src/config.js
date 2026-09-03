@@ -32,6 +32,20 @@ function resolveApiBaseUrl() {
   // An explicit "/" normalises to "" and means same origin — relative URLs.
   if (configured) return "";
 
+  // Nothing configured. `/config.js` is written at container start and loaded
+  // by index.html before the bundle, so reaching here means it did not arrive —
+  // a stale CDN cache, or a proxy that never forwarded it.
+  //
+  // The old fallback guessed port 8000 on the current host unconditionally,
+  // which on a TLS deployment is close to always wrong: the whole point of
+  // serving over HTTPS is that a proxy is in front, and no proxy publishes the
+  // backend on :8000 of the public hostname. It failed as a hang rather than as
+  // an error, because a CDN simply does not answer on that port.
+  //
+  // Over HTTPS, assume the deployment it must be — one origin behind a proxy.
+  // Keep the port guess only for the plain-HTTP LAN layout it was written for.
+  if (window.location.protocol === "https:") return "";
+
   return `${window.location.protocol}//${window.location.hostname}:8000`;
 }
 
