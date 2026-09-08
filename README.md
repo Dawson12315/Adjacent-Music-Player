@@ -10,8 +10,8 @@
 
 <p align="center">
   Point it at a folder of music and get a streaming service: web, iPhone,
-  iPad, Android, CarPlay and Android Auto — with your own files, on your own
-  hardware, with nobody else's recommendations.
+  iPad, Android and Android Auto — with your own files, on your own hardware,
+  with nobody else's recommendations.
 </p>
 
 <p align="center">
@@ -54,9 +54,9 @@ Manager](#nginx-proxy-manager-in-a-container)**.
 | Client | Status | Notes |
 |---|---|---|
 | **Web** | ✅ Shipped | React app served by the `adjacent-frontend` container. |
-| **iOS / iPadOS** | ✅ Shipped | Native app on React Native. Background audio, offline downloads, CarPlay. |
+| **iOS / iPadOS** | ✅ Shipped | Native app on React Native. Background audio, offline downloads, lock-screen and headset transport. |
 | **Android** | ✅ Shipped | Same codebase. Background audio, offline downloads, Android Auto. |
-| **CarPlay** | ✅ Shipped | Now-playing transport, lock-screen controls, seek-by-interval. |
+| **CarPlay** | 🚧 Pending | Built; waiting on Apple's CarPlay audio entitlement, which is granted per app on request. |
 | **Android Auto** | ✅ Shipped | Media session with transport controls. |
 | **watchOS** | 🚧 Planned | Transport control and now-playing on the wrist. |
 | **tvOS** | 🚧 Planned | Living-room browse-and-play on the big screen. |
@@ -992,13 +992,15 @@ deployment and CI/CD to GHCR.
 **Web** — full client: browse, search, queue, playlists, insights, admin.
 
 **iOS and Android** — native clients on React Native. Background audio, offline
-downloads, generated artwork, listening stats, CarPlay and Android Auto
-transport.
+downloads, generated artwork, listening stats, Android Auto transport, and
+lock-screen controls on both.
 
 ### Next
 
 - **watchOS** — transport control and now-playing on the wrist.
 - **tvOS** — living-room browse-and-play.
+- **CarPlay** — the scene is written; it ships once Apple grants the
+  `carplay-audio` entitlement.
 - Lyrics.
 - Song radio — an endless queue seeded from one track.
 - Android Auto browse tree, so the car can browse the library rather than only
