@@ -45,6 +45,23 @@
   letter-spacing: var(--tracking-tight);
 }
 
+/*
+ * Nothing in the sidebar may shrink.
+ *
+ * The sidebar is a flex column that scrolls. Flex children default to
+ * `flex-shrink: 1`, so once the playlists outgrew the viewport the browser
+ * squashed their *box* while the rows inside kept their height — they spilled
+ * out and painted over Insights, Settings and the library stats, and because
+ * the box had not grown, `overflow-y` had nothing to scroll. Enough playlists
+ * and the bottom of the nav became unreachable.
+ *
+ * Holding every child at its natural height makes the sidebar's content height
+ * honest, which is the thing `overflow-y: auto` needs to do its job.
+ */
+.sidebar > * {
+  flex: none;
+}
+
 .sidebar__nav {
   display: flex;
   flex-direction: column;
