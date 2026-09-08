@@ -1,12 +1,93 @@
-# Adjacent 🎧
+<p align="center">
+  <img src="frontend/public/mark.svg" width="96" height="96" alt="Adjacent" />
+</p>
 
-Adjacent is a self-hosted, Spotify-inspired music streaming web app that lets you stream and manage your personal music library through a modern web interface.
+<h1 align="center">Adjacent</h1>
 
-Built with:
-- FastAPI (backend)
-- React (frontend)
-- Docker (deployment)
-- GitHub Actions + GHCR (CI/CD)
+<p align="center">
+  <strong>Your music library, self-hosted, on every screen you own.</strong>
+</p>
+
+<p align="center">
+  Point it at a folder of music and get a streaming service: web, iPhone,
+  iPad, Android, CarPlay and Android Auto — with your own files, on your own
+  hardware, with nobody else's recommendations.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Dawson12315/Adjacent-Music-Player/actions/workflows/tests.yml">
+    <img alt="Tests" src="https://github.com/Dawson12315/Adjacent-Music-Player/actions/workflows/tests.yml/badge.svg" />
+  </a>
+  <a href="https://github.com/Dawson12315/Adjacent-Music-Player/actions/workflows/docker-publish.yml">
+    <img alt="Images" src="https://github.com/Dawson12315/Adjacent-Music-Player/actions/workflows/docker-publish.yml/badge.svg" />
+  </a>
+  <img alt="Backend" src="https://img.shields.io/badge/backend-FastAPI-009485" />
+  <img alt="Frontend" src="https://img.shields.io/badge/frontend-React-61DAFB" />
+  <img alt="Mobile" src="https://img.shields.io/badge/mobile-React%20Native-61DAFB" />
+</p>
+
+---
+
+## Get started
+
+Two containers and a compose file — you never clone this repo to run it.
+
+```bash
+mkdir -p /opt/apps/adjacent && sudo chown -R 1000:1000 /opt/apps/adjacent
+# paste the compose file from the Deploy section below
+docker compose up -d
+```
+
+Then open `http://YOUR_IP:5173`, create the admin account, and press
+**Scan library now**.
+
+Full instructions for **[Docker CLI](#docker-cli)**,
+**[Portainer](#portainer)**, **[Synology Container
+Manager](#synology-container-manager)** and **[Unraid](#unraid)** are below,
+along with **[putting it behind a domain with Nginx Proxy
+Manager](#nginx-proxy-manager-in-a-container)**.
+
+---
+
+## Clients
+
+| Client | Status | Notes |
+|---|---|---|
+| **Web** | ✅ Shipped | React app served by the `adjacent-frontend` container. |
+| **iOS / iPadOS** | ✅ Shipped | Native app on React Native. Background audio, offline downloads, CarPlay. |
+| **Android** | ✅ Shipped | Same codebase. Background audio, offline downloads, Android Auto. |
+| **CarPlay** | ✅ Shipped | Now-playing transport, lock-screen controls, seek-by-interval. |
+| **Android Auto** | ✅ Shipped | Media session with transport controls. |
+| **watchOS** | 🚧 Planned | Transport control and now-playing on the wrist. |
+| **tvOS** | 🚧 Planned | Living-room browse-and-play on the big screen. |
+
+The mobile clients talk to the same server over the same API — sign in with your
+server URL and the account you already have.
+
+---
+
+## What it does
+
+**Your library, understood.** Scans a folder of music, reads its tags, and
+enriches from MusicBrainz and Last.fm where the tags are thin. Artists, albums
+and genres are derived rather than demanded, so a messy library still browses
+cleanly.
+
+**Playback that behaves.** Adaptive HLS with a two-rung ladder, or passthrough
+for originals. Gapless queueing, shuffle that keeps your current track, repeat,
+and a queue you can reorder. Seeking works over a reverse proxy, which is less
+common than it should be.
+
+**Offline.** Download a playlist to a phone and it plays with the network off.
+
+**It learns from you, locally.** Listening history drives For You, On Repeat and
+Jump Back In. Nothing leaves your server.
+
+**Multi-user when you want it.** Starts on SQLite with zero setup; migrate to
+Postgres in place from the Settings screen when you want accounts for other
+people, each with their own library view, likes and history.
+
+**Last.fm scrobbling**, if you still keep score.
 
 ---
 
@@ -835,31 +916,36 @@ It needs the music volume mounted, and skips files it cannot find.
 
 ---
 
-## Required Setup
-
-You must have a music library available on your host system.
-
-Examples:
-- Synology mount → `/mnt/media/music`
-- Local folder → `/home/user/music`
-
-This gets mounted into the container at:
-
-`/music`
-
----
-
 ## Architecture
 
 ```text
-Browser
-   ↓
-React Frontend (Nginx)
-   ↓
-FastAPI Backend
-   ↓
-SQLite DB + Music Files
+  Web browser        iOS / Android        CarPlay / Android Auto
+       │                   │                        │
+       └───────────────────┴────────────────────────┘
+                           │  HTTPS
+                  ┌────────┴────────┐
+                  │  Reverse proxy  │   TLS, one origin
+                  └────────┬────────┘
+             /api/*, /uploads/*  │  everything else
+                  ┌─────────┐    │    ┌──────────┐
+                  │ backend │◄───┴───►│ frontend │
+                  │ FastAPI │         │  nginx   │
+                  └────┬────┘         └──────────┘
+                       │
+        ┌──────────────┼──────────────┐
+        │              │              │
+   SQLite or      Music files     Transcode
+   Postgres        (read-only)      cache
 ```
+
+Two containers. The frontend is a static React build behind nginx; the backend
+is FastAPI with ffmpeg for transcoding. Adding a reverse proxy makes the whole
+thing same-origin, which is why cookies stay first-party and the mobile clients
+need only one URL.
+
+The database starts as SQLite and can migrate to Postgres in place when you
+want more than one account. Your music is mounted read-only and is never
+written to — everything Adjacent creates lives in its own data directory.
 
 ---
 
@@ -891,51 +977,49 @@ install — whatever the UI said.
 
 ---
 
-## Current Status
+## Status
 
-Phase 5 — Core App + UI Refinement
+The server and all three clients are in daily use. What follows is what is
+actually finished, not what is planned.
 
-### Completed
-- Music playback
-- Library scanning
-- Persistent player UI
-- Dockerized deployment
-- CI/CD pipeline
+### Shipped
 
-### In Progress
-- UI polish
-- Playback improvements
+**Server** — library scanning with MusicBrainz and Last.fm enrichment,
+adaptive HLS streaming, playlists, listening history and recommendations,
+multi-user on Postgres with in-place migration, Last.fm scrobbling, Dockerised
+deployment and CI/CD to GHCR.
 
----
+**Web** — full client: browse, search, queue, playlists, insights, admin.
 
-## Roadmap
+**iOS and Android** — native clients on React Native. Background audio, offline
+downloads, generated artwork, listening stats, CarPlay and Android Auto
+transport.
 
 ### Next
-- Mobile companion app(android)
 
-### Future
-- Lyrics
-- Song Radio
-- Mobile companion app(ios)
-- Apple Tv application
-
----
-
-## Purpose
-
-Adjacent is built as:
-- a self-hosted Spotify alternative
-- a full-stack learning project
-- a portfolio-ready system with real deployment and CI/CD
+- **watchOS** — transport control and now-playing on the wrist.
+- **tvOS** — living-room browse-and-play.
+- Lyrics.
+- Song radio — an endless queue seeded from one track.
+- Android Auto browse tree, so the car can browse the library rather than only
+  control what is already playing.
 
 ---
 
-## Notes
+## Good to know
 
-- Altering info for music library does not change the music library source metadata, only what is stored in the Adjacent persistent SQLite DB
-- Requires Docker
-- Requires a mounted music library
-- Designed for self-hosted environments
+- **Your files are never modified.** The music mount is read-only. Editing a
+  track's title or artwork in Adjacent changes Adjacent's database, not the tags
+  in your files — so nothing you do here can damage a library you spent years
+  tagging.
+- **Everything Adjacent creates** — database, uploaded artwork, transcode cache
+  — lives in the one data directory you mount. Back that up and you have backed
+  up the install.
+- **Not a backup tool.** Adjacent streams a library you already keep somewhere
+  safe. Keep your own copies of the music.
+- Requires Docker and a mounted music library. Built for self-hosted
+  environments; see [Exposing Adjacent to the
+  internet](#exposing-adjacent-to-the-internet) before putting it on a domain.
 
 ---
 
