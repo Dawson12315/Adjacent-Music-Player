@@ -56,7 +56,7 @@ Manager](#nginx-proxy-manager-in-a-container)**.
 | **Web** | ✅ Shipped | React app served by the `adjacent-frontend` container. |
 | **iOS / iPadOS** | ✅ Shipped | Native app on React Native. Background audio, offline downloads, lock-screen and headset transport. |
 | **Android** | ✅ Shipped | Same codebase. Background audio, offline downloads, Android Auto. |
-| **CarPlay** | 🚧 Pending | Built; waiting on Apple's CarPlay audio entitlement, which is granted per app on request. |
+| **CarPlay** | 🚧 Next release | Playlists, albums, artists and recent on the car screen, plus Now Playing. Entitlement granted; ships with the next App Store build. |
 | **Android Auto** | ✅ Shipped | Media session with transport controls. |
 | **watchOS** | 🚧 Planned | Transport control and now-playing on the wrist. |
 | **tvOS** | 🚧 Planned | Living-room browse-and-play on the big screen. |
@@ -999,8 +999,7 @@ lock-screen controls on both.
 
 - **watchOS** — transport control and now-playing on the wrist.
 - **tvOS** — living-room browse-and-play.
-- **CarPlay** — the scene is written; it ships once Apple grants the
-  `carplay-audio` entitlement.
+- **CarPlay** — built and verified; ships with the next App Store build.
 - Lyrics.
 - Song radio — an endless queue seeded from one track.
 - Android Auto browse tree, so the car can browse the library rather than only
