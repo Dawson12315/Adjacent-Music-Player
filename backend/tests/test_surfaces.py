@@ -167,3 +167,60 @@ def test_home_rails(surface_client):
 
     for_you = client.get("/api/recommendations/for-you")
     assert for_you.status_code == 200
+
+
+def test_playlists_carry_a_track_count_and_an_album_preview(surface_client, db_session_factory):
+    """A playlist row on a client shows its size and a mosaic of its albums.
+
+    The count and the preview come with the listing, so a Playlists page or a
+    car screen never has to open every playlist to describe it.
+    """
+    from app.models.track import Track
+
+    client, _ = surface_client
+
+    created = client.post("/api/playlists", json={"name": "Surface Mix"})
+    assert created.status_code == 200
+    assert created.json()["track_count"] == 0
+    assert created.json()["preview"] == []
+    playlist_id = created.json()["id"]
+
+    db = db_session_factory()
+    try:
+        track_ids = [
+            row.id
+            for row in db.query(Track.id)
+            .filter(Track.title.in_(["Surface Song 1", "Surface Song 2"]))
+            .order_by(Track.title.asc())
+            .all()
+        ]
+    finally:
+        db.close()
+    assert len(track_ids) == 2
+
+    for track_id in track_ids:
+        added = client.post(f"/api/playlists/{playlist_id}/tracks", json={"track_id": track_id})
+        assert added.status_code == 200, added.text
+
+    listing = client.get("/api/playlists")
+    assert listing.status_code == 200
+    by_id = {playlist["id"]: playlist for playlist in listing.json()}
+
+    mix = by_id[playlist_id]
+    assert mix["track_count"] == 2
+    # Two tracks from one album make one preview tile, in playlist order.
+    assert mix["preview"] == [
+        {"title": "Surface Song 1", "album": "Surface Album", "artwork_path": None}
+    ]
+
+    # Ducking Good holds whatever earlier tests liked as well; the fixture's
+    # like is in there, and so is its album.
+    liked = next(playlist for playlist in listing.json() if playlist["system_key"])
+    assert liked["track_count"] >= 1
+    assert any(item["album"] == "Surface Album" for item in liked["preview"])
+
+    # The single-playlist routes describe a playlist the same way.
+    renamed = client.patch(f"/api/playlists/{playlist_id}", json={"name": "Surface Mix 2"})
+    assert renamed.status_code == 200
+    assert renamed.json()["track_count"] == 2
+    assert [item["title"] for item in renamed.json()["preview"]] == ["Surface Song 1"]

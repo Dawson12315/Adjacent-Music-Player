@@ -21,6 +21,10 @@ from app.schemas.playlist import (
 )
 from app.schemas.track import TrackResponse
 from app.services.listening_service import record_listening_event
+from app.services.playlist_responses import (
+    build_playlist_response,
+    build_playlist_responses,
+)
 from app.services.playlists import ensure_liked_songs_playlist
 from app.services.recommendations.playlist_recommender import (
     get_playlist_recommendations_for_playlist,
@@ -90,7 +94,7 @@ def list_playlists(
         .all()
     )
 
-    return playlists
+    return build_playlist_responses(db, playlists)
 
 
 @router.post("/playlists", response_model=PlaylistResponse, tags=["playlists"])
@@ -120,7 +124,7 @@ def create_playlist(
     db.commit()
     db.refresh(playlist)
 
-    return playlist
+    return build_playlist_response(db, playlist)
 
 
 @router.get("/playlists/liked-songs", response_model=PlaylistResponse, tags=["playlists"])
@@ -128,7 +132,7 @@ def get_liked_songs_playlist(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return ensure_liked_songs_playlist(db, current_user.id)
+    return build_playlist_response(db, ensure_liked_songs_playlist(db, current_user.id))
 
 
 @router.get("/playlists/liked-songs/tracks/{track_id}", tags=["playlists"])
@@ -310,7 +314,7 @@ def upload_playlist_artwork(
     db.commit()
     db.refresh(playlist)
 
-    return playlist
+    return build_playlist_response(db, playlist)
 
 
 @router.post("/playlists/{playlist_id}/tracks", tags=["playlists"])
@@ -538,4 +542,4 @@ def rename_playlist(
     db.commit()
     db.refresh(playlist)
 
-    return playlist
+    return build_playlist_response(db, playlist)
