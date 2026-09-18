@@ -10,8 +10,8 @@
 
 <p align="center">
   Point it at a folder of music and get a streaming service: web, iPhone,
-  iPad, Android and Android Auto — with your own files, on your own hardware,
-  with nobody else's recommendations.
+  Android and CarPlay — with your own files, on your own hardware, with
+  nobody else's recommendations.
 </p>
 
 <p align="center">
@@ -54,10 +54,10 @@ Manager](#nginx-proxy-manager-in-a-container)**.
 | Client | Status | Notes |
 |---|---|---|
 | **Web** | ✅ Shipped | React app served by the `adjacent-frontend` container. |
-| **iOS / iPadOS** | ✅ Shipped | Native app on React Native. Background audio, offline downloads, lock-screen and headset transport. |
-| **Android** | ✅ Shipped | Same codebase. Background audio, offline downloads, Android Auto. |
+| **iOS** | ✅ Shipped | Native app on React Native. Background audio, offline downloads, lock-screen and headset transport. iPhone for 1.0 — it runs on an iPad, scaled, but the layout is not designed for one. |
+| **Android** | ✅ Shipped | Same codebase. Background audio, offline downloads, notification and lock-screen transport. |
 | **CarPlay** | 🚧 Next release | Playlists, albums, artists and recent on the car screen, plus Now Playing. Entitlement granted; ships with the next App Store build. |
-| **Android Auto** | ✅ Shipped | Media session with transport controls. |
+| **Android Auto** | 🚧 Planned | Needs a media browse service, which Adjacent does not have yet; the tree it would serve is the one CarPlay already browses. |
 | **watchOS** | 🚧 Planned | Transport control and now-playing on the wrist. |
 | **tvOS** | 🚧 Planned | Living-room browse-and-play on the big screen. |
 
@@ -919,7 +919,7 @@ It needs the music volume mounted, and skips files it cannot find.
 ## Architecture
 
 ```text
-  Web browser        iOS / Android        CarPlay / Android Auto
+  Web browser        iOS / Android              CarPlay      
        │                   │                        │
        └───────────────────┴────────────────────────┘
                            │  HTTPS
@@ -992,8 +992,8 @@ deployment and CI/CD to GHCR.
 **Web** — full client: browse, search, queue, playlists, insights, admin.
 
 **iOS and Android** — native clients on React Native. Background audio, offline
-downloads, generated artwork, listening stats, Android Auto transport, and
-lock-screen controls on both.
+downloads, generated artwork, listening stats and lock-screen controls on both,
+and CarPlay on iOS.
 
 ### Next
 
@@ -1002,8 +1002,8 @@ lock-screen controls on both.
 - **CarPlay** — built and verified; ships with the next App Store build.
 - Lyrics.
 - Song radio — an endless queue seeded from one track.
-- Android Auto browse tree, so the car can browse the library rather than only
-  control what is already playing.
+- **Android Auto** — the media browse service a head unit needs to see the app
+  at all, serving the same tree CarPlay browses.
 
 ---
 
