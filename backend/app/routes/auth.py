@@ -251,8 +251,12 @@ def update_me(
     current_user: User = Depends(get_current_user),
 ):
     if not verify_password(payload.current_password, current_user.password_hash):
+        # A wrong current password is a mistake in the form, not a dead
+        # session — the cookie that authenticated this request is fine. A 401
+        # here made the clients treat it as an expiry and sign the person
+        # out, hiding the one message that would have helped.
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Current password is incorrect",
         )
 

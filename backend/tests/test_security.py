@@ -123,6 +123,22 @@ def test_password_change_invalidates_other_sessions(client):
     )
 
 
+def test_wrong_current_password_is_a_form_error_not_an_expiry(client, signed_in):
+    """A typo in the current password must not read as a dead session: the
+    clients sign out on 401, and the person never sees why."""
+    response = client.patch(
+        "/api/auth/me",
+        json={
+            "current_password": "definitely-not-it",
+            "new_password": "test-password-2",
+            "confirm_password": "test-password-2",
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Current password is incorrect"
+    assert client.get("/api/auth/me").status_code == 200
+
+
 def test_tokens_without_a_pwd_claim_are_grandfathered(signed_in):
     """Deploying the change must not sign existing users out: tokens minted
     before the claim existed carry no 'pwd' and stay valid."""
