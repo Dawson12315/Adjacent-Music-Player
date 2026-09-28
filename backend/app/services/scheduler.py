@@ -5,9 +5,11 @@ from app.db import SessionLocal
 from app.models.app_setting import AppSetting
 from app.services.job_locking import release_job_lock, try_acquire_job_lock
 from app.services.lastfm_enrichment_runner import run_lastfm_enrichment_with_lock
-from app.services.maintenance import cleanup_missing_tracks, scan_library_job
-
-
+from app.services.maintenance import (
+    CleanupRefused,
+    LibraryUnavailable,
+    cleanup_missing_tracks,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,40 +20,48 @@ def _run_cleanup_job():
     db = SessionLocal()
 
     try:
+        # Decided outside the try/finally that releases: a skipped run must
+        # not release the lock the running cleanup holds.
         if not try_acquire_job_lock(db, "cleanup"):
             logger.warning("Cleanup skipped: already running")
             return
 
-        logger.info("Running scheduled cleanup...")
-        cleanup_missing_tracks(db)
-    except Exception as error:
-        logger.warning(f"Scheduled cleanup error: {error}")
-    finally:
         try:
-            release_job_lock(db, "cleanup")
+            logger.info("Running scheduled cleanup...")
+            result = cleanup_missing_tracks(db)
+            logger.info("Scheduled cleanup: %s", result)
+        except LibraryUnavailable as error:
+            db.rollback()
+            logger.warning("Scheduled cleanup refused: %s", error)
+        except CleanupRefused as error:
+            logger.warning(
+                "Scheduled cleanup refused: %s Run it from Settings to confirm.",
+                error,
+            )
         except Exception:
-            pass
+            db.rollback()
+            logger.exception("Scheduled cleanup error")
+        finally:
+            try:
+                release_job_lock(db, "cleanup")
+            except Exception:
+                pass
+    finally:
         db.close()
 
 
 def _run_scan_job():
-    db = SessionLocal()
+    # One code path for every scan: the background runner owns the job lock,
+    # the progress the clients poll, and the cache invalidation afterwards.
+    # Running scan_directory inline here left the phone's scan panel saying
+    # nothing was running while the nightly scan was an hour in.
+    from app.services.scan_runner import start_scan_background
 
-    try:
-        if not try_acquire_job_lock(db, "scan"):
-            logger.warning("Scan skipped: already running")
-            return
-
-        logger.info("Running scheduled scan...")
-        scan_library_job(db)
-    except Exception as error:
-        logger.warning(f"Scheduled scan error: {error}")
-    finally:
-        try:
-            release_job_lock(db, "scan")
-        except Exception:
-            pass
-        db.close()
+    result = start_scan_background(limit=100000)
+    if result["started"]:
+        logger.info("Scheduled scan started")
+    else:
+        logger.warning("Scheduled scan skipped: %s", result["reason"])
 
 
 def _run_lastfm_enrichment_job():
@@ -161,6 +171,12 @@ def _run_stream_cache_sweep_job():
         logger.warning(f"Scheduled stream cache sweep error: {error}")
 
 
+def _run_database_backup_job():
+    from app.services.db_backup import run_nightly_backup
+
+    run_nightly_backup()
+
+
 def start_scheduler():
     global _scheduler
 
@@ -169,6 +185,20 @@ def start_scheduler():
 
     _scheduler = BackgroundScheduler()
     _scheduler.start()
+
+    # Not settings-gated: a consistent copy of the SQLite database, written
+    # with the online backup API, kept for a week. Copying app.db by hand
+    # while the server runs misses whatever is still in the WAL.
+    _scheduler.add_job(
+        _run_database_backup_job,
+        trigger="cron",
+        hour=2,
+        minute=45,
+        id="scheduled_database_backup",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
 
     # Not settings-gated: co-occurrence is derived data that silently rots
     # when listening or playlists change, and the rebuild is cheap.

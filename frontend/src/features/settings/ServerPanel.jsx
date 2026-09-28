@@ -33,6 +33,13 @@ const MIGRATION_STEPS = [
 // the user to restart it by hand (bare-metal installs have no supervisor).
 const RECONNECT_TIMEOUT_MS = 60_000;
 
+function describeRows(rows) {
+  const parts = Object.entries(rows || {})
+    .filter(([, count]) => count > 0)
+    .map(([table, count]) => `${count.toLocaleString()} ${table.replace(/_/g, " ")}`);
+  return parts.length > 0 ? parts.join(", ") : "no rows";
+}
+
 function formatBytes(bytes) {
   if (bytes == null) return null;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -54,6 +61,9 @@ export function ServerPanel() {
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [testedFingerprint, setTestedFingerprint] = useState(null);
+  // Only meaningful when the tested database already holds Adjacent data;
+  // the server refuses to replace it unless this travels with the request.
+  const [wipeExisting, setWipeExisting] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmWord, setConfirmWord] = useState("");
   const [migration, setMigration] = useState(null);
@@ -139,6 +149,9 @@ export function ServerPanel() {
   // A successful test is only valid for the exact fields it tested.
   const fingerprint = JSON.stringify(form);
   const isTestCurrent = testResult?.ok && testedFingerprint === fingerprint;
+  const targetIsOccupied =
+    isTestCurrent && testResult.target_state === "occupied_adjacent";
+  const canMigrate = isTestCurrent && (!targetIsOccupied || wipeExisting);
 
   function updateField(field) {
     return (event) => {
@@ -154,6 +167,7 @@ export function ServerPanel() {
       username: form.username.trim(),
       password: form.password,
       sslmode: form.sslmode,
+      wipe_existing: targetIsOccupied && wipeExisting,
     };
   }
 
@@ -165,6 +179,7 @@ export function ServerPanel() {
 
     setIsTesting(true);
     setTestResult(null);
+    setWipeExisting(false);
 
     try {
       const result = await testDatabaseConnection(connectionPayload());
@@ -362,7 +377,27 @@ export function ServerPanel() {
                     `, database “${form.database}” is empty and ready`}
                   {testResult.target_state === "leftover_adjacent" &&
                     " — a previous attempt's leftovers will be cleared"}
+                  {targetIsOccupied &&
+                    ` — database “${form.database}” already holds Adjacent data (${describeRows(
+                      testResult.existing_rows,
+                    )})`}
                 </div>
+              )}
+
+              {targetIsOccupied && (
+                <label className="field field--inline server-wipe-toggle">
+                  <input
+                    type="checkbox"
+                    checked={wipeExisting}
+                    onChange={(event) => setWipeExisting(event.target.checked)}
+                  />
+                  <span>
+                    Replace it. Everything currently in “{form.database}” on that
+                    server is deleted and this install's data takes its place. If
+                    that database is a live Adjacent install, point at a different
+                    one instead.
+                  </span>
+                </label>
               )}
 
               <div className="settings-card__actions">
@@ -377,7 +412,7 @@ export function ServerPanel() {
                 <button
                   className="btn btn--primary"
                   type="button"
-                  disabled={!isTestCurrent}
+                  disabled={!canMigrate}
                   onClick={() => setIsConfirming(true)}
                 >
                   Migrate &amp; enable
@@ -438,6 +473,12 @@ export function ServerPanel() {
               </code>{" "}
               and verified row-for-row.
             </li>
+            {targetIsOccupied && (
+              <li className="server-modal-warning">
+                The Adjacent data already in that database (
+                {describeRows(testResult.existing_rows)}) is deleted first.
+              </li>
+            )}
             <li>The server restarts on the new database. You stay signed in.</li>
             <li>
               Your SQLite file is kept untouched as a backup in the data

@@ -13,7 +13,11 @@ import time
 
 from app.config import settings
 from app.db import SessionLocal
-from app.services.job_locking import release_job_lock, try_acquire_job_lock
+from app.services.job_locking import (
+    JobHeartbeat,
+    release_job_lock,
+    try_acquire_job_lock,
+)
 from app.services.recommendations.rec_cache import invalidate_library_caches
 from app.services.scanner import scan_directory
 
@@ -86,8 +90,13 @@ def start_scan_background(limit: int) -> dict:
 
 
 def _run_scan(limit: int):
+    heartbeat = JobHeartbeat("scan")
+
     def on_progress(files_seen: int, added: int):
         _update_progress(files_seen=files_seen, added=added)
+        # Reported every hundred files and every batch — often enough that a
+        # scan making any progress at all is never taken for a hung one.
+        heartbeat.tick()
 
     try:
         result = scan_directory(

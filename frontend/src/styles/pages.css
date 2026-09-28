@@ -600,6 +600,18 @@
   color: var(--yellow);
 }
 
+/* The "replace existing data" tick: a warning, so it reads like one. */
+.server-wipe-toggle {
+  align-items: flex-start;
+  color: var(--yellow);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.server-wipe-toggle input {
+  margin-top: 0.2em;
+}
+
 /* ---------- users panel ---------- */
 
 .server-chip--admin {

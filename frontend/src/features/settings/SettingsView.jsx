@@ -33,6 +33,10 @@ export function SettingsView() {
 
   const [confirmAction, setConfirmAction] = useState(null);
   const [isCleaning, setIsCleaning] = useState(false);
+  // Set when a cleanup left tracks missing-but-not-yet-removed, or refused a
+  // removal above its safety limit: { count, message }. The card then offers
+  // to remove them now, which re-runs cleanup with force.
+  const [pendingCleanup, setPendingCleanup] = useState(null);
 
   async function handleScan() {
     if (isScanning) return;
@@ -46,21 +50,51 @@ export function SettingsView() {
     }
   }
 
-  async function handleCleanup() {
+  async function handleCleanup(force = false) {
     if (isCleaning) return;
 
     setIsCleaning(true);
 
     try {
-      const result = await settingsService.runCleanup();
+      const result = await settingsService.runCleanup(force);
       await refreshLibrary();
-      notify(
-        `Cleanup completed. Removed ${result.removed} missing track${
-          result.removed === 1 ? "" : "s"
-        }.`,
-      );
+
+      const removed = result.removed || 0;
+      const outstanding = (result.marked_missing || 0) + (result.still_missing || 0);
+      const plural = (count) => (count === 1 ? "" : "s");
+
+      if (removed > 0) {
+        notify(`Cleanup removed ${removed} missing track${plural(removed)}.`);
+      } else if (outstanding === 0) {
+        notify("Cleanup completed. Every track's file is where it should be.");
+      } else {
+        notify(`Nothing removed yet — ${outstanding} track${plural(outstanding)} missing.`);
+      }
+
+      if (!force && outstanding > 0) {
+        setPendingCleanup({
+          count: outstanding,
+          message:
+            `${outstanding} track${plural(outstanding)} ${outstanding === 1 ? "has" : "have"} ` +
+            `no file right now. ${outstanding === 1 ? "It" : "They"} will be removed ` +
+            `automatically after ${result.grace_days} days if still missing — or now, if ` +
+            "the files are really gone.",
+        });
+      } else {
+        setPendingCleanup(null);
+      }
     } catch (error) {
-      notify(error.message || "Failed to run cleanup.");
+      if (error.status === 409 && error.detail?.code === "cleanup_refused") {
+        const { missing, total } = error.detail;
+        setPendingCleanup({
+          count: missing,
+          message:
+            `${missing} of ${total} tracks are missing — more than cleanup removes on ` +
+            "its own, because an unmounted drive looks just like this. Remove them anyway?",
+        });
+      } else {
+        notify(error.message || "Failed to run cleanup.");
+      }
     } finally {
       setIsCleaning(false);
     }
@@ -143,20 +177,49 @@ export function SettingsView() {
           <div className="settings-card">
             <div className="settings-card__title">Run cleanup now</div>
             <div className="settings-card__text">
-              Immediately remove tracks from the database if their music files no longer
-              exist on disk.
+              Checks every track's file. A track whose file is gone is marked missing and
+              removed once it has stayed missing for a week, so a drive that is offline for
+              a night costs nothing. Large removals ask first, and a copy of the database is
+              saved before anything is removed.
             </div>
 
-            <div className="settings-card__actions">
-              <button
-                className="btn btn--primary"
-                type="button"
-                onClick={handleCleanup}
-                disabled={isCleaning}
-              >
-                {isCleaning ? "Cleaning..." : "Run cleanup now"}
-              </button>
-            </div>
+            {pendingCleanup ? (
+              <>
+                <div className="settings-card__text">{pendingCleanup.message}</div>
+                <div className="settings-card__actions">
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => setPendingCleanup(null)}
+                    disabled={isCleaning}
+                  >
+                    Wait
+                  </button>
+
+                  <button
+                    className="btn btn--danger"
+                    type="button"
+                    onClick={() => handleCleanup(true)}
+                    disabled={isCleaning}
+                  >
+                    {isCleaning
+                      ? "Removing…"
+                      : `Remove ${pendingCleanup.count} now`}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="settings-card__actions">
+                <button
+                  className="btn btn--primary"
+                  type="button"
+                  onClick={() => handleCleanup(false)}
+                  disabled={isCleaning}
+                >
+                  {isCleaning ? "Checking…" : "Run cleanup now"}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </section>

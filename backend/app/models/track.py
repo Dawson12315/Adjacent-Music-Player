@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Float, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -20,6 +20,12 @@ class Track(Base):
     musicbrainz_recording_id = Column(String, nullable=True, index=True)
     lastfm_tags_enriched = Column(Boolean, nullable=False, default=False)
     duration_seconds = Column(Float, nullable=True)
+
+    # Set by cleanup the first time the file cannot be found, cleared the
+    # moment it is found again. A track is only deleted once it has stayed
+    # missing for the whole grace period, so a NAS that drops for a night
+    # costs nothing.
+    missing_since = Column(DateTime, nullable=True)
 
     playlist_tracks = relationship("PlaylistTrack", back_populates="track")
     track_artists = relationship("TrackArtist", back_populates="track", cascade="all, delete-orphan")

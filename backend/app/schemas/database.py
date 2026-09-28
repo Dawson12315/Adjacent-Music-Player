@@ -16,3 +16,8 @@ class DatabaseConnectionRequest(BaseModel):
 
     # libpq sslmode; "prefer" tries TLS and falls back, which suits LAN installs.
     sslmode: str = Field(default="prefer", pattern="^(disable|prefer|require)$")
+
+    # Required to migrate into a database that already holds Adjacent data.
+    # Never implied: the test endpoint reports the row counts so the UI can
+    # ask, and the migration refuses without it.
+    wipe_existing: bool = False

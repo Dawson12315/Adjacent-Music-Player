@@ -49,6 +49,16 @@ def current() -> str | None:
         return _mode
 
 
+def writes_paused() -> bool:
+    """True while nothing may write to the database.
+
+    The HTTP guard below covers requests; this is for the background loops
+    (MusicBrainz backfill, co-occurrence rebuild, the job-lock gate) that
+    never pass through the middleware.
+    """
+    return current() is not None
+
+
 def blocks(method: str, path: str) -> bool:
     mode = current()
 

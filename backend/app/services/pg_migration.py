@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import signal
+import sqlite3
 import threading
 import time
 from datetime import datetime
@@ -32,7 +33,15 @@ from app.db import Base, SessionLocal
 from app.db import engine as live_engine
 from app.models.job_lock import JobLock
 from app.services import maintenance_mode
-from app.services.job_locking import release_job_lock, try_acquire_job_lock
+from app.services.job_locking import (
+    JobHeartbeat,
+    release_job_lock,
+    try_acquire_job_lock,
+)
+from app.services.musicbrainz_backfill_runner import (
+    is_musicbrainz_backfill_running,
+    start_musicbrainz_backfill_background,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +53,13 @@ SNAPSHOT_PATH = Path("data/migration-snapshot.db")
 
 # Rows in these tables are process-transient; the new database starts them fresh.
 SKIP_DATA_TABLES = {"job_locks"}
+
+# A target whose Adjacent tables hold rows in any of these is somebody's data,
+# not the debris of a failed attempt — it is only replaced on explicit request.
+OCCUPANCY_TABLES = ("tracks", "users", "listening_events", "playlists")
+
+# How long to wait for background writers to notice writes are paused.
+BACKGROUND_WRITER_WAIT_SECONDS = 20
 
 # Rows with a NULL user_id predate authentication; they belong to the admin.
 USER_BACKFILL_TABLES = {
@@ -130,18 +146,47 @@ def _friendly_connection_error(error: Exception, params) -> str:
     return message
 
 
-def _inspect_target_state(pg_engine) -> str:
-    """empty | leftover_adjacent | occupied"""
+def _inspect_target(pg_engine) -> dict:
+    """{"state": empty | leftover_adjacent | occupied_adjacent | occupied,
+        "rows": {table: count}}
+
+    `leftover_adjacent` is a failed attempt's empty schema, safe to drop.
+    `occupied_adjacent` is Adjacent's schema with data in it — an install that
+    already ran on this database. Table names alone cannot tell the two
+    apart, and treating the second as the first replaced months of listening
+    history with a stale SQLite snapshot without a word.
+    """
     existing = set(inspect(pg_engine).get_table_names())
 
     if not existing:
-        return "empty"
+        return {"state": "empty", "rows": {}}
 
     ours = {table.name for table in Base.metadata.sorted_tables}
-    if existing <= ours:
-        return "leftover_adjacent"
+    if not existing <= ours:
+        return {"state": "occupied", "rows": {}}
 
-    return "occupied"
+    rows = {}
+    with pg_engine.connect() as connection:
+        for name in OCCUPANCY_TABLES:
+            if name not in existing:
+                continue
+            rows[name] = connection.execute(
+                select(func.count()).select_from(Base.metadata.tables[name])
+            ).scalar()
+
+    if any(rows.values()):
+        return {"state": "occupied_adjacent", "rows": rows}
+
+    return {"state": "leftover_adjacent", "rows": rows}
+
+
+def _inspect_target_state(pg_engine) -> str:
+    return _inspect_target(pg_engine)["state"]
+
+
+def describe_existing_rows(rows: dict) -> str:
+    parts = [f"{count:,} {name.replace('_', ' ')}" for name, count in rows.items() if count]
+    return ", ".join(parts) if parts else "no rows"
 
 
 def test_connection(params) -> dict:
@@ -153,7 +198,8 @@ def test_connection(params) -> dict:
         with probe.connect() as connection:
             version = connection.execute(text("SHOW server_version")).scalar() or ""
 
-        target_state = _inspect_target_state(probe)
+        target = _inspect_target(probe)
+        target_state = target["state"]
     except Exception as error:  # noqa: BLE001 — every driver failure becomes one message
         return {"ok": False, "error": _friendly_connection_error(error, params)}
     finally:
@@ -182,7 +228,12 @@ def test_connection(params) -> dict:
             ),
         }
 
-    return {"ok": True, "server_version": str(version), "target_state": target_state}
+    return {
+        "ok": True,
+        "server_version": str(version),
+        "target_state": target_state,
+        "existing_rows": target["rows"],
+    }
 
 
 def _other_job_running() -> str | None:
@@ -244,23 +295,56 @@ def start_migration_background(params) -> dict:
     return {"started": True, "reason": "started"}
 
 
+def _wait_for_background_writers() -> bool:
+    """Let loops that never pass through the HTTP guard finish their current
+    write. Returns whether a MusicBrainz backfill was interrupted, so a failed
+    migration can restart it.
+
+    The backfill checks the pause flag before every request and stops within
+    a couple of seconds; a scan that slipped in between the preflight and the
+    pause holds a job lock, and we wait for that too rather than snapshot
+    under it.
+    """
+    interrupted_backfill = is_musicbrainz_backfill_running()
+    deadline = time.monotonic() + BACKGROUND_WRITER_WAIT_SECONDS
+
+    while time.monotonic() < deadline:
+        other = _other_job_running()
+        if other is None and not is_musicbrainz_backfill_running():
+            return interrupted_backfill
+        time.sleep(0.5)
+
+    other = _other_job_running() or "musicbrainz_backfill"
+    raise RuntimeError(
+        f"A background job ({other}) is still writing to the database. "
+        "Wait for it to finish, then try again."
+    )
+
+
 def _run_migration(params):
     pg_url = build_postgres_url(params)
     pg_engine = create_engine(pg_url, pool_pre_ping=True)
     snap_engine = None
+    wipe_existing = bool(getattr(params, "wipe_existing", False))
+    interrupted_backfill = False
+    schema_is_ours = False
+    heartbeat = JobHeartbeat(JOB_NAME)
 
     try:
         maintenance_mode.enable_migration()
+        interrupted_backfill = _wait_for_background_writers()
 
         _update(step="snapshot")
         _make_snapshot()
         snap_engine = create_engine(f"sqlite:///{SNAPSHOT_PATH.as_posix()}")
 
         _update(step="schema")
-        _prepare_target_schema(pg_engine)
+        _prepare_target_schema(pg_engine, wipe_existing=wipe_existing)
+        # From here on everything in the target was put there by this run.
+        schema_is_ours = True
 
         _update(step="copy")
-        _copy_all_tables(snap_engine, pg_engine)
+        _copy_all_tables(snap_engine, pg_engine, heartbeat=heartbeat)
 
         _update(step="verify")
         _verify(snap_engine, pg_engine)
@@ -276,8 +360,11 @@ def _run_migration(params):
 
     except Exception as error:  # noqa: BLE001 — surfaced to the UI verbatim
         logger.exception("Postgres migration failed")
-        _wipe_partial_target(pg_engine)
+        _wipe_partial_target(pg_engine, schema_is_ours=schema_is_ours)
         maintenance_mode.clear()
+
+        if interrupted_backfill:
+            start_musicbrainz_backfill_background()
         _update(
             state="failed",
             error=str(error),
@@ -309,14 +396,28 @@ def _make_snapshot():
         connection.exec_driver_sql(f"VACUUM INTO '{SNAPSHOT_PATH.as_posix()}'")
 
 
-def _prepare_target_schema(pg_engine):
-    state = _inspect_target_state(pg_engine)
+def _prepare_target_schema(pg_engine, wipe_existing: bool = False):
+    target = _inspect_target(pg_engine)
+    state = target["state"]
 
     if state == "occupied":
         raise RuntimeError(
             "Target database contains tables that are not Adjacent's — refusing "
             "to touch it."
         )
+
+    if state == "occupied_adjacent":
+        if not wipe_existing:
+            raise RuntimeError(
+                "Target database already holds Adjacent data "
+                f"({describe_existing_rows(target['rows'])}). Refusing to "
+                "replace it without confirmation."
+            )
+        logger.warning(
+            "Replacing existing Adjacent data on the target (%s) as requested",
+            describe_existing_rows(target["rows"]),
+        )
+        Base.metadata.drop_all(bind=pg_engine)
 
     if state == "leftover_adjacent":
         logger.info("Dropping leftover Adjacent schema from a previous attempt")
@@ -339,7 +440,7 @@ def _find_admin_id(snap_engine) -> int | None:
     return row[0] if row else None
 
 
-def _copy_all_tables(snap_engine, pg_engine):
+def _copy_all_tables(snap_engine, pg_engine, heartbeat: JobHeartbeat | None = None):
     tables = list(Base.metadata.sorted_tables)
     admin_id = _find_admin_id(snap_engine)
 
@@ -384,6 +485,8 @@ def _copy_all_tables(snap_engine, pg_engine):
                 target.execute(table.insert(), rows)
                 rows_done += len(rows)
                 _update(rows_done=rows_done)
+                if heartbeat is not None:
+                    heartbeat.tick()
 
         tables_done += 1
         _update(tables_done=tables_done)
@@ -447,10 +550,19 @@ def _reset_sequences(pg_engine):
                 )
 
 
-def _wipe_partial_target(pg_engine):
-    """A failed attempt must not leave debris for the next one to trip over."""
+def _wipe_partial_target(pg_engine, schema_is_ours: bool = False):
+    """A failed attempt must not leave debris for the next one to trip over.
+
+    Only ever removes what this run put there: once the schema step has
+    passed, the target held nothing but this run's partial copy, so it is
+    dropped whole. Before that point a populated Adjacent database on the
+    target is somebody's install, and it is left exactly as found.
+    """
     try:
-        if _inspect_target_state(pg_engine) == "leftover_adjacent":
+        state = _inspect_target_state(pg_engine)
+        if state == "leftover_adjacent" or (
+            state == "occupied_adjacent" and schema_is_ours
+        ):
             Base.metadata.drop_all(bind=pg_engine)
             logger.info("Wiped partial Postgres schema after failure")
     except Exception:  # noqa: BLE001
@@ -527,6 +639,12 @@ def retire_legacy_sqlite_file():
         stamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
         backup = legacy.with_name(f"{legacy.name}.pre-postgres.{stamp}")
 
+    # The old process exited moments after cutover with pooled connections
+    # still open; whatever they had not checkpointed lives only in the WAL.
+    # Fold it into the main file so the backup is complete on its own and a
+    # rollback that renames just app.db loses nothing.
+    _checkpoint_sqlite(legacy)
+
     legacy.rename(backup)
 
     for suffix in ("-wal", "-shm"):
@@ -534,4 +652,27 @@ def retire_legacy_sqlite_file():
         if sidecar.exists():
             sidecar.rename(Path(f"{backup}{suffix}"))
 
-    logger.info("Retired legacy SQLite database to %s", backup)
+    logger.info(
+        "Retired legacy SQLite database to %s (to roll back: delete %s and "
+        "rename %s* back to %s*)",
+        backup,
+        RUNTIME_DATABASE_CONFIG_PATH,
+        backup.name,
+        legacy.name,
+    )
+
+
+def _checkpoint_sqlite(path: Path) -> None:
+    try:
+        connection = sqlite3.connect(str(path))
+        try:
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        logger.warning(
+            "Could not checkpoint %s before retiring it; its -wal file is "
+            "kept alongside the backup",
+            path,
+            exc_info=True,
+        )

@@ -95,6 +95,12 @@ function extractMessage(body, fallback) {
     }
   }
 
+  // Some refusals carry counts alongside the text (cleanup's safety limit);
+  // the message is what a toast shows, the rest stays on error.detail.
+  if (detail && typeof detail === "object" && typeof detail.message === "string") {
+    return detail.message;
+  }
+
   return fallback;
 }
 

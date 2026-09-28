@@ -162,11 +162,37 @@ def rebuild_track_cooccurrence(db: Session) -> dict:
     return result
 
 
+COOCCURRENCE_JOB_NAME = "cooccurrence_rebuild"
+
+
 def rebuild_track_cooccurrence_standalone() -> dict:
-    """For the scheduler and background hooks — owns its session."""
+    """For the scheduler and background hooks — owns its session.
+
+    Holds a job lock for the duration so the Postgres migration refuses to
+    start over it (the rebuild rewrites a whole table; half of it landing
+    after the snapshot would be silently lost), and skips itself when a
+    migration is already pausing writes.
+    """
+    from app.services import maintenance_mode
+    from app.services.job_locking import release_job_lock, try_acquire_job_lock
+
+    if maintenance_mode.writes_paused():
+        logger.info("Co-occurrence rebuild skipped: database migration in progress")
+        return {"skipped": "migration_in_progress"}
+
     db = SessionLocal()
     try:
-        return rebuild_track_cooccurrence(db)
+        if not try_acquire_job_lock(db, COOCCURRENCE_JOB_NAME):
+            logger.info("Co-occurrence rebuild skipped: already running")
+            return {"skipped": "already_running"}
+
+        try:
+            return rebuild_track_cooccurrence(db)
+        finally:
+            try:
+                release_job_lock(db, COOCCURRENCE_JOB_NAME)
+            except Exception:  # noqa: BLE001
+                logger.warning("Could not release the co-occurrence job lock", exc_info=True)
     finally:
         db.close()
 

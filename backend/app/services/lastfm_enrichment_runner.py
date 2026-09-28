@@ -23,24 +23,25 @@ def run_lastfm_enrichment_with_lock() -> bool:
     db = SessionLocal()
 
     try:
+        # Decided before the try/finally below: a failed acquire must not fall
+        # through to a release that would unlock the run that owns the lock.
         if not try_acquire_job_lock(db, LASTFM_ENRICHMENT_LOCK_NAME):
             logger.warning("Last.fm enrichment skipped: already running")
             return False
 
-        logger.info("Running Last.fm enrichment...")
-        run_lastfm_enrichment()
-        return True
-
-    except Exception as error:
-        logger.warning(f"Last.fm enrichment error: {error}")
-        return False
-
-    finally:
         try:
-            release_job_lock(db, LASTFM_ENRICHMENT_LOCK_NAME)
-        except Exception:
-            pass
-
+            logger.info("Running Last.fm enrichment...")
+            run_lastfm_enrichment()
+            return True
+        except Exception as error:
+            logger.warning(f"Last.fm enrichment error: {error}")
+            return False
+        finally:
+            try:
+                release_job_lock(db, LASTFM_ENRICHMENT_LOCK_NAME)
+            except Exception:
+                pass
+    finally:
         db.close()
 
 

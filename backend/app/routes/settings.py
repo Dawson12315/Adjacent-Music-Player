@@ -360,12 +360,26 @@ def start_database_migration(
     payload: DatabaseConnectionRequest,
     current_user: User = Depends(require_admin),
 ):
-    from app.services.pg_migration import start_migration_background, test_connection
+    from app.services.pg_migration import (
+        describe_existing_rows,
+        start_migration_background,
+        test_connection,
+    )
 
     # The UI gates on a successful test, but the API must not trust that.
     preflight = test_connection(payload)
     if not preflight["ok"]:
         raise HTTPException(status_code=400, detail=preflight["error"])
+
+    if preflight["target_state"] == "occupied_adjacent" and not payload.wipe_existing:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Database “{payload.database}” already holds Adjacent data "
+                f"({describe_existing_rows(preflight['existing_rows'])}). "
+                "Confirm that it should be replaced, or point at a different database."
+            ),
+        )
 
     result = start_migration_background(payload)
 

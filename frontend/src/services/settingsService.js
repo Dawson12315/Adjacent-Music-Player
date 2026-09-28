@@ -64,8 +64,16 @@ export function getScanProgress(options) {
   return apiClient.get("/api/scan/progress", { ...options, noStore: true });
 }
 
-export function runCleanup() {
-  return apiClient.post("/api/maintenance/cleanup");
+/**
+ * Without `force` the server only removes tracks that have stayed missing for
+ * its grace period, and answers 409 (code "cleanup_refused") instead of
+ * removing more than its safety limit — see handleCleanup for the follow-up.
+ */
+export function runCleanup(force = false) {
+  return apiClient.post("/api/maintenance/cleanup", undefined, {
+    params: force ? { force: true } : undefined,
+    noStore: true,
+  });
 }
 
 /* ---------- Last.fm ---------- */

@@ -17,6 +17,7 @@ from app.services.lastfm_enrichment_progress import (
 )
 from app.services.lastfm_track_similarity import ingest_similar_tracks_for_track
 from app.utils.artist_normalization import normalize_artist_name
+from app.services.job_locking import JobHeartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,7 @@ def run_lastfm_enrichment() -> Dict:
     
     reset_stop()
     start_progress(total_tracks=total_tracks_to_process)
+    heartbeat = JobHeartbeat("lastfm_enrichment")
 
     try:
         while True:
@@ -136,6 +138,7 @@ def run_lastfm_enrichment() -> Dict:
             logger.info(f"\n=== LAST.FM BATCH {batch_number} ({len(tracks)} tracks) ===\n")
 
             for index, track in enumerate(tracks, start=1):
+                heartbeat.tick()
                 if should_stop():
                     return _stop_summary(
                         batch_number,

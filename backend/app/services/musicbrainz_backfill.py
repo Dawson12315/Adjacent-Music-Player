@@ -4,6 +4,7 @@ from typing import Optional
 
 from app.db import SessionLocal
 from app.models.track import Track
+from app.services import maintenance_mode
 from app.services.musicbrainz import find_recording_mbid
 
 
@@ -50,6 +51,19 @@ def backfill_musicbrainz_recording_ids(
             logger.info(f"\n=== MBID BATCH {batch_number} ({len(tracks)} tracks) ===\n")
 
             for index, track in enumerate(tracks, start=1):
+                # Every commit here would land in SQLite after the migration's
+                # snapshot and be lost at cutover. Stopping is safe: the work
+                # is idempotent and the next scan picks up where this left off.
+                if maintenance_mode.writes_paused():
+                    logger.info("MusicBrainz backfill paused: database migration in progress")
+                    return {
+                        "batches_processed": batch_number,
+                        "total_checked": total_checked,
+                        "total_matched": total_matched,
+                        "total_missing": total_missing,
+                        "paused": True,
+                    }
+
                 mbid = find_recording_mbid(
                     track.title,
                     track.artist,

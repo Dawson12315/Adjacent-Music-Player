@@ -188,8 +188,9 @@ def _wait_for_database():
 
     logging.getLogger(__name__).critical(
         "PostgreSQL is unreachable (%s). Fix the database or delete "
-        "data/database.json to fall back to the SQLite backup "
-        "(data/app.db.pre-postgres — rename it to data/app.db first).",
+        "data/database.json to fall back to the SQLite backup: rename "
+        "data/app.db.pre-postgres back to data/app.db, together with its "
+        "-wal and -shm files if they exist.",
         last_error,
     )
     raise RuntimeError("Database unreachable at startup") from last_error

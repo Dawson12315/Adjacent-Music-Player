@@ -61,11 +61,24 @@ def migration_env(client, tmp_path, monkeypatch):
     monkeypatch.setattr(pg_migration, "_schedule_restart", lambda: None)
 
     _seed_source_data(client)
+    _drop_target_schema(pg_migration)
 
     yield pg_migration
 
     maintenance_mode.clear()
     pg_migration._update(state="idle", step=None, error=None)
+    _drop_target_schema(pg_migration)
+
+
+def _drop_target_schema(pg_migration):
+    """A test that fails halfway must not hand the next one a populated target."""
+    from app.db import Base
+
+    target = create_engine(pg_migration.build_postgres_url(_Params))
+    try:
+        Base.metadata.drop_all(bind=target)
+    finally:
+        target.dispose()
 
 
 def _seed_source_data(client):
@@ -234,3 +247,68 @@ def test_migration_copies_everything_and_writes_cutover(migration_env, client):
     assert maintenance_mode.blocks("GET", "/api/tracks")
     assert not maintenance_mode.blocks("GET", "/api/settings/database/migration")
     assert not maintenance_mode.blocks("GET", "/api/health")
+
+
+def test_populated_target_is_refused_unless_replacement_is_confirmed(migration_env, client):
+    """An Adjacent database that already holds data is someone's install, not
+    a failed attempt's leftovers — it is never replaced silently."""
+    from app.db import Base
+    from app.db import engine as live_engine
+
+    pg_migration = migration_env
+
+    target = create_engine(pg_migration.build_postgres_url(_Params))
+    try:
+        Base.metadata.create_all(bind=target)
+        tracks_table = Base.metadata.tables["tracks"]
+        with target.begin() as connection:
+            connection.execute(
+                tracks_table.insert().values(
+                    title="months of history", file_path="/pg/only.mp3"
+                )
+            )
+
+        probe = pg_migration.test_connection(_Params)
+        assert probe["ok"] is True
+        assert probe["target_state"] == "occupied_adjacent"
+        assert probe["existing_rows"]["tracks"] == 1
+
+        # Without confirmation: the run fails and the target is untouched.
+        pg_migration._run_migration(_Params)
+        progress = pg_migration.get_migration_progress()
+        assert progress["state"] == "failed"
+        assert "already holds Adjacent data" in progress["error"]
+
+        with target.connect() as connection:
+            assert connection.execute(
+                text("SELECT count(*) FROM tracks")
+            ).scalar() == 1
+        assert not pg_migration.RUNTIME_DATABASE_CONFIG_PATH.exists()
+
+        # The API refuses the same way, before starting anything.
+        payload = {
+            "host": _Params.host,
+            "port": _Params.port,
+            "database": _Params.database,
+            "username": _Params.username,
+            "password": _Params.password,
+            "sslmode": _Params.sslmode,
+        }
+        response = client.post("/api/settings/database/migrate", json=payload)
+        assert response.status_code == 409, response.text
+        assert "already holds Adjacent data" in response.json()["detail"]
+
+        # With confirmation: replaced, and the copy matches the source.
+        class _Replace(_Params):
+            wipe_existing = True
+
+        pg_migration._update(state="idle", step=None, error=None)
+        pg_migration._run_migration(_Replace)
+        progress = pg_migration.get_migration_progress()
+        assert progress["state"] == "restarting", progress["error"]
+
+        assert _table_counts(target) == _table_counts(live_engine)
+
+        Base.metadata.drop_all(bind=target)
+    finally:
+        target.dispose()
