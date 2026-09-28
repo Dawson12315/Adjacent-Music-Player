@@ -167,6 +167,60 @@ def _rebuild_track_user_stats_table(connection):
     connection.execute(text("PRAGMA foreign_keys=on"))
 
 
+def existing_index_names(table_name: str) -> set[str]:
+    """Index names on a table, including expression indexes.
+
+    SQLAlchemy's SQLite reflection skips expression-based indexes entirely,
+    so `inspect().get_indexes()` never lists `ix_tracks_lower_artist` there.
+    """
+    with engine.connect() as connection:
+        if engine.dialect.name == "sqlite":
+            rows = connection.execute(
+                text("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = :table"),
+                {"table": table_name},
+            )
+        elif engine.dialect.name == "postgresql":
+            rows = connection.execute(
+                text("SELECT indexname FROM pg_indexes WHERE tablename = :table"),
+                {"table": table_name},
+            )
+        else:
+            return {index["name"] for index in inspect(engine).get_indexes(table_name)}
+
+        return {row[0] for row in rows}
+
+
+def sync_model_indexes():
+    """Create any index the models declare that the database lacks.
+
+    `create_all` builds indexes only with new tables. Every index used to be
+    declared a second time as SQLite DDL in the runner below, which never
+    runs on Postgres — so a migrated install had none of the expression
+    indexes the track list sorts on. Idempotent, by index name.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    created = 0
+
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            continue
+
+        existing = existing_index_names(table.name)
+
+        for index in table.indexes:
+            if not index.name or index.name in existing:
+                continue
+            try:
+                index.create(bind=engine, checkfirst=False)
+                created += 1
+            except Exception:  # noqa: BLE001
+                logger.warning("Could not create index %s", index.name, exc_info=True)
+
+    if created:
+        logger.info("Created %s missing indexes", created)
+
+
 def run_simple_migrations():
     # This runner is the SQLite catch-up path: it is built entirely on PRAGMA
     # introspection and exists to bring long-lived app.db files up to what the

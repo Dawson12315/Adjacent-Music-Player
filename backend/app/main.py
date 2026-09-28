@@ -10,7 +10,7 @@ from starlette.types import Receive, Scope, Send
 from app import models
 from app.config import settings
 from app.db import Base, engine
-from app.db_migrations import run_simple_migrations, sync_model_columns
+from app.db_migrations import run_simple_migrations, sync_model_columns, sync_model_indexes
 from app.middleware.body_limit import BodySizeLimitMiddleware
 from app.routes.albums import router as albums_router
 from app.routes.artist_edit import router as artist_edit_router
@@ -101,7 +101,7 @@ if os.path.exists(LEGACY_UPLOADS_DIR):
 
 # The Vite dev server origin is a development convenience only; a production
 # API should trust exactly the origin it was configured with.
-cors_origins = [settings.frontend_origin]
+cors_origins = list(settings.frontend_origins)
 
 if not settings.is_production and "http://localhost:5173" not in cors_origins:
     cors_origins.append("http://localhost:5173")
@@ -114,6 +114,10 @@ if not settings.is_production and "http://localhost:5173" not in cors_origins:
 # deployment, where the UI and API are separate ports) read the error instead
 # of seeing an opaque network failure.
 app.add_middleware(BodySizeLimitMiddleware)
+
+from app.middleware.security_headers import SecurityHeadersMiddleware  # noqa: E402
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -200,6 +204,22 @@ def _wait_for_database():
 def on_startup():
     ensure_upload_dirs()
 
+    # The login limiter, the migration's read-only guard and the in-process
+    # scheduler are all per process: a second worker would run the nightly
+    # jobs twice and let writes through during a migration.
+    workers = os.environ.get("WEB_CONCURRENCY") or os.environ.get("UVICORN_WORKERS")
+    if workers and workers.strip().isdigit() and int(workers) > 1:
+        logging.getLogger(__name__).error(
+            "Adjacent must run as a single process (WEB_CONCURRENCY=%s). Remove "
+            "--workers: rate limiting, the migration guard and the scheduled jobs "
+            "are per process.",
+            workers,
+        )
+
+    logging.getLogger(__name__).info(
+        "Allowed browser origins: %s", ", ".join(settings.frontend_origins) or "(none)"
+    )
+
     _wait_for_database()
 
     # First boot after a migration: move the old SQLite files out of the way.
@@ -214,9 +234,19 @@ def on_startup():
     # database was created. Required on PostgreSQL, where the SQLite-only
     # migrations above do not run at all.
     sync_model_columns()
+    sync_model_indexes()
 
     # Jobs die with the process; their locks must not survive it.
     release_all_job_locks()
+
+    if not os.path.isdir(settings.music_library_path) or not os.listdir(
+        settings.music_library_path
+    ):
+        logging.getLogger(__name__).warning(
+            "Music library path %s is missing or empty — is the volume mounted? "
+            "/api/health reports degraded until it is.",
+            settings.music_library_path,
+        )
 
     start_scheduler()
 

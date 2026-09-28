@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.dependencies.auth import require_admin
 from app.models.track import Track
+from app.models.track_artist import TrackArtist
 from app.models.user import User
 from app.schemas.artist_edit import ArtistRenameRequest, ArtistTransferRequest
 from app.services.recommendations.rec_cache import invalidate_library_caches
@@ -30,6 +31,12 @@ def rename_artist(
 
     for track in tracks:
         track.artist = new_artist
+
+    # The index reads track_artists; rename the credit rows too, or the old
+    # name keeps its page and the new one has none.
+    db.query(TrackArtist).filter(TrackArtist.artist_name == current_artist).update(
+        {TrackArtist.artist_name: new_artist}, synchronize_session=False
+    )
 
     db.commit()
     invalidate_library_caches()
@@ -68,6 +75,24 @@ def transfer_artist(
 
     for track in source_tracks:
         track.artist = target_artist
+
+    # Credits already naming the target on the same track would collide with
+    # the unique (track, name) pair; drop those, then rename the rest.
+    source_credits = db.query(TrackArtist).filter(TrackArtist.artist_name == source_artist).all()
+    for credit in source_credits:
+        clash = (
+            db.query(TrackArtist)
+            .filter(
+                TrackArtist.track_id == credit.track_id,
+                TrackArtist.artist_name == target_artist,
+                TrackArtist.id != credit.id,
+            )
+            .first()
+        )
+        if clash is not None:
+            db.delete(credit)
+        else:
+            credit.artist_name = target_artist
 
     db.commit()
     invalidate_library_caches()

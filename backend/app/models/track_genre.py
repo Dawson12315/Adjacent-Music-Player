@@ -1,4 +1,4 @@
-from sqlalchemy import Column, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Column, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -16,4 +16,5 @@ class TrackGenre(Base):
 
     __table_args__ = (
         UniqueConstraint("track_id", "genre", name="uq_track_genre_pair"),
+        Index("ix_track_genres_genre", "genre"),
     )

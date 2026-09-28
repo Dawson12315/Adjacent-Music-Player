@@ -37,6 +37,10 @@ def get_or_build(key: str, builder: Callable[[], Any]) -> Any:
 
 
 def invalidate_library_caches() -> None:
+    # The Last.fm similarity lookup is a library-shaped cache too.
+    from app.services.lastfm_track_similarity import invalidate_local_track_lookup
+
+    invalidate_local_track_lookup()
     """Call after anything that adds, removes, or edits tracks."""
     with _guard:
         _cache.clear()

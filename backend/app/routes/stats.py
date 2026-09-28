@@ -14,7 +14,7 @@ from app.models.user import User
 from app.routes.tracks import build_track_response as build_artwork_track_response
 from app.utils.db_compat import hour_of_day, local_day
 from app.schemas.track import TrackResponse, TrackWithStatsResponse
-from app.services.recommendations.utils import build_track_response
+from app.services.track_responses import build_track_responses
 from app.services.stats_service import (
     get_most_liked_tracks,
     get_most_liked_tracks_with_stats,
@@ -51,7 +51,7 @@ def top_played_tracks(
     current_user: User = Depends(get_current_user),
 ):
     tracks = get_top_played_tracks(db, current_user.id, limit=limit)
-    return [build_track_response(track) for track in tracks]
+    return build_track_responses(db, tracks)
 
 
 @router.get("/stats/most-liked", response_model=list[TrackResponse], tags=["stats"])
@@ -61,7 +61,7 @@ def most_liked_tracks(
     current_user: User = Depends(get_current_user),
 ):
     tracks = get_most_liked_tracks(db, current_user.id, limit=limit)
-    return [build_track_response(track) for track in tracks]
+    return build_track_responses(db, tracks)
 
 
 @router.get("/stats/recently-played", response_model=list[TrackResponse], tags=["stats"])
@@ -71,7 +71,7 @@ def recently_played_tracks(
     current_user: User = Depends(get_current_user),
 ):
     tracks = get_recently_played_tracks(db, current_user.id, limit=limit)
-    return [build_track_response(track) for track in tracks]
+    return build_track_responses(db, tracks)
 
 
 @router.get("/stats/most-skipped", response_model=list[TrackResponse], tags=["stats"])
@@ -456,11 +456,14 @@ def stats_overview(
         .all()
     )
 
+    # Batched, with artwork: the thin builder never set artwork paths, so the
+    # Recently Played page fell back to generated tiles for anything outside
+    # the first library page.
     return {
-        "top_played": [build_track_response(track) for track in top_played],
-        "most_liked": [build_track_response(track) for track in most_liked],
-        "most_skipped": [build_track_response(track) for track in most_skipped],
-        "recently_played": [build_track_response(track) for track in recently_played],
+        "top_played": build_track_responses(db, top_played),
+        "most_liked": build_track_responses(db, most_liked),
+        "most_skipped": build_track_responses(db, most_skipped),
+        "recently_played": build_track_responses(db, recently_played),
         "top_genres": [
             {"name": genre.name, "play_count": genre.play_count}
             for genre in top_genres

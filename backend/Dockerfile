@@ -49,4 +49,10 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -sf http://localhost:8000/api/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Single process by design: the login limiter, the migration guard and the
+# scheduled jobs live in memory. Do not add --workers.
+#
+# No access log: at INFO it wrote a line per health poll and per HLS segment
+# into a Docker log nothing rotates, and stream tokens rode in those URLs.
+# The app's own logging carries what matters.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

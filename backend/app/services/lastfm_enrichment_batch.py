@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 import logging
 import time
 from typing import Dict
@@ -20,6 +21,14 @@ from app.utils.artist_normalization import normalize_artist_name
 from app.services.job_locking import JobHeartbeat
 
 logger = logging.getLogger(__name__)
+
+# A failed lookup is retried after this long, not nightly.
+RETRY_FAILED_AFTER = timedelta(days=7)
+
+# On a Last.fm rate limit: wait, double, and give up for the night after a run of them.
+RATE_LIMIT_BACKOFF_SECONDS = 30
+RATE_LIMIT_BACKOFF_MAX_SECONDS = 600
+RATE_LIMIT_GIVE_UP_AFTER = 5
 
 BATCH_SIZE = 25
 BATCH_DELAY_SECONDS = 2.0
@@ -114,25 +123,34 @@ def run_lastfm_enrichment() -> Dict:
     start_progress(total_tracks=total_tracks_to_process)
     heartbeat = JobHeartbeat("lastfm_enrichment")
 
+    # Paged by id, so a run walks the whole library once. Selecting "the
+    # first fifty unenriched" every time stopped the run dead after fifty
+    # tracks Last.fm had nothing for.
+    last_id = 0
+    retry_before = datetime.utcnow() - RETRY_FAILED_AFTER
+    consecutive_rate_limits = 0
+    backoff_seconds = RATE_LIMIT_BACKOFF_SECONDS
+
     try:
         while True:
-            candidate_tracks = (
+            tracks = (
                 db.query(Track)
                 .filter(
                     Track.musicbrainz_recording_id.isnot(None),
                     Track.lastfm_tags_enriched.is_(False),
+                    Track.id > last_id,
+                    (Track.lastfm_checked_at.is_(None))
+                    | (Track.lastfm_checked_at < retry_before),
                 )
-                .limit(BATCH_SIZE * 2)
+                .order_by(Track.id.asc())
+                .limit(BATCH_SIZE)
                 .all()
             )
 
-            tracks = [
-                track for track in candidate_tracks
-                if track.id not in attempted_track_ids
-            ][:BATCH_SIZE]
-
             if not tracks:
                 break
+
+            last_id = tracks[-1].id
 
             batch_number += 1
             logger.info(f"\n=== LAST.FM BATCH {batch_number} ({len(tracks)} tracks) ===\n")
@@ -168,6 +186,32 @@ def run_lastfm_enrichment() -> Dict:
 
                 if result["success"]:
                     total_processed += 1
+                    consecutive_rate_limits = 0
+                    backoff_seconds = RATE_LIMIT_BACKOFF_SECONDS
+                elif result.get("reason") == "rate_limited":
+                    # Back off, doubling each time; a real throttle is not
+                    # "no tags", and continuing at full rate makes it worse.
+                    consecutive_rate_limits += 1
+                    total_skipped += 1
+
+                    if consecutive_rate_limits >= RATE_LIMIT_GIVE_UP_AFTER:
+                        logger.warning(
+                            "Last.fm keeps rate-limiting; stopping this run after %s in a row",
+                            consecutive_rate_limits,
+                        )
+                        return _stop_summary(
+                            batch_number,
+                            total_checked,
+                            total_processed,
+                            total_skipped,
+                            total_artist_similarity_ingested,
+                            total_artist_similarity_skipped,
+                            total_track_similarity_ingested,
+                            total_track_similarity_skipped,
+                        )
+
+                    time.sleep(backoff_seconds)
+                    backoff_seconds = min(backoff_seconds * 2, RATE_LIMIT_BACKOFF_MAX_SECONDS)
                 else:
                     total_skipped += 1
 

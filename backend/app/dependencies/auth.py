@@ -1,4 +1,6 @@
-from fastapi import Cookie, Depends, HTTPException, status
+from datetime import datetime, timedelta
+
+from fastapi import Cookie, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -11,7 +13,23 @@ from app.services.auth import (
 )
 
 
+# What an account still holding an admin-issued one-time password may do:
+# see itself, change the password, sign out, and nothing else. Everything the
+# login-time checks enforced used to be bypassable by any client that did not
+# implement the forced-change screen — the cookie worked for its full week.
+PASSWORD_CHANGE_ALLOWED = {
+    ("GET", "/api/auth/me"),
+    ("PATCH", "/api/auth/me"),
+    ("POST", "/api/auth/logout"),
+    ("POST", "/api/auth/recovery-codes"),
+}
+
+# Must match the login-time TTL in routes/auth.py.
+TEMP_PASSWORD_TTL_HOURS = 48
+
+
 def get_current_user(
+    request: Request,
     db: Session = Depends(get_db),
     access_token: str | None = Cookie(default=None, alias=settings.auth_cookie_name),
 ) -> User:
@@ -68,6 +86,24 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session expired — sign in again",
         )
+
+    if user.must_change_password:
+        issued_at = user.temp_password_issued_at
+
+        if issued_at is not None and datetime.utcnow() - issued_at > timedelta(
+            hours=TEMP_PASSWORD_TTL_HOURS
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="This one-time password has expired. Ask an admin to reset it.",
+            )
+
+        if (request.method, request.url.path) not in PASSWORD_CHANGE_ALLOWED:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Choose a password before using the app.",
+                headers={"X-Adjacent-Code": "password_change_required"},
+            )
 
     return user
 

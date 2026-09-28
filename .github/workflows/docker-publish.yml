@@ -22,6 +22,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # arm64 too: Synology's ARM models, Raspberry Pi and Docker Desktop on
+      # Apple silicon all pulled an amd64-only image and restart-looped on
+      # "exec format error".
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -45,6 +51,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./backend
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -60,6 +67,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # arm64 too: Synology's ARM models, Raspberry Pi and Docker Desktop on
+      # Apple silicon all pulled an amd64-only image and restart-looped on
+      # "exec format error".
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -84,6 +97,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

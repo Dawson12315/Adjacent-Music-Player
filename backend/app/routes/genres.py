@@ -3,6 +3,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.services.track_responses import build_track_responses
 from app.dependencies.auth import get_current_user
 from app.models.track import Track
 from app.models.track_genre import TrackGenre
@@ -76,28 +77,18 @@ def list_genre_tracks(
         .all()
     )
 
-    # These used to read attributes the Track model does not have, so genre
-    # lists always shipped null artwork. Two batched lookups fix that.
-    album_map, artist_map = get_artwork_maps(db, [track for track, _count in rows])
+    # The same full row every other list returns — duration, every artist,
+    # every genre, artwork — plus the play count this page sorts by. A
+    # hand-built thinner shape here left the lock screen without a scrubber
+    # and an edit from this page dropping the track's other genres.
+    tracks = [track for track, _count in rows]
+    responses = build_track_responses(db, tracks)
+    play_counts = {track.id: int(count or 0) for track, count in rows}
 
-    items = []
-
-    for track, play_count in rows:
-        album_artwork_path = album_map.get(normalize_album_key(track.album))
-
-        items.append({
-            "id": track.id,
-            "title": track.title,
-            "artist": track.artist,
-            "album": track.album,
-            "genre": track.genre,
-            "genres": [genre_name],
-            "file_path": track.file_path,
-            "artwork_path": album_artwork_path,
-            "album_artwork_path": album_artwork_path,
-            "artist_artwork_path": artist_map.get(normalize_artist_name(track.artist)),
-            "play_count": int(play_count or 0),
-        })
+    items = [
+        {**response.model_dump(), "play_count": play_counts.get(response.id, 0)}
+        for response in responses
+    ]
 
     return {
         "items": items,

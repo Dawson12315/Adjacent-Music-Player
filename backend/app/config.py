@@ -73,6 +73,15 @@ class Settings(BaseSettings):
     # internet, where that race is against scanners rather than housemates.
     setup_token: str | None = None
 
+    # The transcode caches (HLS segments, mobile renditions) are bounded to
+    # this many gigabytes across both; the least recently played entries are
+    # evicted past it. Enforced after each new entry and nightly.
+    stream_cache_budget_gb: float = 20.0
+
+    # Below this much free space on the data volume, transcodes and uploads
+    # are refused rather than fill the disk out from under the database.
+    min_free_disk_gb: float = 2.0
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -87,6 +96,20 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @property
+    def frontend_origins(self) -> list[str]:
+        """Every origin the browser may call from.
+
+        One value used to be the whole allowance, and a LAN install reached by
+        both IP and hostname — the NAS's `.local` name, a Tailscale name — got
+        `Disallowed CORS origin` on the second, silently. Comma-separated.
+        """
+        return [
+            origin.strip().rstrip("/")
+            for origin in self.frontend_origin.split(",")
+            if origin.strip()
+        ]
 
     @field_validator("frontend_origin")
     @classmethod
@@ -103,7 +126,7 @@ class Settings(BaseSettings):
         Normalising here rather than asking people to notice the slash: there is
         no deployment where the trailing form is the one that was meant.
         """
-        return value.strip().rstrip("/")
+        return ",".join(part.strip().rstrip("/") for part in value.split(",") if part.strip())
 
     @field_validator("auth_secret_key")
     @classmethod

@@ -12,19 +12,33 @@ Two sources, combined:
 
 The table is rebuilt from scratch — event counts are small (thousands) and a
 full rebuild is O(events + playlist pairs), so incremental bookkeeping is not
-worth its complexity.
+worth its complexity. Playlist pairs are what make that go wrong: a liked-songs
+list of two thousand tracks is two million pairs on its own, which took eight
+gigabytes and held SQLite's write lock for most of a minute nightly and at
+boot. Large playlists are sampled, and the rows go in with bulk inserts in
+chunks, committing as they go.
 """
 
 import logging
+import random
 from collections import Counter
 from itertools import combinations
 
+from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.models.listening_event import ListeningEvent
 from app.models.playlist_track import PlaylistTrack
 from app.models.track_cooccurrence import TrackCooccurrence
+
+# Above this many tracks a playlist is a library, not a curation: every track
+# is paired with a sample of the others rather than with all of them.
+PLAYLIST_FULL_PAIRS_UP_TO = 300
+PLAYLIST_SAMPLE_PARTNERS = 40
+
+# Rows per INSERT and per commit.
+INSERT_CHUNK = 5000
 
 
 logger = logging.getLogger(__name__)
@@ -116,14 +130,28 @@ def _collect_playlist_pairs(db: Session) -> tuple[Counter, int]:
 
     pair_weights: Counter = Counter()
 
+    rng = random.Random(0)
+
     for track_ids in playlist_to_tracks.values():
         unique_track_ids = sorted(set(track_ids))
 
         if len(unique_track_ids) < 2:
             continue
 
-        for pair in combinations(unique_track_ids, 2):
-            pair_weights[pair] += PLAYLIST_PAIR_WEIGHT
+        if len(unique_track_ids) <= PLAYLIST_FULL_PAIRS_UP_TO:
+            for pair in combinations(unique_track_ids, 2):
+                pair_weights[pair] += PLAYLIST_PAIR_WEIGHT
+            continue
+
+        # Sampled: each track keeps a bounded number of partners, so the pair
+        # count grows with the playlist rather than with its square. Seeded,
+        # so two rebuilds of the same data agree.
+        for track_a in unique_track_ids:
+            for track_b in rng.sample(unique_track_ids, PLAYLIST_SAMPLE_PARTNERS):
+                if track_a == track_b:
+                    continue
+                pair = (track_a, track_b) if track_a < track_b else (track_b, track_a)
+                pair_weights[pair] += PLAYLIST_PAIR_WEIGHT
 
     return pair_weights, len(playlist_to_tracks)
 
@@ -137,26 +165,40 @@ def rebuild_track_cooccurrence(db: Session) -> dict:
     combined.update(playlist_pairs)
 
     db.query(TrackCooccurrence).delete()
-
-    new_rows = [
-        TrackCooccurrence(
-            track_a_id=track_a_id,
-            track_b_id=track_b_id,
-            cooccurrence_count=weight,
-        )
-        for (track_a_id, track_b_id), weight in combined.items()
-    ]
-
-    if new_rows:
-        db.bulk_save_objects(new_rows)
-
     db.commit()
+
+    # Core inserts in chunks, each its own transaction: no ORM object per
+    # pair, and the write lock is released between chunks so a like or a
+    # play recorded during the rebuild is not made to wait a minute.
+    table = TrackCooccurrence.__table__
+    rows = []
+    pairs_written = 0
+
+    for (track_a_id, track_b_id), weight in combined.items():
+        rows.append(
+            {
+                "track_a_id": track_a_id,
+                "track_b_id": track_b_id,
+                "cooccurrence_count": int(round(weight)),
+            }
+        )
+
+        if len(rows) >= INSERT_CHUNK:
+            db.execute(insert(table), rows)
+            db.commit()
+            pairs_written += len(rows)
+            rows = []
+
+    if rows:
+        db.execute(insert(table), rows)
+        db.commit()
+        pairs_written += len(rows)
 
     result = {
         "playlists_scanned": playlists_scanned,
         "session_pairs": len(session_pairs),
         "playlist_pairs": len(playlist_pairs),
-        "pairs_written": len(new_rows),
+        "pairs_written": pairs_written,
     }
     logger.info("Rebuilt track co-occurrence: %s", result)
     return result

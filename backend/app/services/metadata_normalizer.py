@@ -1,7 +1,7 @@
 import re
 from typing import Optional, List
 
-from app.utils.artist_parsing import split_artist_names
+from app.utils.artist_parsing import extract_featured_artists, split_artist_names
 from app.services.genre_normalizer import normalize_genre
 from app.utils.genre_parsing import split_genre_names
 
@@ -169,7 +169,6 @@ def normalize_artist(value: Optional[str]) -> Optional[str]:
 
     cleaned = cleaned.replace("_", " ")
     cleaned = cleaned.replace("&", " & ")
-    cleaned = cleaned.replace(";", ", ")
     cleaned = _collapse_spaces(cleaned)
 
     # apply full-string alias cleanup first
@@ -189,7 +188,9 @@ def normalize_artist_name(value: Optional[str]) -> Optional[str]:
     cleaned = cleaned.replace("_", " ")
     cleaned = _collapse_spaces(cleaned)
 
-    if cleaned.isupper() or cleaned.islower():
+    # Only an all-lower-case name is retyped; an all-caps one is usually an
+    # acronym (MGMT, ABBA, KISS) and "Mgmt" is not the band.
+    if cleaned.islower():
         cleaned = cleaned.title()
 
     cleaned = ARTIST_ALIASES.get(cleaned, cleaned)
@@ -207,7 +208,9 @@ def normalize_artist_list(value: Optional[str]) -> List[str]:
     if not cleaned:
         return []
 
-    split_names = split_artist_names(cleaned)
+    # The credited artists, then whoever was featured: a feature is a credit
+    # too, and used to be deleted from the field and lost.
+    split_names = split_artist_names(cleaned) + extract_featured_artists(value)
 
     normalized: List[str] = []
     seen = set()

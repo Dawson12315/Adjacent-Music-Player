@@ -98,3 +98,7 @@ recovery_limiter = FailureRateLimiter(max_failures=5, window_seconds=15 * 60)
 # it only ever engages under sustained attack, and it is checked *after* the
 # per-client tier so a normal user's mistyping never reaches it.
 username_login_limiter = FailureRateLimiter(max_failures=50, window_seconds=60 * 60)
+
+# Recovery codes get the same second tier: 32-bit codes behind a 2 s bcrypt
+# check were only ever limited per source address, which a /64 sidesteps.
+username_recovery_limiter = FailureRateLimiter(max_failures=20, window_seconds=60 * 60)

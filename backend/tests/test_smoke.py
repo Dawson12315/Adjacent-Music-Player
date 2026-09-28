@@ -78,7 +78,9 @@ def test_like_flow_and_track_listing(client, db_session_factory):
     finally:
         db.close()
 
-    listing = client.get("/api/tracks", params={"limit": 10})
+    # By title, not "the first ten": other files seed hundreds of tracks
+    # into the same database and the first page is whatever sorts first.
+    listing = client.get("/api/tracks", params={"limit": 10, "search": "Smoke Song"})
     assert listing.status_code == 200
     payload = listing.json()
     items = payload["items"] if isinstance(payload, dict) else payload

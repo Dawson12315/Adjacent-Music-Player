@@ -125,19 +125,22 @@ def like_track(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return record_listening_event(
-        db,
-        ListeningEventCreate(
-            track_id=track_id,
-            event_type="liked",
-            source_type=payload.source_type,
-            source_id=payload.source_id,
-            position_seconds=payload.position_seconds,
-            duration_seconds=payload.duration_seconds,
-            session_id=payload.session_id,
-        ),
-        current_user.id,
-    )
+    try:
+        return record_listening_event(
+            db,
+            ListeningEventCreate(
+                track_id=track_id,
+                event_type="liked",
+                source_type=payload.source_type,
+                source_id=payload.source_id,
+                position_seconds=payload.position_seconds,
+                duration_seconds=payload.duration_seconds,
+                session_id=payload.session_id,
+            ),
+            current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.post("/tracks/{track_id}/unlike", response_model=ListeningEventResponse, tags=["listening"])
@@ -147,16 +150,19 @@ def unlike_track(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return record_listening_event(
-        db,
-        ListeningEventCreate(
-            track_id=track_id,
-            event_type="unliked",
-            source_type=payload.source_type,
-            source_id=payload.source_id,
-            position_seconds=payload.position_seconds,
-            duration_seconds=payload.duration_seconds,
-            session_id=payload.session_id,
-        ),
-        current_user.id,
-    )
+    try:
+        return record_listening_event(
+            db,
+            ListeningEventCreate(
+                track_id=track_id,
+                event_type="unliked",
+                source_type=payload.source_type,
+                source_id=payload.source_id,
+                position_seconds=payload.position_seconds,
+                duration_seconds=payload.duration_seconds,
+                session_id=payload.session_id,
+            ),
+            current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))

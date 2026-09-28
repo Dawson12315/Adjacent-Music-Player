@@ -62,6 +62,10 @@ def _request_lastfm(params: dict) -> Dict:
         logger.warning("Last.fm lookup failed: response was not valid JSON")
         return {"success": False, "tags": []}
 
+    if response.status_code == 429 or data.get("error") == 29:
+        logger.warning("Last.fm rate limit reached: %s", data.get("message"))
+        return {"success": False, "tags": [], "rate_limited": True}
+
     if "error" in data:
         logger.warning(f"Last.fm API error {data.get('error')}: {data.get('message')}")
         return {"success": False, "tags": []}

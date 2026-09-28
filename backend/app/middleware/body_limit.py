@@ -28,7 +28,7 @@ DEFAULT_MAX_BODY_BYTES = 1 * 1024 * 1024
 
 # Artwork uploads: the frontend sends original-resolution images, so this needs
 # real headroom while still bounding the damage.
-UPLOAD_MAX_BODY_BYTES = 20 * 1024 * 1024
+UPLOAD_MAX_BODY_BYTES = 8 * 1024 * 1024 + 64 * 1024
 
 # Endpoints whose bodies are file uploads rather than JSON.
 UPLOAD_PATH_MARKERS = ("/artwork",)

@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -14,15 +15,38 @@ logger = logging.getLogger(__name__)
 ROOT_ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(ROOT_ENV_PATH)
 
-EMAIL = os.getenv("MUSICBRAINZ_EMAIL", "unknown@example.com")
+EMAIL = (os.getenv("MUSICBRAINZ_EMAIL") or "").strip()
 
 MUSICBRAINZ_BASE_URL = "https://musicbrainz.org/ws/2"
-USER_AGENT = f"Adjacent/1.0 ({EMAIL})"
+# MusicBrainz asks for a real contact in the User-Agent and throttles or
+# blocks the placeholder ones. Without an address the automatic backfill
+# stays off (see musicbrainz_backfill) and the manual lookup says why.
+USER_AGENT = f"Adjacent/1.0 ({EMAIL or 'no-contact-configured'})"
 
 session = requests.Session()
 session.headers.update({
     "User-Agent": USER_AGENT,
 })
+
+# One request per second, shared by the backfill thread and the manual
+# lookup: the three searches a track can take used to go out back to back.
+MIN_REQUEST_INTERVAL_SECONDS = 1.1
+_rate_limit_lock = threading.Lock()
+_last_request_at = 0.0
+
+
+def contact_configured() -> bool:
+    return bool(EMAIL) and "example.com" not in EMAIL
+
+
+def _respect_rate_limit() -> None:
+    global _last_request_at
+
+    with _rate_limit_lock:
+        elapsed = time.monotonic() - _last_request_at
+        if elapsed < MIN_REQUEST_INTERVAL_SECONDS:
+            time.sleep(MIN_REQUEST_INTERVAL_SECONDS - elapsed)
+        _last_request_at = time.monotonic()
 
 
 def _normalize(value: Optional[str]) -> str:
@@ -84,6 +108,7 @@ def _search_recordings(query: str) -> list[dict]:
 
     for attempt in range(1, attempts + 1):
         try:
+            _respect_rate_limit()
             response = session.get(
                 f"{MUSICBRAINZ_BASE_URL}/recording",
                 params={

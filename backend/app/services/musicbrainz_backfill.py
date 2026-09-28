@@ -3,9 +3,15 @@ import time
 from typing import Optional
 
 from app.db import SessionLocal
+from datetime import datetime, timedelta
+
 from app.models.track import Track
 from app.services import maintenance_mode
-from app.services.musicbrainz import find_recording_mbid
+from app.services.musicbrainz import contact_configured, find_recording_mbid
+
+# A track that did not match is tried again after this long, not on the next
+# pass: MusicBrainz gains recordings, but not every minute.
+RETRY_UNMATCHED_AFTER = timedelta(days=30)
 
 
 
@@ -22,12 +28,32 @@ def backfill_musicbrainz_recording_ids(
     batch_delay_seconds: float = DEFAULT_BATCH_DELAY_SECONDS,
     max_batches: Optional[int] = None,
 ) -> dict:
+    if not contact_configured():
+        # MusicBrainz asks for a real contact address and throttles the
+        # placeholder; running without one would get the operator's address
+        # blocked. Say so once, loudly, and do nothing.
+        logger.warning(
+            "MusicBrainz backfill skipped: set MUSICBRAINZ_EMAIL to a real "
+            "address to enable recording lookups."
+        )
+        return {
+            "batches_processed": 0,
+            "total_checked": 0,
+            "total_matched": 0,
+            "total_missing": 0,
+            "skipped": "no_contact",
+        }
+
     db = SessionLocal()
 
     total_checked = 0
     total_matched = 0
     total_missing = 0
     batch_number = 0
+    # A cursor rather than a re-selection: re-running "the first fifty with
+    # no id" forever was the loop that never ended.
+    last_id = 0
+    retry_before = datetime.utcnow() - RETRY_UNMATCHED_AFTER
 
     try:
         while True:
@@ -36,13 +62,21 @@ def backfill_musicbrainz_recording_ids(
 
             tracks = (
                 db.query(Track)
-                .filter(Track.musicbrainz_recording_id.is_(None))
+                .filter(
+                    Track.musicbrainz_recording_id.is_(None),
+                    Track.id > last_id,
+                    (Track.musicbrainz_checked_at.is_(None))
+                    | (Track.musicbrainz_checked_at < retry_before),
+                )
+                .order_by(Track.id.asc())
                 .limit(batch_size)
                 .all()
             )
 
             if not tracks:
                 break
+
+            last_id = tracks[-1].id
 
             batch_number += 1
             batch_matched = 0
@@ -70,6 +104,8 @@ def backfill_musicbrainz_recording_ids(
                     raw_title=track.raw_title,
                     raw_artist=track.raw_artist,
                 )
+
+                track.musicbrainz_checked_at = datetime.utcnow()
 
                 if mbid:
                     track.musicbrainz_recording_id = mbid

@@ -12,10 +12,13 @@ import logging
 import re
 import shutil
 import threading
+import time
 from pathlib import Path
 
 from app.db import SessionLocal
 from app.models.track import Track
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +40,19 @@ _sweep_thread: threading.Thread | None = None
 # lives. Past this budget the least-recently-used entries are evicted;
 # eviction is safe by construction because a missing cache entry is simply
 # rebuilt on the next request.
-CACHE_BUDGET_BYTES = 20 * 1024 * 1024 * 1024  # 20 GB across both caches
+CACHE_BUDGET_BYTES = int(settings.stream_cache_budget_gb * 1024 * 1024 * 1024)
 
 # Below this much free space on the data volume, refuse new transcodes rather
 # than fill the disk out from under SQLite/Postgres.
-MIN_FREE_DISK_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
+MIN_FREE_DISK_BYTES = int(settings.min_free_disk_gb * 1024 * 1024 * 1024)
+
+# The budget used to be checked only by the nightly sweep, so a busy week of
+# listening could write the whole allowance and then some before 04:15. Now
+# every new entry asks for a check, which runs at most this often and off the
+# request thread (it stats every cache entry).
+BUDGET_CHECK_INTERVAL_SECONDS = 300
+_budget_check_guard = threading.Lock()
+_budget_checked_at = 0.0
 
 
 def clear_stream_caches() -> None:
@@ -148,6 +159,10 @@ def sweep_stream_caches() -> dict:
             shutil.rmtree(entry, ignore_errors=True)
             removed_dirs += 1
 
+    # Partial outputs an interrupted transcode left behind, old enough that
+    # no run can still be writing them.
+    removed_files += _remove_stale_partials()
+
     evicted = _enforce_cache_budget()
     removed_files += evicted["files"]
     removed_dirs += evicted["dirs"]
@@ -164,33 +179,64 @@ def sweep_stream_caches() -> dict:
     return result
 
 
+# Longer than ffmpeg is allowed to run; anything .tmp older than this is dead.
+STALE_PARTIAL_SECONDS = 15 * 60
+
+
+def _remove_stale_partials() -> int:
+    removed = 0
+
+    if not MOBILE_CACHE_DIR.exists():
+        return removed
+
+    cutoff = time.time() - STALE_PARTIAL_SECONDS
+
+    for entry in MOBILE_CACHE_DIR.iterdir():
+        if ".tmp" not in entry.name:
+            continue
+        try:
+            if entry.is_file() and entry.stat().st_mtime < cutoff:
+                entry.unlink()
+                removed += 1
+        except OSError:
+            continue
+
+    return removed
+
+
 def _cache_entries() -> list[tuple[float, int, Path, bool]]:
     """(atime, size, path, is_dir) for every cache entry, oldest use first."""
     entries: list[tuple[float, int, Path, bool]] = []
 
+    # mtime, not atime: the serving code bumps a cache file's mtime when it
+    # is played, whereas atime is frozen on the noatime mounts Docker volumes
+    # and NAS exports use — "least recently used" was creation order there.
     if MOBILE_CACHE_DIR.exists():
         for entry in MOBILE_CACHE_DIR.iterdir():
-            if not entry.is_file():
-                continue
             try:
                 stat = entry.stat()
             except OSError:
                 continue
-            entries.append((stat.st_atime, stat.st_size, entry, False))
+            if not entry.is_file():
+                continue
+            entries.append((stat.st_mtime, stat.st_size, entry, False))
 
     if HLS_CACHE_ROOT.exists():
         for entry in HLS_CACHE_ROOT.iterdir():
             if not entry.is_dir():
                 continue
             try:
-                children = [c for c in entry.rglob("*") if c.is_file()]
-                size = sum(c.stat().st_size for c in children)
-                # A directory's own atime does not move when its segments are
-                # read, so use the newest child access as the entry's age.
-                atime = max((c.stat().st_atime for c in children), default=0.0)
+                size = 0
+                newest = 0.0
+                for child in entry.rglob("*"):
+                    child_stat = child.stat()
+                    if not child.is_file():
+                        continue
+                    size += child_stat.st_size
+                    newest = max(newest, child_stat.st_mtime)
             except OSError:
                 continue
-            entries.append((atime, size, entry, True))
+            entries.append((newest, size, entry, True))
 
     entries.sort(key=lambda item: item[0])
     return entries
@@ -241,6 +287,40 @@ def has_room_for_transcode() -> bool:
         return True
 
     return usage.free >= MIN_FREE_DISK_BYTES
+
+
+def has_room_for_upload(size_bytes: int) -> bool:
+    """The same floor for uploads, which share the volume with the database."""
+    try:
+        usage = shutil.disk_usage(MOBILE_CACHE_DIR.parent)
+    except OSError:
+        return True
+
+    return usage.free - size_bytes >= MIN_FREE_DISK_BYTES
+
+
+def schedule_budget_check() -> bool:
+    """Enforce the budget soon, in the background, unless done recently."""
+    global _budget_checked_at
+
+    with _budget_check_guard:
+        now = time.monotonic()
+
+        if now - _budget_checked_at < BUDGET_CHECK_INTERVAL_SECONDS:
+            return False
+
+        _budget_checked_at = now
+
+    def _run():
+        try:
+            evicted = _enforce_cache_budget()
+            if evicted["files"] or evicted["dirs"]:
+                logger.info("Cache budget check evicted %s", evicted)
+        except Exception:  # noqa: BLE001
+            logger.exception("Cache budget check failed")
+
+    threading.Thread(target=_run, name="cache-budget-check", daemon=True).start()
+    return True
 
 
 def start_stream_cache_sweep_background() -> bool:

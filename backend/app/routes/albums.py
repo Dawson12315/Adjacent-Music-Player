@@ -7,6 +7,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
+from app.utils.images import read_validated_image
+from app.services.stream_cache_maintenance import has_room_for_upload
 from app.dependencies.auth import get_current_user, require_admin
 from app.models.album_artwork import AlbumArtwork
 from app.models.track import Track
@@ -189,20 +191,19 @@ def upload_album_artwork(
     if not album_key:
         raise HTTPException(status_code=400, detail="Invalid album name")
 
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File must be an image")
+    # The bytes decide, not the declared type or the filename.
+    image_bytes, extension = read_validated_image(file)
+
+    if not has_room_for_upload(len(image_bytes)):
+        raise HTTPException(status_code=507, detail="The server is out of disk space.")
 
     os.makedirs(ALBUM_ARTWORK_DIR, exist_ok=True)
-
-    extension = os.path.splitext(file.filename or "")[1].lower()
-    if extension not in ALLOWED_IMAGE_EXTENSIONS:
-        extension = ".jpg"
 
     filename = f"{uuid4().hex}{extension}"
     file_path = os.path.join(ALBUM_ARTWORK_DIR, filename)
 
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(image_bytes)
 
     artwork_path = f"/uploads/albums/{filename}"
 

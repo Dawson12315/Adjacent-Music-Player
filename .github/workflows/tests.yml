@@ -76,6 +76,12 @@ jobs:
 
       - run: pip install -r requirements.txt -r requirements-dev.txt
 
+      # ecdsa's advisory (a timing side channel in a library python-jose
+      # pulls in) has no fixed release; the JWTs here are HMAC-signed and
+      # never touch it. Everything else must be clean.
+      - name: Audit pinned dependencies
+        run: pip-audit -r requirements.txt --ignore-vuln PYSEC-2026-1325
+
       - name: Run suite (${{ matrix.database }})
         env:
           DATABASE_URL: ${{ matrix.database_url }}

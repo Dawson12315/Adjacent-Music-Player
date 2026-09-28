@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Dict, List
 
 from app.models.app_setting import AppSetting
@@ -70,6 +71,19 @@ def enrich_track_lastfm_tags(db, track_id: int) -> Dict:
     lastfm_source = "track"
 
     if not lastfm_result["success"]:
+        if lastfm_result.get("rate_limited"):
+            return {
+                "success": False,
+                "reason": "rate_limited",
+                "track_id": track.id,
+                "added_genres": [],
+            }
+
+        # Tried, and not from a throttle: remembered, so the nightly run
+        # moves on to the next track instead of the same fifty for ever.
+        track.lastfm_checked_at = datetime.utcnow()
+        db.commit()
+
         return {
             "success": False,
             "reason": "lastfm_lookup_failed",

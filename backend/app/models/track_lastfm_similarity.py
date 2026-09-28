@@ -10,8 +10,12 @@ class TrackLastfmSimilarity(Base):
     id = Column(Integer, primary_key=True, index=True)
 
     # Local track references (preferred for fast joins later)
-    source_track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False, index=True)
-    similar_track_id = Column(Integer, ForeignKey("tracks.id"), nullable=True, index=True)
+    source_track_id = Column(
+        Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    similar_track_id = Column(
+        Integer, ForeignKey("tracks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     # Raw Last.fm identity (used before resolution OR as fallback)
     source_track_name = Column(String, nullable=False)

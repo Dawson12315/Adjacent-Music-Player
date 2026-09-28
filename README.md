@@ -142,6 +142,11 @@ services:
       timeout: 5s
       start_period: 20s
       retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   frontend:
@@ -155,6 +160,11 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
 networks:
@@ -243,6 +253,11 @@ services:
       timeout: 5s
       start_period: 20s
       retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   frontend:
@@ -256,6 +271,11 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
 networks:
@@ -322,6 +342,11 @@ services:
       timeout: 5s
       start_period: 20s
       retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   frontend:
@@ -335,6 +360,11 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
 networks:
@@ -379,6 +409,26 @@ fix is the `chown` from your platform's section.
 
 ---
 
+### Operating notes
+
+- **One process.** The backend must run as a single uvicorn process: the login
+  rate limiter, the migration's read-only guard and the nightly jobs live in
+  memory. Do not add `--workers`; the image does not, and the server logs an
+  error at boot if it sees `WEB_CONCURRENCY` above one.
+- **Logs.** The compose file caps container logs at three 10 MB files. If you
+  run the image some other way, set `--log-opt max-size=10m --log-opt
+  max-file=3`, or the Docker log grows for ever. The backend keeps no access
+  log; `/api/health` tells you whether the library, the database and ffmpeg
+  are all there, and says `degraded` with a 503 when one is not.
+- **Several addresses.** `FRONTEND_ORIGIN` takes a comma-separated list when
+  the same install is opened by more than one name —
+  `FRONTEND_ORIGIN=http://192.168.1.50:5173,http://nas.local:5173`.
+- **Cache size.** The transcode caches are bounded to `STREAM_CACHE_BUDGET_GB`
+  (default 20) across HLS and mobile renditions, evicting the least recently
+  played entries, and transcodes and uploads are refused when the data
+  volume has less than `MIN_FREE_DISK_GB` (default 2) free. Lower both on a
+  small boot SSD.
+
 ## Going multi-user (PostgreSQL)
 
 Adjacent starts in single-user mode on SQLite — zero setup, perfect for one
@@ -411,6 +461,11 @@ database password, and `docker compose up -d`:
     #   ports: ["127.0.0.1:5432:5432"]
     # Loopback-bound. A bare "5432:5432" publishes your database to every
     # interface on the machine.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 ```
 
@@ -462,7 +517,9 @@ recommendations against the shared library.
   box saying so.
 - Already migrated with `"5432:5432"`? Change it to `"127.0.0.1:5432:5432"`,
   and if you entered a LAN IP as the database host, update
-  `data/database.json` to say `localhost` before restarting.
+  `data/database.json` to say `adjacent-postgres` (the container name, reachable
+  over `adjacent-net`) before restarting. Not `localhost`: inside the backend
+  container that is the backend itself.
 - If Postgres is ever unreachable at boot, the backend retries for ~30
   seconds, then exits with a log message explaining exactly that — it will
   not silently start empty.
@@ -493,10 +550,13 @@ In your backend environment:
       # Trust forwarded client IPs ONLY from your proxy's address, so the login
       # rate limiter sees real clients instead of the proxy. Never "*".
       #
-      # 127.0.0.1 is right only for a proxy running on the host. A proxy in a
-      # container has its own address — see the Nginx Proxy Manager section for
-      # how to find it.
-      - FORWARDED_ALLOW_IPS=127.0.0.1
+      # A proxy running on the host does NOT arrive as 127.0.0.1: Docker
+      # rewrites its traffic, so the backend sees the bridge network's gateway.
+      # Find it with
+      #   docker network inspect adjacent-net --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'
+      # and put that here (or the whole subnet). A proxy in a container has
+      # its own address — see the Nginx Proxy Manager section.
+      - FORWARDED_ALLOW_IPS=172.18.0.1
 ```
 
 and in the frontend environment:

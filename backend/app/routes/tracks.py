@@ -4,9 +4,12 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
 import mimetypes
+import os
+from email.utils import formatdate
 import re
 import subprocess
 import threading
+import time
 import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -174,6 +177,36 @@ MOBILE_STREAM_PROFILES = {
 
 
 # Mobile stream cache locking
+# Content types the players actually accept. `mimetypes.guess_type` answers
+# `audio/mp4a-latm` for .m4a and `audio/x-flac` for .flac, and AVFoundation —
+# iOS and Safari — refuses both outright; the stream URLs carry no extension,
+# so the header is all a player has to go on.
+MEDIA_TYPES_BY_EXTENSION = {
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".mp4": "audio/mp4",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".wav": "audio/wav",
+    ".wave": "audio/wav",
+    ".aif": "audio/aiff",
+    ".aiff": "audio/aiff",
+    ".wma": "audio/x-ms-wma",
+}
+
+
+def media_type_for(file_path: Path) -> str:
+    known = MEDIA_TYPES_BY_EXTENSION.get(file_path.suffix.lower())
+    if known:
+        return known
+
+    guessed, _ = mimetypes.guess_type(str(file_path))
+    return guessed or "application/octet-stream"
+
+
 MOBILE_CACHE_LOCKS: dict[str, threading.Lock] = {}
 MOBILE_CACHE_LOCKS_GUARD = threading.Lock()
 MOBILE_CACHE_LOCKS_MAX = 512
@@ -250,6 +283,17 @@ def inflight_build(key: str):
 
 # HLS streaming constants
 HLS_SEGMENT_DURATION_SECONDS = 4
+# ffmpeg appends this when an event-style playlist is finished.
+HLS_END_TAG = "#EXT-X-ENDLIST"
+# Segments that must exist before a growing playlist is handed to a player.
+HLS_MIN_SEGMENTS_TO_START = 2
+# How long the first request waits for those segments before giving up.
+HLS_START_WAIT_SECONDS = 30
+
+# Builds in progress, keyed like the cache lock: the request that started a
+# build and the requests that arrive during it all wait on the same event.
+_HLS_BUILDS: dict[str, "threading.Event"] = {}
+_HLS_BUILDS_GUARD = threading.Lock()
 HLS_CACHE_ROOT = Path("data/hls_cache")
 # Matches ffmpeg's -hls_segment_filename output plus the playlist itself.
 HLS_SEGMENT_NAME_PATTERN = re.compile(r"segment_\d{5}\.ts|index\.m3u8")
@@ -367,6 +411,20 @@ def get_hls_ffmpeg_args(profile: dict) -> list[str]:
     return cleaned_args
 
 
+def _touch_cache_entry(file_path: Path) -> None:
+    """Bump the mtime of a cache file (never a library file) once an hour."""
+    try:
+        resolved = file_path.resolve()
+        cache_root = Path("data").resolve()
+        if cache_root not in resolved.parents:
+            return
+        now = time.time()
+        if now - resolved.stat().st_mtime > 3600:
+            os.utime(resolved, (now, now))
+    except OSError:
+        pass
+
+
 def iter_file_range(file_path: Path, start: int, end: int, chunk_size: int = 256 * 1024):
     with file_path.open("rb") as file:
         file.seek(start)
@@ -389,14 +447,42 @@ def range_file_response(
     filename: str,
     cache_seconds: int = 86400,
 ):
-    file_size = file_path.stat().st_size
+    stat = file_path.stat()
+    file_size = stat.st_size
     range_header = request.headers.get("range")
+
+    # Mark the entry as used. Eviction orders by this, not by atime, which
+    # Docker volumes and NAS exports leave frozen under noatime.
+    _touch_cache_entry(file_path)
+
+    # A validator, so a client that cached half of one rendition cannot splice
+    # bytes from another after the source was re-tagged: the fingerprint is
+    # in the cache file's name, so size + mtime is the whole identity here.
+    etag = f'"{stat.st_size:x}-{stat.st_mtime_ns:x}"'
+    last_modified = formatdate(stat.st_mtime, usegmt=True)
 
     base_headers = {
         "Accept-Ranges": "bytes",
-        "Cache-Control": f"public, max-age={cache_seconds}, no-transform",
+        # `private`: these responses are unlocked by a bearer token, and a
+        # shared cache on the path (a proxy with caching on, a carrier proxy
+        # over plain http) must not hand them to the next client.
+        "Cache-Control": f"private, max-age={cache_seconds}, no-transform",
+        "Vary": "X-Stream-Token",
         "Content-Disposition": f'inline; filename="{filename}"',
+        "ETag": etag,
+        "Last-Modified": last_modified,
     }
+
+    # If-Range: a range is only meaningful against the representation the
+    # client already holds; otherwise send the whole file (RFC 9110 §13.1.5).
+    if_range = request.headers.get("if-range")
+    if range_header and if_range and if_range.strip() not in (etag, last_modified):
+        range_header = None
+
+    # Multiple ranges are allowed to be ignored (RFC 9110 §14.2); a single
+    # 200 with the whole file is what every player copes with.
+    if range_header and "," in range_header:
+        range_header = None
 
     if not range_header:
         headers = {
@@ -420,7 +506,9 @@ def range_file_response(
     try:
         if start_text:
             start = int(start_text)
-            end = int(end_text) if end_text else file_size - 1
+            # An end past the file is satisfiable and means "to the end"
+            # (RFC 9110 §14.1.2); some players probe with a huge one.
+            end = min(int(end_text), file_size - 1) if end_text else file_size - 1
         else:
             suffix_length = int(end_text)
             start = max(file_size - suffix_length, 0)
@@ -428,7 +516,7 @@ def range_file_response(
     except ValueError:
         raise HTTPException(status_code=416, detail="Invalid range header")
 
-    if start < 0 or end >= file_size or start > end:
+    if start < 0 or start >= file_size or start > end:
         return StreamingResponse(
             iter(()),
             status_code=416,
@@ -486,8 +574,14 @@ def ensure_mobile_stream_cache(
         if is_cache_valid():
             return cached_file_path
 
-        if temp_file_path.exists():
-            temp_file_path.unlink()
+        # Partials from earlier runs, each named with its own uuid: a restart
+        # mid-transcode left them behind for ever, and the sweeper counted
+        # them as valid entries because their identity was current.
+        for stale in cache_dir.glob(f"{cache_basename}_*.tmp*"):
+            try:
+                stale.unlink()
+            except OSError:
+                pass
 
         ffmpeg_command = [
             "ffmpeg",
@@ -549,16 +643,103 @@ def ensure_mobile_stream_cache(
                 detail="Mobile stream cache file was not created",
             )
 
+    from app.services.stream_cache_maintenance import schedule_budget_check
+
+    schedule_budget_check()
+
     return cached_file_path
 
 
 # HLS streaming cache helper
+def _hls_segment_count(track_dir: Path) -> int:
+    try:
+        return sum(1 for entry in track_dir.iterdir() if entry.suffix == ".ts")
+    except OSError:
+        return 0
+
+
+def _hls_playlist_complete(playlist_path: Path) -> bool:
+    try:
+        return playlist_path.exists() and HLS_END_TAG in playlist_path.read_text()
+    except OSError:
+        return False
+
+
+def _run_hls_build(
+    track_id: int,
+    quality: str,
+    ffmpeg_command: list[str],
+    track_dir: Path,
+    playlist_path: Path,
+    done: "threading.Event",
+    cache_key: str,
+):
+    """The ffmpeg run, off the request thread.
+
+    Holds a transcode slot for its whole duration, exactly as the blocking
+    build did; what changed is that the first request no longer waits for it
+    to finish. A failure or a timeout removes the directory, so the next poll
+    for the playlist is a 404 and the player falls into its own recovery.
+    """
+    try:
+        with transcode_slot(f"HLS build of track {track_id} ({quality})"):
+            try:
+                result = subprocess.run(
+                    ffmpeg_command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=FFMPEG_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired:
+                shutil.rmtree(track_dir, ignore_errors=True)
+                logger.error("ffmpeg timed out building HLS for track %s (%s)", track_id, quality)
+                return
+
+        if result.returncode != 0 or not _hls_playlist_complete(playlist_path):
+            shutil.rmtree(track_dir, ignore_errors=True)
+            # ffmpeg stderr contains absolute library paths; log it, don't return it.
+            logger.error(
+                "HLS generation failed for track %s (%s): %s",
+                track_id,
+                quality,
+                (result.stderr or "").strip(),
+            )
+            return
+
+        from app.services.stream_cache_maintenance import schedule_budget_check
+
+        schedule_budget_check()
+    except HTTPException as error:
+        # No slot, or no disk: nothing was written.
+        shutil.rmtree(track_dir, ignore_errors=True)
+        logger.warning("HLS build of track %s (%s) refused: %s", track_id, quality, error.detail)
+    except Exception:
+        shutil.rmtree(track_dir, ignore_errors=True)
+        logger.exception("HLS build of track %s (%s) crashed", track_id, quality)
+    finally:
+        with _HLS_BUILDS_GUARD:
+            _HLS_BUILDS.pop(cache_key, None)
+        done.set()
+
+
 def ensure_hls_stream_cache(
     track: Track,
     file_path: Path,
     profile: dict,
     quality: str,
+    wait_for_completion: bool = False,
 ):
+    """The HLS playlist for this track and quality, building it if needed.
+
+    The playlist is served while it grows. ffmpeg writes the first segment
+    within a second of starting; the old code waited for the whole track to
+    finish before answering, which on a NAS meant a minute or two of silence
+    after pressing play and a 504 for anything over an hour. Now the playlist
+    comes back as soon as a couple of segments exist, without an end tag, and
+    the player re-polls it until ffmpeg appends one. `wait_for_completion` is
+    for the explicit prepare endpoints.
+    """
     if profile.get("passthrough"):
         raise HTTPException(
             status_code=400,
@@ -575,92 +756,86 @@ def ensure_hls_stream_cache(
     playlist_path = paths["playlist_path"]
     segment_pattern = paths["segment_pattern"]
 
-    # Source identity lives in the directory name; existence is validity.
-    def is_cache_valid() -> bool:
-        return playlist_path.exists() and playlist_path.stat().st_size > 0
-
-    if is_cache_valid():
+    if _hls_playlist_complete(playlist_path):
         return playlist_path
 
     with cache_lock:
-        if is_cache_valid():
+        if _hls_playlist_complete(playlist_path):
             return playlist_path
 
-        if track_dir.exists():
-            shutil.rmtree(track_dir, ignore_errors=True)
+        with _HLS_BUILDS_GUARD:
+            done = _HLS_BUILDS.get(cache_key)
 
-        track_dir.mkdir(parents=True, exist_ok=True)
-
-        ffmpeg_command = [
-            "ffmpeg",
-            "-y",
-            "-nostdin",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            str(file_path),
-            *get_hls_ffmpeg_args(profile),
-            "-f",
-            "hls",
-            "-hls_time",
-            str(HLS_SEGMENT_DURATION_SECONDS),
-            "-hls_playlist_type",
-            "vod",
-            "-hls_segment_filename",
-            str(segment_pattern),
-            str(playlist_path),
-        ]
-
-        logger.info("Generating HLS stream for track %s (%s)", track.id, quality)
-
-        with transcode_slot(f"HLS build of track {track.id} ({quality})"):
-            try:
-                result = subprocess.run(
-                    ffmpeg_command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    timeout=FFMPEG_TIMEOUT_SECONDS,
-                )
-            except subprocess.TimeoutExpired:
+        if done is None:
+            # Whatever is there is a partial from an interrupted run.
+            if track_dir.exists():
                 shutil.rmtree(track_dir, ignore_errors=True)
 
-                logger.error(
-                    "ffmpeg timed out building HLS for track %s (%s)",
-                    track.id,
-                    quality,
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                    detail="Audio conversion timed out.",
-                )
+            track_dir.mkdir(parents=True, exist_ok=True)
 
-        if result.returncode != 0:
-            shutil.rmtree(track_dir, ignore_errors=True)
+            ffmpeg_command = [
+                "ffmpeg",
+                "-y",
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(file_path),
+                *get_hls_ffmpeg_args(profile),
+                "-f",
+                "hls",
+                "-hls_time",
+                str(HLS_SEGMENT_DURATION_SECONDS),
+                # Event, not VOD: the playlist is appended to as segments land
+                # and only gains its end tag when ffmpeg finishes.
+                "-hls_playlist_type",
+                "event",
+                "-hls_segment_filename",
+                str(segment_pattern),
+                str(playlist_path),
+            ]
 
-            # ffmpeg stderr contains absolute library paths; log it, don't return it.
-            logger.error(
-                "HLS generation failed for track %s (%s): %s",
-                track.id,
-                quality,
-                result.stderr.strip(),
-            )
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to create HLS stream",
-            )
+            logger.info("Generating HLS stream for track %s (%s)", track.id, quality)
 
-        if not playlist_path.exists():
-            raise HTTPException(
-                status_code=500,
-                detail="HLS playlist generation failed",
-            )
+            done = threading.Event()
+            with _HLS_BUILDS_GUARD:
+                _HLS_BUILDS[cache_key] = done
 
-    return playlist_path
+            threading.Thread(
+                target=_run_hls_build,
+                args=(track.id, quality, ffmpeg_command, track_dir, playlist_path, done, cache_key),
+                name=f"hls-build-{track.id}-{quality}",
+                daemon=True,
+            ).start()
 
+    if wait_for_completion:
+        done.wait(timeout=FFMPEG_TIMEOUT_SECONDS + TRANSCODE_WAIT_TIMEOUT_SECONDS + 5)
+        if not _hls_playlist_complete(playlist_path):
+            raise HTTPException(status_code=500, detail="Failed to create HLS stream")
+        return playlist_path
 
-# --- HLS helper functions ---
+    # Enough to start: a couple of segments on disk and the playlist listing them.
+    deadline = time.monotonic() + HLS_START_WAIT_SECONDS
+
+    while time.monotonic() < deadline:
+        if _hls_playlist_complete(playlist_path):
+            return playlist_path
+
+        if playlist_path.exists() and _hls_segment_count(track_dir) >= HLS_MIN_SEGMENTS_TO_START:
+            return playlist_path
+
+        if done.is_set():
+            # Finished without a playlist: the build failed and cleaned up.
+            raise HTTPException(status_code=500, detail="Failed to create HLS stream")
+
+        done.wait(timeout=0.2)
+
+    raise HTTPException(
+        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+        detail="Audio conversion is taking too long to start.",
+    )
+
 
 def build_hls_variant_playlist_url(
     track_id: int,
@@ -746,6 +921,55 @@ def prepare_hls_variants_in_background(track_id: int, file_path_text: str):
                     track_id,
                     quality,
                 )
+
+
+# Last.fm being unreachable is not the client's mistake. A 400 here made the
+# phone's outbox drop the scrobble for good; a 502 keeps it for the retry.
+_LASTFM_UPSTREAM_ERRORS = {"request_failed", "invalid_json"}
+
+
+def raise_lastfm_failure(result: dict, fallback: str):
+    error = result.get("error") or fallback
+
+    if error in _LASTFM_UPSTREAM_ERRORS:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Last.fm did not answer. The scrobble will be retried.",
+        )
+
+    raise HTTPException(status_code=400, detail=error)
+
+
+def replace_primary_artist_credit(db: Session, track: Track, new_artist: str | None) -> None:
+    """Point the track's primary credit at `new_artist`, keeping the rest."""
+    from app.models.track_artist import TrackArtist
+
+    if not new_artist:
+        return
+
+    credits = (
+        db.query(TrackArtist)
+        .filter(TrackArtist.track_id == track.id)
+        .order_by(TrackArtist.position.asc(), TrackArtist.id.asc())
+        .all()
+    )
+
+    others = [credit for credit in credits if credit.position != 0]
+    primary = next((credit for credit in credits if credit.position == 0), None)
+
+    # The new name may already be a secondary credit; it moves to the front.
+    duplicate = next(
+        (credit for credit in others if credit.artist_name.casefold() == new_artist.casefold()),
+        None,
+    )
+    if duplicate is not None:
+        db.delete(duplicate)
+        db.flush()
+
+    if primary is None:
+        db.add(TrackArtist(track_id=track.id, artist_name=new_artist, position=0))
+    else:
+        primary.artist_name = new_artist
 
 
 def create_stream_token(track_id: int, user_id: int) -> str:
@@ -993,17 +1217,21 @@ def stream_track(
 
     file_path = Path(track.file_path)
 
+    # The lookup needed the connection for a millisecond; the body can take
+    # minutes. FastAPI only closes the dependency after the response has been
+    # sent, so sixteen slow downloads used to hold the whole pool and every
+    # other endpoint answered 500 for thirty seconds at a time.
+    db.close()
+
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    media_type, _ = mimetypes.guess_type(str(file_path))
-    if media_type is None:
-        media_type = "application/octet-stream"
-
     return FileResponse(
         path=file_path,
-        media_type=media_type,
+        media_type=media_type_for(file_path),
         filename=file_path.name,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "private, max-age=3600, no-transform"},
     )
 
 
@@ -1093,6 +1321,12 @@ def mobile_stream_track(
         raise HTTPException(status_code=404, detail="Track not found")
 
     file_path = Path(track.file_path)
+    track_id_value = track.id
+
+    # Nothing below needs the database: a transcode can take a minute and
+    # the body longer, and neither may hold a pooled connection (see
+    # stream_track).
+    db.close()
 
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
@@ -1100,13 +1334,11 @@ def mobile_stream_track(
     source_extension = file_path.suffix.lower()
 
     if profile.get("passthrough"):
-        media_type, _ = mimetypes.guess_type(str(file_path))
-    
         return range_file_response(
             request=request,
             file_path=file_path,
-            media_type=media_type or "application/octet-stream",
-            filename=f"track-{track.id}{source_extension}",
+            media_type=media_type_for(file_path),
+            filename=f"track-{track_id_value}{source_extension}",
         )
 
     output_extension = profile["extension"]
@@ -1121,7 +1353,7 @@ def mobile_stream_track(
         request=request,
         file_path=cached_file_path,
         media_type=profile["media_type"],
-        filename=f"track-{track.id}{output_extension}",
+        filename=f"track-{track_id_value}{output_extension}",
     )
 
 
@@ -1154,6 +1386,8 @@ def get_hls_master_playlist(
 
     if not startup_profile or startup_profile.get("passthrough"):
         raise HTTPException(status_code=500, detail="Invalid HLS startup quality")
+
+    db.close()
 
     ensure_hls_stream_cache(
         track=track,
@@ -1198,7 +1432,7 @@ def get_hls_master_playlist(
     return Response(
         content="\n".join(lines) + "\n",
         media_type="application/vnd.apple.mpegurl",
-        headers={"Cache-Control": "public, max-age=60"},
+        headers={"Cache-Control": "private, max-age=60", "Vary": "X-Stream-Token"},
     )
 
 
@@ -1230,6 +1464,9 @@ def get_hls_quality_playlist(
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
+    track_id_value = track.id
+    db.close()
+
     playlist_path = ensure_hls_stream_cache(
         track=track,
         file_path=file_path,
@@ -1240,11 +1477,12 @@ def get_hls_quality_playlist(
     if quality == HLS_DEFAULT_QUALITY and not fast_start_only:
         threading.Thread(
             target=prepare_hls_variants_in_background,
-            args=(track.id, str(file_path)),
+            args=(track_id_value, str(file_path)),
             daemon=True,
         ).start()
 
     playlist_text = playlist_path.read_text()
+    complete = HLS_END_TAG in playlist_text
     rewritten_lines = []
 
     for line in playlist_text.splitlines():
@@ -1253,16 +1491,20 @@ def get_hls_quality_playlist(
         if stripped and not stripped.startswith("#"):
             segment_name = Path(stripped).name
             rewritten_lines.append(
-                f"/api/tracks/{track.id}/hls/{quality}/{segment_name}?token={token}"
+                f"/api/tracks/{track_id_value}/hls/{quality}/{segment_name}?token={token}"
                 + ("&fast_start=1" if fast_start_only else "")
             )
         else:
             rewritten_lines.append(line)
 
+    # A playlist still growing is re-fetched by the player every few
+    # seconds; it must not be served from any cache in between.
+    cache_control = "private, max-age=60" if complete else "no-store"
+
     return Response(
         content="\n".join(rewritten_lines) + "\n",
         media_type="application/vnd.apple.mpegurl",
-        headers={"Cache-Control": "public, max-age=60"},
+        headers={"Cache-Control": cache_control, "Vary": "X-Stream-Token"},
     )
 
 
@@ -1297,6 +1539,7 @@ def get_hls_segment(
         raise HTTPException(status_code=404, detail="Track not found")
 
     file_path = Path(track.file_path)
+    db.close()
 
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
@@ -1313,8 +1556,10 @@ def get_hls_segment(
         path=segment_path,
         media_type="video/mp2t",
         filename=segment_name,
+        content_disposition_type="inline",
         headers={
-            "Cache-Control": "public, max-age=86400",
+            "Cache-Control": "private, max-age=86400",
+            "Vary": "X-Stream-Token",
         },
     )
 
@@ -1437,7 +1682,7 @@ def fetch_musicbrainz_recording_id(
 def update_track_now_playing_on_lastfm(
     track_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     settings_row = db.query(AppSetting).first()
 
@@ -1470,7 +1715,7 @@ def update_track_now_playing_on_lastfm(
     )
 
     if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["error"] or "Last.fm now playing failed")
+        raise_lastfm_failure(result, "Last.fm now playing failed")
 
     return result
 
@@ -1479,7 +1724,7 @@ def update_track_now_playing_on_lastfm(
 def scrobble_track_to_lastfm(
     track_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     settings_row = db.query(AppSetting).first()
 
@@ -1512,7 +1757,7 @@ def scrobble_track_to_lastfm(
     )
 
     if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["error"] or "Last.fm scrobble failed")
+        raise_lastfm_failure(result, "Last.fm scrobble failed")
 
     return result
 
@@ -1633,8 +1878,14 @@ def update_track(
         raise HTTPException(status_code=404, detail="Track not found")
 
     track.title = payload.title
-    track.artist = payload.artist
     track.album = payload.album
+
+    if payload.artist != track.artist:
+        track.artist = payload.artist
+        # The artist index and artist pages are built from track_artists,
+        # not from tracks.artist; editing one without the other left the
+        # old name in the index and the new one on the track.
+        replace_primary_artist_credit(db, track, payload.artist)
 
     if payload.genres is not None:
         normalized_genres = normalize_genre_list(", ".join(payload.genres))
@@ -1654,6 +1905,7 @@ def update_track(
             )
 
     db.commit()
+    invalidate_library_caches()
 
     track = (
         db.query(Track)

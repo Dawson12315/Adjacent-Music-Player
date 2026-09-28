@@ -1,3 +1,5 @@
+import time
+import threading
 import re
 from typing import Dict, Any
 
@@ -33,6 +35,46 @@ def clean_lastfm_track_lookup_title(title: str) -> str:
 
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip()
+
+
+# The (artist, title) → id map for the whole library, built once and reused
+# for the run: rebuilding it per track cost a fifth of a second and gigabytes
+# of churn over a night on a large library. Invalidated with the library.
+_LOCAL_LOOKUP_GUARD = threading.Lock()
+_LOCAL_LOOKUP: dict | None = None
+_LOCAL_LOOKUP_BUILT_AT = 0.0
+LOCAL_LOOKUP_TTL_SECONDS = 15 * 60
+
+
+def get_local_track_lookup(db) -> dict:
+    global _LOCAL_LOOKUP, _LOCAL_LOOKUP_BUILT_AT
+
+    with _LOCAL_LOOKUP_GUARD:
+        fresh = _LOCAL_LOOKUP is not None and (
+            time.monotonic() - _LOCAL_LOOKUP_BUILT_AT < LOCAL_LOOKUP_TTL_SECONDS
+        )
+        if fresh:
+            return _LOCAL_LOOKUP
+
+        rows = (
+            db.query(Track.id, Track.artist, Track.title)
+            .filter(Track.artist.isnot(None), Track.title.isnot(None))
+            .all()
+        )
+        _LOCAL_LOOKUP = {
+            build_track_key(artist, title): track_id
+            for track_id, artist, title in rows
+            if artist and title
+        }
+        _LOCAL_LOOKUP_BUILT_AT = time.monotonic()
+        return _LOCAL_LOOKUP
+
+
+def invalidate_local_track_lookup() -> None:
+    global _LOCAL_LOOKUP
+
+    with _LOCAL_LOOKUP_GUARD:
+        _LOCAL_LOOKUP = None
 
 
 def ingest_similar_tracks_for_track(
@@ -96,17 +138,7 @@ def ingest_similar_tracks_for_track(
     stored_rows = []
     seen_similar_keys: set[str] = set()
 
-    local_tracks = (
-        db.query(Track)
-        .filter(Track.artist.isnot(None), Track.title.isnot(None))
-        .all()
-    )
-
-    local_track_lookup = {
-        build_track_key(candidate.artist, candidate.title): candidate.id
-        for candidate in local_tracks
-        if candidate.artist and candidate.title
-    }
+    local_track_lookup = get_local_track_lookup(db)
 
     for item in lastfm_result["tracks"]:
         similar_track_name = item.get("name")

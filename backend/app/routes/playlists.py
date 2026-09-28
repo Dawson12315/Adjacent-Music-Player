@@ -2,11 +2,15 @@ import os
 import shutil
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
+from sqlalchemy import func
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import case
 
 from app.db import get_db
+from app.services.track_responses import build_track_responses
+from app.utils.images import read_validated_image
+from app.services.stream_cache_maintenance import has_room_for_upload
 from app.dependencies.auth import get_current_user, require_admin
 from app.models.playlist import Playlist
 from app.models.playlist_track import PlaylistTrack
@@ -33,7 +37,8 @@ from app.services.recommendations.playlist_recommender import (
 router = APIRouter()
 
 PLAYLIST_ARTWORK_DIR = "data/uploads/playlist_artwork"
-ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+MAX_PLAYLISTS_PER_USER = 500
 
 
 def _get_user_playlist_or_404(db: Session, playlist_id: int, user_id: int) -> Playlist:
@@ -114,6 +119,16 @@ def create_playlist(
 
     if existing:
         raise HTTPException(status_code=400, detail="Playlist already exists")
+
+    # A ceiling, so a loop of create-and-upload cannot fill the data volume
+    # one cover at a time.
+    owned = db.query(Playlist).filter(Playlist.user_id == current_user.id).count()
+
+    if owned >= MAX_PLAYLISTS_PER_USER:
+        raise HTTPException(
+            status_code=400,
+            detail=f"You already have {MAX_PLAYLISTS_PER_USER} playlists; remove one first.",
+        )
 
     playlist = Playlist(
         user_id=current_user.id,
@@ -285,20 +300,19 @@ def upload_playlist_artwork(
     if playlist.system_key:
         raise HTTPException(status_code=400, detail="System playlist artwork cannot be changed")
 
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File must be an image")
+    # The bytes decide, not the declared type or the filename.
+    image_bytes, extension = read_validated_image(file)
+
+    if not has_room_for_upload(len(image_bytes)):
+        raise HTTPException(status_code=507, detail="The server is out of disk space.")
 
     os.makedirs(PLAYLIST_ARTWORK_DIR, exist_ok=True)
-
-    extension = os.path.splitext(file.filename or "")[1].lower()
-    if extension not in ALLOWED_IMAGE_EXTENSIONS:
-        extension = ".png"
 
     filename = f"{uuid4().hex}{extension}"
     file_path = os.path.join(PLAYLIST_ARTWORK_DIR, filename)
 
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(image_bytes)
 
     if playlist.artwork_path:
         old_filename = os.path.basename(playlist.artwork_path)
@@ -386,24 +400,53 @@ def add_track_to_playlist(
 
 @router.get(
     "/playlists/{playlist_id}/tracks",
-    response_model=list[TrackResponse],
     tags=["playlists"],
 )
 def get_playlist_tracks(
     playlist_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    limit: int | None = Query(default=None, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
 ):
+    """The playlist's tracks in order — full rows, and pageable.
+
+    This used to return the ORM objects straight through the response model:
+    one lazy SELECT per row, and every row without artists, genres or
+    artwork, because the model has no such attributes. The phone then showed
+    generated tiles for every playlist row, and an edit opened from one
+    dropped every genre but the first. Every other track surface goes through
+    the batched builder; now this one does too. `limit`/`offset` are additive:
+    without them the whole list comes back as before.
+    """
     playlist = _get_user_playlist_or_404(db, playlist_id, current_user.id)
 
-    playlist_tracks = (
-        db.query(PlaylistTrack)
+    base = (
+        db.query(Track)
+        .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
         .filter(PlaylistTrack.playlist_id == playlist.id)
-        .order_by(PlaylistTrack.position.asc())
-        .all()
+        .options(selectinload(Track.track_artists), selectinload(Track.track_genres))
+        .order_by(PlaylistTrack.position.asc(), PlaylistTrack.id.asc())
     )
 
-    return [playlist_track.track for playlist_track in playlist_tracks]
+    if limit is None:
+        return build_track_responses(db, base.all())
+
+    total = (
+        db.query(func.count(PlaylistTrack.id))
+        .filter(PlaylistTrack.playlist_id == playlist.id)
+        .scalar()
+        or 0
+    )
+    items = build_track_responses(db, base.offset(offset).limit(limit).all())
+
+    return {
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(items) < total,
+    }
 
 
 @router.get(
