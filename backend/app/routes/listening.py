@@ -53,6 +53,7 @@ def track_play_start(
                 position_seconds=payload.position_seconds,
                 duration_seconds=payload.duration_seconds,
                 session_id=payload.session_id,
+                occurred_at=getattr(payload, "occurred_at", None),
             ),
             current_user.id,
         )
@@ -82,6 +83,7 @@ def track_play_complete(
                 position_seconds=payload.position_seconds,
                 duration_seconds=payload.duration_seconds,
                 session_id=payload.session_id,
+                occurred_at=getattr(payload, "occurred_at", None),
             ),
             current_user.id,
         )
@@ -111,6 +113,7 @@ def track_skip(
                 position_seconds=payload.position_seconds,
                 duration_seconds=payload.duration_seconds,
                 session_id=payload.session_id,
+                occurred_at=getattr(payload, "occurred_at", None),
             ),
             current_user.id,
         )
@@ -136,6 +139,7 @@ def like_track(
                 position_seconds=payload.position_seconds,
                 duration_seconds=payload.duration_seconds,
                 session_id=payload.session_id,
+                occurred_at=getattr(payload, "occurred_at", None),
             ),
             current_user.id,
         )
@@ -161,6 +165,7 @@ def unlike_track(
                 position_seconds=payload.position_seconds,
                 duration_seconds=payload.duration_seconds,
                 session_id=payload.session_id,
+                occurred_at=getattr(payload, "occurred_at", None),
             ),
             current_user.id,
         )

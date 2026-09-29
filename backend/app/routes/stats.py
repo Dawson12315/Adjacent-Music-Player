@@ -82,7 +82,9 @@ def get_most_skipped_tracks(
 ):
     rows = get_most_skipped_tracks_for_user(db, current_user.id, limit=limit)
 
-    return [build_track_response(track) for track in rows]
+    # Batched like the other lists; a name-only helper here was a NameError
+    # the moment a library had a skip to report.
+    return build_track_responses(db, rows)
 
 
 @router.get(

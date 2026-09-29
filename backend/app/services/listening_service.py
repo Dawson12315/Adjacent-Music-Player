@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -68,6 +68,16 @@ def _calculate_completion_ratio(
     return max(0.0, min(ratio, 1.0))
 
 
+def _later(current, candidate):
+    """Never move last-played backwards when an older event is replayed."""
+    if current is None:
+        return candidate
+    try:
+        return max(current, candidate)
+    except TypeError:
+        return candidate
+
+
 def record_listening_event(
     db: Session,
     payload: ListeningEventCreate,
@@ -76,6 +86,18 @@ def record_listening_event(
     track = db.query(Track).filter(Track.id == payload.track_id).first()
     if not track:
         raise ValueError("Track not found")
+
+    now = datetime.now(UTC)
+    # The client's clock when it says so, bounded to the recent past: a play
+    # replayed from an outbox after a flight lands in the hour it happened.
+    # A time in the future, or older than the outbox keeps, is a bad clock.
+    occurred_at = getattr(payload, "occurred_at", None)
+    if occurred_at is not None:
+        if occurred_at.tzinfo is None:
+            occurred_at = occurred_at.replace(tzinfo=UTC)
+        if occurred_at > now or now - occurred_at > timedelta(days=7):
+            occurred_at = None
+    happened_at = (occurred_at or now).replace(tzinfo=None)
 
     event = ListeningEvent(
         user_id=user_id,
@@ -86,26 +108,26 @@ def record_listening_event(
         position_seconds=payload.position_seconds,
         duration_seconds=payload.duration_seconds,
         session_id=payload.session_id,
+        created_at=happened_at,
     )
 
     db.add(event)
 
     stats = _get_or_create_track_stats(db, user_id, payload.track_id)
-    now = datetime.now(UTC)
 
     ratio_event_count_before = stats.completion_count + stats.skip_count
 
     if payload.event_type == "play_started":
         stats.play_count += 1
-        stats.last_played_at = now
+        stats.last_played_at = _later(stats.last_played_at, happened_at)
 
     elif payload.event_type == "skipped":
         stats.skip_count += 1
-        stats.last_played_at = now
+        stats.last_played_at = _later(stats.last_played_at, happened_at)
 
     elif payload.event_type == "play_completed":
         stats.completion_count += 1
-        stats.last_played_at = now
+        stats.last_played_at = _later(stats.last_played_at, happened_at)
 
     elif payload.event_type == "liked":
         stats.like_count += 1

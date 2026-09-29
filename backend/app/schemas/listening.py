@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 
 ListeningEventType = Literal[
@@ -36,6 +36,9 @@ class ListeningEventCreate(BaseModel):
     position_seconds: float | None = None
     duration_seconds: float | None = None
     session_id: str | None = None
+    # When the client says it happened. Replayed from an outbox a day
+    # later, an event used to be stamped with the drain's time.
+    occurred_at: datetime | None = None
 
 
 class ListeningEventResponse(BaseModel):
@@ -55,9 +58,31 @@ class ListeningEventResponse(BaseModel):
 class TrackPlaybackEventBase(BaseModel):
     source_type: SourceType | None = None
     source_id: int | None = None
-    position_seconds: float | None = None
+    # Both names: the phone sent `playback_position_seconds` for months and
+    # pydantic silently dropped it, so every skip was recorded at null.
+    # Installed builds keep sending the old name until they update.
+    position_seconds: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("position_seconds", "playback_position_seconds"),
+    )
     duration_seconds: float | None = None
     session_id: str | None = None
+    occurred_at: datetime | None = None
+
+    @field_validator("position_seconds", "duration_seconds", mode="before")
+    @classmethod
+    def _sane_seconds(cls, value):
+        # Clamped, not rejected: a negative or absurd value is a client bug
+        # that must not lose the event.
+        if value is None:
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if number != number or number < 0:  # NaN or negative
+            return 0.0
+        return min(number, 86400.0)
 
 
 class TrackListeningEventRequest(BaseModel):

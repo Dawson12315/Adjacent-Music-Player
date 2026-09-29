@@ -3,7 +3,7 @@ import shutil
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from sqlalchemy import func
+from sqlalchemy import func, literal
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
@@ -63,15 +63,22 @@ def list_mobile_albums(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Grouped by album *and* artist: every library has several "Greatest
+    # Hits", and grouping by title alone collapsed them into one tile with
+    # whichever artist sorted first and every record's tracks interleaved.
+    # One expression object for select, group and order: Postgres binds each
+    # `coalesce(artist, '')` literal separately and then cannot see that the
+    # grouped one is the selected one.
+    artist_expr = func.coalesce(Track.artist, literal(""))
     album_rows = (
         db.query(
             Track.album.label("album"),
-            func.min(Track.artist).label("artist"),
+            artist_expr.label("artist"),
             func.count(Track.id).label("track_count"),
         )
         .filter(Track.album.isnot(None))
-        .group_by(Track.album)
-        .order_by(func.lower(Track.album))
+        .group_by(Track.album, artist_expr)
+        .order_by(func.lower(Track.album), func.lower(artist_expr))
         .all()
     )
 
@@ -87,6 +94,8 @@ def list_mobile_albums(
 
     items = [
         {
+            # A stable identity a list can key on; `name` stays the title.
+            "id": f"{row.album}\u001f{row.artist or ''}",
             "name": row.album,
             "album": row.album,
             "artist": row.artist or "Unknown Artist",
@@ -107,10 +116,13 @@ def get_mobile_album_tracks(
     album_name: str,
     limit: int | None = Query(None, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    # A plain default: another route calls this function directly, and a
+    # Query() default would arrive as the marker object there.
+    artist: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    tracks = (
+    query = (
         db.query(Track)
         .options(
             selectinload(Track.track_artists),
@@ -118,9 +130,14 @@ def get_mobile_album_tracks(
         )
         # Same lowering function on both sides — see get_mobile_artist_tracks.
         .filter(func.lower(Track.album) == func.lower(album_name))
-        .order_by(Track.title.asc())
-        .all()
     )
+
+    # Narrowed to one artist's record when the client names it; without it
+    # every record of that title, as before.
+    if isinstance(artist, str) and artist.strip():
+        query = query.filter(func.lower(func.coalesce(Track.artist, "")) == artist.strip().lower()[:300])
+
+    tracks = query.order_by(Track.title.asc()).all()
 
     return paginate_flat(build_track_responses(db, tracks), limit, offset)
 
