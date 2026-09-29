@@ -9,7 +9,13 @@ from app.models.track import Track
 from app.models.track_genre import TrackGenre
 from app.models.listening_event import ListeningEvent
 from app.models.user import User
-from app.services.track_responses import get_artwork_maps, normalize_album_key
+from app.services.track_responses import (
+    build_track_payloads,
+    get_artwork_maps,
+    normalize_album_key,
+    payload_dict,
+    track_load_options,
+)
 from app.utils.artist_normalization import normalize_artist_name
 
 router = APIRouter()
@@ -38,6 +44,7 @@ def list_genre_tracks(
     genre_name: str,
     limit: int = Query(100, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    fields: str | None = Query(None, pattern="^(list|full)$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -59,6 +66,7 @@ def list_genre_tracks(
             Track,
             func.coalesce(play_counts.c.play_count, 0).label("play_count"),
         )
+        .options(*track_load_options(fields))
         .join(TrackGenre, TrackGenre.track_id == Track.id)
         .outerjoin(play_counts, play_counts.c.track_id == Track.id)
         .filter(func.lower(TrackGenre.genre) == func.lower(genre_name))
@@ -82,11 +90,11 @@ def list_genre_tracks(
     # hand-built thinner shape here left the lock screen without a scrubber
     # and an edit from this page dropping the track's other genres.
     tracks = [track for track, _count in rows]
-    responses = build_track_responses(db, tracks)
+    responses = build_track_payloads(db, tracks, fields)
     play_counts = {track.id: int(count or 0) for track, count in rows}
 
     items = [
-        {**response.model_dump(), "play_count": play_counts.get(response.id, 0)}
+        {**payload_dict(response), "play_count": play_counts.get(payload_dict(response)["id"], 0)}
         for response in responses
     ]
 

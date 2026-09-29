@@ -6,7 +6,9 @@ page cost 864 queries. This module batches artwork resolution into two IN
 queries per request and gives every route the same response shape.
 """
 
-from sqlalchemy.orm import Session
+import os
+
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.album_artwork import AlbumArtwork
 from app.models.artist_artwork import ArtistArtwork
@@ -108,3 +110,78 @@ def build_track_responses(db: Session, tracks: list[Track]) -> list[TrackRespons
 
 def build_single_track_response(db: Session, track: Track) -> TrackResponse:
     return build_track_responses(db, [track])[0]
+
+
+# --- The list projection --------------------------------------------------
+#
+# A full TrackResponse is ~570 bytes on the wire; a row in a list on the
+# phone reads about a third of it. `fields=list` on the list routes returns
+# only what a row draws, plays and edits from: identity, the three names, the
+# genres (the edit sheet preloads them), the artwork paths, the duration
+# (the lock-screen scrubber needs it) and the file extension (the cache
+# names its files by it). The full shape stays the default, and stays on
+# `/tracks/{id}`.
+
+LIST_FIELDS = (
+    "id",
+    "title",
+    "artist",
+    "album",
+    "genres",
+    "artwork_path",
+    "album_artwork_path",
+    "artist_artwork_path",
+    "duration_seconds",
+    "file_ext",
+)
+
+
+def file_extension_of(file_path: str | None) -> str | None:
+    extension = os.path.splitext(file_path or "")[1].lstrip(".").lower()
+    return extension or None
+
+
+def track_load_options(fields: str | None = None) -> list:
+    """The relationships a payload needs loaded, and no more."""
+    if fields == "list":
+        return [selectinload(Track.track_genres)]
+    return [selectinload(Track.track_artists), selectinload(Track.track_genres)]
+
+
+def build_track_list_items(db: Session, tracks: list[Track]) -> list[dict]:
+    if not tracks:
+        return []
+
+    album_map, artist_map = get_artwork_maps(db, tracks)
+    items = []
+
+    for track in tracks:
+        album_artwork_path = album_map.get(normalize_album_key(track.album))
+        items.append(
+            {
+                "id": track.id,
+                "title": track.title,
+                "artist": track.artist,
+                "album": track.album,
+                "genres": [item.genre for item in track.track_genres if item.genre],
+                "artwork_path": album_artwork_path,
+                "album_artwork_path": album_artwork_path,
+                "artist_artwork_path": artist_map.get(normalize_artist_name(track.artist)),
+                "duration_seconds": track.duration_seconds,
+                "file_ext": file_extension_of(track.file_path),
+            }
+        )
+
+    return items
+
+
+def build_track_payloads(db: Session, tracks: list[Track], fields: str | None = None) -> list:
+    """Full responses by default; the list projection on request."""
+    if fields == "list":
+        return build_track_list_items(db, tracks)
+    return build_track_responses(db, tracks)
+
+
+def payload_dict(payload) -> dict:
+    """A payload as a plain dict, whichever shape it is."""
+    return payload if isinstance(payload, dict) else payload.model_dump()

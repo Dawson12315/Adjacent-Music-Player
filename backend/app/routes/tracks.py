@@ -44,8 +44,10 @@ from app.services.lastfm import scrobble_track, update_now_playing
 from app.services.stream_cache_maintenance import clear_stream_caches
 from app.services.track_responses import (
     build_single_track_response,
+    build_track_payloads,
     build_track_response_from_maps,
     build_track_responses,
+    track_load_options,
 )
 from app.services.metadata_normalizer import normalize_genre_list
 from app.services.recommendations.rec_cache import invalidate_library_caches
@@ -65,7 +67,9 @@ MAX_TRACKS_BY_IDS = 500
 # Ceiling for the legacy no-limit flat listing. Far above any realistic library,
 # it exists to bound the worst-case response, not to paginate: clients that can
 # paginate should pass `limit`.
-MAX_UNPAGED_TRACKS = 50_000
+# The unpaged list is legacy: the web and the phone both page. A client that
+# still asks for everything gets this many rows, not a 16 MB answer.
+MAX_UNPAGED_TRACKS = 5_000
 
 MOBILE_STREAM_PROFILES = {
     "mp3_128": {
@@ -1121,13 +1125,11 @@ def list_tracks(
     search: str | None = Query(None),
     sort_by: str = Query("artist", pattern="^(title|album|artist)$"),
     section: str | None = Query(None, pattern="^(\\$#|[A-Za-z])$"),
+    fields: str | None = Query(None, pattern="^(list|full)$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = db.query(Track).options(
-        selectinload(Track.track_artists),
-        selectinload(Track.track_genres),
-    )
+    query = db.query(Track).options(*track_load_options(fields))
 
     cleaned_search = search.strip() if search else ""
 
@@ -1190,7 +1192,7 @@ def list_tracks(
 
     tracks = query.all()
 
-    items = build_track_responses(db, tracks)
+    items = build_track_payloads(db, tracks, fields)
 
     if limit is None:
         return items

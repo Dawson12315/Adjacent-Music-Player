@@ -14,10 +14,36 @@ from app.models.artist_artwork import ArtistArtwork
 from app.models.track import Track
 from app.models.track_artist import TrackArtist
 from app.models.user import User
-from app.services.track_responses import build_track_responses
+from app.services.track_responses import build_track_payloads, track_load_options
 from app.utils.artist_normalization import normalize_artist_name
 
 router = APIRouter()
+
+# Stays under SQLite's bound-parameter ceiling.
+_IN_CHUNK_SIZE = 500
+
+
+def page_envelope(items: list, total: int, limit: int, offset: int) -> dict:
+    return {
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(items) < total,
+    }
+
+
+def artist_artwork_by_key(db: Session, keys: list[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for start in range(0, len(keys), _IN_CHUNK_SIZE):
+        chunk = keys[start : start + _IN_CHUNK_SIZE]
+        for row in (
+            db.query(ArtistArtwork.artist_key, ArtistArtwork.artwork_path)
+            .filter(ArtistArtwork.artist_key.in_(chunk))
+            .all()
+        ):
+            out[row.artist_key] = row.artwork_path
+    return out
 
 
 def paginate_flat(items: list, limit: int | None, offset: int):
@@ -64,7 +90,11 @@ def list_mobile_artists(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    artist_rows = (
+    # The page is cut in SQL. This used to aggregate every artist for every
+    # page and slice the list in Python, so a 1,000-artist library paid for
+    # the whole index twice per sign-in; the artwork and album-count lookups
+    # now cover only the page, in chunks that fit SQLite's parameter limit.
+    grouped = (
         db.query(
             TrackArtist.artist_name.label("artist_name"),
             func.count(func.distinct(TrackArtist.track_id)).label("track_count"),
@@ -72,33 +102,40 @@ def list_mobile_artists(
         .filter(TrackArtist.artist_name.isnot(None))
         .group_by(TrackArtist.artist_name)
         .order_by(func.lower(TrackArtist.artist_name))
-        .all()
     )
 
-    artist_keys = [normalize_artist_name(row.artist_name) for row in artist_rows if row.artist_name]
-    artwork_rows = (
-        db.query(ArtistArtwork)
-        .filter(ArtistArtwork.artist_key.in_(artist_keys))
-        .all()
-        if artist_keys
-        else []
-    )
-    artwork_by_key = {artwork.artist_key: artwork.artwork_path for artwork in artwork_rows}
-
-    album_count_rows = (
-        db.query(
-            TrackArtist.artist_name.label("artist_name"),
-            func.count(func.distinct(Track.album)).label("album_count"),
+    if limit is None:
+        artist_rows = grouped.all()
+        total = len(artist_rows)
+    else:
+        total = (
+            db.query(func.count(func.distinct(TrackArtist.artist_name)))
+            .filter(TrackArtist.artist_name.isnot(None))
+            .scalar()
+            or 0
         )
-        .join(Track, Track.id == TrackArtist.track_id)
-        .filter(TrackArtist.artist_name.isnot(None))
-        .filter(Track.album.isnot(None))
-        .group_by(TrackArtist.artist_name)
-        .all()
+        artist_rows = grouped.offset(offset).limit(limit).all()
+
+    page_names = [row.artist_name for row in artist_rows if row.artist_name]
+    artwork_by_key = artist_artwork_by_key(
+        db, [normalize_artist_name(name) for name in page_names]
     )
-    album_count_by_artist = {
-        row.artist_name: row.album_count for row in album_count_rows if row.artist_name
-    }
+
+    album_count_by_artist: dict[str, int] = {}
+    for start in range(0, len(page_names), _IN_CHUNK_SIZE):
+        chunk = page_names[start : start + _IN_CHUNK_SIZE]
+        for row in (
+            db.query(
+                TrackArtist.artist_name.label("artist_name"),
+                func.count(func.distinct(Track.album)).label("album_count"),
+            )
+            .join(Track, Track.id == TrackArtist.track_id)
+            .filter(TrackArtist.artist_name.in_(chunk))
+            .filter(Track.album.isnot(None))
+            .group_by(TrackArtist.artist_name)
+            .all()
+        ):
+            album_count_by_artist[row.artist_name] = row.album_count
 
     items = [
         {
@@ -116,7 +153,10 @@ def list_mobile_artists(
         if row.artist_name
     ]
 
-    return paginate_flat(items, limit, offset)
+    if limit is None:
+        return items
+
+    return page_envelope(items, total, limit, offset)
 
 
 # New endpoint: /mobile/artists/section-index
@@ -176,16 +216,18 @@ def get_mobile_artist_tracks(
     artist_name: str,
     limit: int | None = Query(None, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    # A plain default: the web route calls this function directly.
+    fields: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if not isinstance(fields, str):
+        fields = None
+
     tracks = (
         db.query(Track)
         .join(TrackArtist, TrackArtist.track_id == Track.id)
-        .options(
-            selectinload(Track.track_artists),
-            selectinload(Track.track_genres),
-        )
+        .options(*track_load_options(fields))
         # Lower both sides with the SAME function (SQLite's). Mixing SQL
         # lower() with Python casefold() made names containing ß/İ-class
         # characters unmatchable.
@@ -194,7 +236,7 @@ def get_mobile_artist_tracks(
         .all()
     )
 
-    return paginate_flat(build_track_responses(db, tracks), limit, offset)
+    return paginate_flat(build_track_payloads(db, tracks, fields), limit, offset)
 
 
 @router.get("/artists/artwork", tags=["artists"])

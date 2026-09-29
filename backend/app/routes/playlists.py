@@ -8,7 +8,11 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import case
 
 from app.db import get_db
-from app.services.track_responses import build_track_responses
+from app.services.track_responses import (
+    build_track_payloads,
+    build_track_responses,
+    track_load_options,
+)
 from app.utils.images import read_validated_image
 from app.services.stream_cache_maintenance import has_room_for_upload
 from app.dependencies.auth import get_current_user, require_admin
@@ -148,6 +152,28 @@ def get_liked_songs_playlist(
     current_user: User = Depends(get_current_user),
 ):
     return build_playlist_response(db, ensure_liked_songs_playlist(db, current_user.id))
+
+
+@router.get("/playlists/liked-songs/track-ids", tags=["playlists"])
+def get_liked_songs_track_ids(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Just the ids, in playlist order.
+
+    The phone keeps a set of loved ids to draw the heart; it used to fetch
+    the whole playlist as full rows for that, on every sign-in and after
+    every tap. Two thousand loved tracks is a megabyte of rows and eight
+    kilobytes of ids.
+    """
+    playlist = ensure_liked_songs_playlist(db, current_user.id)
+    rows = (
+        db.query(PlaylistTrack.track_id)
+        .filter(PlaylistTrack.playlist_id == playlist.id)
+        .order_by(PlaylistTrack.position.asc(), PlaylistTrack.id.asc())
+        .all()
+    )
+    return {"playlist_id": playlist.id, "track_ids": [row.track_id for row in rows]}
 
 
 @router.get("/playlists/liked-songs/tracks/{track_id}", tags=["playlists"])
@@ -408,6 +434,7 @@ def get_playlist_tracks(
     current_user: User = Depends(get_current_user),
     limit: int | None = Query(default=None, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    fields: str | None = Query(None, pattern="^(list|full)$"),
 ):
     """The playlist's tracks in order — full rows, and pageable.
 
@@ -425,12 +452,12 @@ def get_playlist_tracks(
         db.query(Track)
         .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
         .filter(PlaylistTrack.playlist_id == playlist.id)
-        .options(selectinload(Track.track_artists), selectinload(Track.track_genres))
+        .options(*track_load_options(fields))
         .order_by(PlaylistTrack.position.asc(), PlaylistTrack.id.asc())
     )
 
     if limit is None:
-        return build_track_responses(db, base.all())
+        return build_track_payloads(db, base.all(), fields)
 
     total = (
         db.query(func.count(PlaylistTrack.id))
@@ -438,7 +465,7 @@ def get_playlist_tracks(
         .scalar()
         or 0
     )
-    items = build_track_responses(db, base.offset(offset).limit(limit).all())
+    items = build_track_payloads(db, base.offset(offset).limit(limit).all(), fields)
 
     return {
         "items": items,

@@ -115,6 +115,12 @@ if not settings.is_production and "http://localhost:5173" not in cors_origins:
 # of seeing an opaque network failure.
 app.add_middleware(BodySizeLimitMiddleware)
 
+# Inside gzip: it hashes the JSON before compression, and a 304 has no body
+# for gzip to touch.
+from app.middleware.etag import ETagMiddleware  # noqa: E402
+
+app.add_middleware(ETagMiddleware)
+
 from app.middleware.security_headers import SecurityHeadersMiddleware  # noqa: E402
 
 app.add_middleware(SecurityHeadersMiddleware)

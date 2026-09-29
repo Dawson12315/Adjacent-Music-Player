@@ -23,7 +23,7 @@ router = APIRouter()
 
 # Bumped whenever a client-facing route or field is added. Clients compare it
 # with the version they were built against.
-API_VERSION = 3
+API_VERSION = 4
 
 # The oldest mobile build this API still serves whole.
 MIN_CLIENT_VERSION = "1.0.31"
@@ -37,6 +37,12 @@ CAPABILITIES = [
     "scan-progress",
     "offline-manifest",
     "health-status",
+    # Pass R: `fields=list` on the list routes, SQL-paged indexes, weak
+    # ETags on the index routes, `/stats/top-genres`, liked track ids.
+    "list-projection",
+    "etag",
+    "top-genres",
+    "liked-track-ids",
 ]
 
 _FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None

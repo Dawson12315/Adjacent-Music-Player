@@ -14,7 +14,7 @@ from app.models.user import User
 from app.routes.tracks import build_track_response as build_artwork_track_response
 from app.utils.db_compat import hour_of_day, local_day
 from app.schemas.track import TrackResponse, TrackWithStatsResponse
-from app.services.track_responses import build_track_responses
+from app.services.track_responses import build_track_payloads, build_track_responses
 from app.services.stats_service import (
     get_most_liked_tracks,
     get_most_liked_tracks_with_stats,
@@ -64,14 +64,49 @@ def most_liked_tracks(
     return build_track_responses(db, tracks)
 
 
-@router.get("/stats/recently-played", response_model=list[TrackResponse], tags=["stats"])
+@router.get("/stats/recently-played", tags=["stats"])
 def recently_played_tracks(
-    limit: int = 20,
+    limit: int = Query(20, ge=1, le=500),
+    fields: str | None = Query(None, pattern="^(list|full)$"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list:
+    tracks = get_recently_played_tracks(db, current_user.id, limit=limit)
+    return build_track_payloads(db, tracks, fields)
+
+
+def get_top_genres(db: Session, user_id: int, limit: int) -> list[dict]:
+    rows = (
+        db.query(
+            TrackGenre.genre.label("name"),
+            func.count(ListeningEvent.id).label("play_count"),
+        )
+        .join(Track, Track.id == TrackGenre.track_id)
+        .join(ListeningEvent, ListeningEvent.track_id == Track.id)
+        .filter(
+            ListeningEvent.user_id == user_id,
+            ListeningEvent.event_type == "play_started",
+        )
+        .group_by(TrackGenre.genre)
+        .order_by(func.count(ListeningEvent.id).desc())
+        .limit(limit)
+        .all()
+    )
+    return [{"name": row.name, "play_count": row.play_count} for row in rows]
+
+
+@router.get("/stats/top-genres", tags=["stats"])
+def top_genres(
+    limit: int = Query(20, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    tracks = get_recently_played_tracks(db, current_user.id, limit=limit)
-    return build_track_responses(db, tracks)
+    """The genres played most, and nothing else.
+
+    The Genres page used to ask the overview for these, which builds four
+    ranked track lists it then threw away.
+    """
+    return get_top_genres(db, current_user.id, limit)
 
 
 @router.get("/stats/most-skipped", response_model=list[TrackResponse], tags=["stats"])
@@ -441,22 +476,7 @@ def stats_overview(
 
     most_skipped = get_most_skipped_tracks_for_user(db, current_user.id, limit=limit)
 
-    top_genres = (
-        db.query(
-            TrackGenre.genre.label("name"),
-            func.count(ListeningEvent.id).label("play_count"),
-        )
-        .join(Track, Track.id == TrackGenre.track_id)
-        .join(ListeningEvent, ListeningEvent.track_id == Track.id)
-        .filter(
-            ListeningEvent.user_id == current_user.id,
-            ListeningEvent.event_type == "play_started",
-        )
-        .group_by(TrackGenre.genre)
-        .order_by(func.count(ListeningEvent.id).desc())
-        .limit(limit)
-        .all()
-    )
+    top_genres = get_top_genres(db, current_user.id, limit)
 
     # Batched, with artwork: the thin builder never set artwork paths, so the
     # Recently Played page fell back to generated tiles for anything outside
@@ -466,8 +486,5 @@ def stats_overview(
         "most_liked": build_track_responses(db, most_liked),
         "most_skipped": build_track_responses(db, most_skipped),
         "recently_played": build_track_responses(db, recently_played),
-        "top_genres": [
-            {"name": genre.name, "play_count": genre.play_count}
-            for genre in top_genres
-        ],
+        "top_genres": top_genres,
     }

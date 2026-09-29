@@ -13,9 +13,13 @@ from app.dependencies.auth import get_current_user, require_admin
 from app.models.album_artwork import AlbumArtwork
 from app.models.track import Track
 from app.models.user import User
-from app.services.track_responses import build_track_responses
+from app.services.track_responses import build_track_payloads, track_load_options
+from app.routes.artists import page_envelope
 
 router = APIRouter()
+
+# Stays under SQLite's bound-parameter ceiling.
+_IN_CHUNK_SIZE = 500
 
 ALBUM_ARTWORK_DIR = "data/uploads/albums"
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -70,7 +74,7 @@ def list_mobile_albums(
     # `coalesce(artist, '')` literal separately and then cannot see that the
     # grouped one is the selected one.
     artist_expr = func.coalesce(Track.artist, literal(""))
-    album_rows = (
+    grouped = (
         db.query(
             Track.album.label("album"),
             artist_expr.label("artist"),
@@ -79,18 +83,27 @@ def list_mobile_albums(
         .filter(Track.album.isnot(None))
         .group_by(Track.album, artist_expr)
         .order_by(func.lower(Track.album), func.lower(artist_expr))
-        .all()
     )
 
-    album_keys = [normalize_album_name(row.album) for row in album_rows if row.album]
-    artwork_rows = (
-        db.query(AlbumArtwork)
-        .filter(AlbumArtwork.album_key.in_(album_keys))
-        .all()
-        if album_keys
-        else []
-    )
-    artwork_by_key = {artwork.album_key: artwork.artwork_path for artwork in artwork_rows}
+    # The page is cut in SQL, and the artwork lookup covers only the page:
+    # every page used to re-aggregate the whole table and then slice a list.
+    if limit is None:
+        album_rows = grouped.all()
+        total = len(album_rows)
+    else:
+        total = db.query(func.count()).select_from(grouped.subquery()).scalar() or 0
+        album_rows = grouped.offset(offset).limit(limit).all()
+
+    album_keys = list({normalize_album_name(row.album) for row in album_rows if row.album})
+    artwork_by_key: dict[str, str] = {}
+    for start in range(0, len(album_keys), _IN_CHUNK_SIZE):
+        chunk = album_keys[start : start + _IN_CHUNK_SIZE]
+        for row in (
+            db.query(AlbumArtwork.album_key, AlbumArtwork.artwork_path)
+            .filter(AlbumArtwork.album_key.in_(chunk))
+            .all()
+        ):
+            artwork_by_key[row.album_key] = row.artwork_path
 
     items = [
         {
@@ -108,7 +121,10 @@ def list_mobile_albums(
         if row.album
     ]
 
-    return paginate_flat(items, limit, offset)
+    if limit is None:
+        return items
+
+    return page_envelope(items, total, limit, offset)
 
 
 @router.get("/mobile/albums/{album_name:path}/tracks", tags=["mobile"])
@@ -119,15 +135,16 @@ def get_mobile_album_tracks(
     # A plain default: another route calls this function directly, and a
     # Query() default would arrive as the marker object there.
     artist: str | None = None,
+    fields: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if not isinstance(fields, str):
+        fields = None
+
     query = (
         db.query(Track)
-        .options(
-            selectinload(Track.track_artists),
-            selectinload(Track.track_genres),
-        )
+        .options(*track_load_options(fields))
         # Same lowering function on both sides — see get_mobile_artist_tracks.
         .filter(func.lower(Track.album) == func.lower(album_name))
     )
@@ -139,7 +156,7 @@ def get_mobile_album_tracks(
 
     tracks = query.order_by(Track.title.asc()).all()
 
-    return paginate_flat(build_track_responses(db, tracks), limit, offset)
+    return paginate_flat(build_track_payloads(db, tracks, fields), limit, offset)
 
 
 @router.get("/albums/artwork", tags=["albums"])
