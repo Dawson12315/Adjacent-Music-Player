@@ -449,6 +449,9 @@ def test_backfill_stops_when_writes_are_paused(client, db_session_factory, monke
         "find_recording_mbid",
         lambda *args, **kwargs: looked_up.append(args) or None,
     )
+    # The backfill refuses to run without a contact address before it looks
+    # at anything else; a fresh checkout has none, so say one is configured.
+    monkeypatch.setattr(musicbrainz_backfill, "contact_configured", lambda: True)
 
     maintenance_mode.enable_migration()
     try:
