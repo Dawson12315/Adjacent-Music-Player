@@ -2,6 +2,7 @@ import os
 import shutil
 from uuid import uuid4
 
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
@@ -34,6 +35,7 @@ from app.services.playlist_responses import (
     build_playlist_responses,
 )
 from app.services.playlists import ensure_liked_songs_playlist
+from app.services.recommendations.dismissals import dismiss_tracks
 from app.services.recommendations.playlist_recommender import (
     get_playlist_recommendations_for_playlist,
 )
@@ -499,6 +501,45 @@ def get_playlist_recommendations(
         refresh=refresh,
         limit=limit,
         exclude_track_ids=parsed_exclude_track_ids,
+        user_id=current_user.id,
+    )
+
+
+class RecommendationRecycleRequest(BaseModel):
+    """The rows on screen when "refresh" was pressed: not these, for a while."""
+
+    shown_track_ids: list[int] = Field(default_factory=list, max_length=100)
+    refresh: int = Field(default=1, ge=0, le=10_000)
+    limit: int = Field(default=20, ge=1, le=100)
+    debug: bool = False
+
+
+@router.post(
+    "/playlists/{playlist_id}/recommendations/recycle",
+    tags=["playlists"],
+)
+def recycle_playlist_recommendations(
+    playlist_id: int,
+    payload: RecommendationRecycleRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Hold the shown suggestions out of this playlist for four days and answer with the next set.
+
+    Recycling used to rotate the ranking and nothing more, so the same
+    tracks came straight back. Scoped to the playlist: a track recycled
+    here is still suggested for the others.
+    """
+    playlist = _get_user_playlist_or_404(db, playlist_id, current_user.id)
+    dismiss_tracks(db, current_user.id, playlist.id, payload.shown_track_ids)
+
+    return get_playlist_recommendations_for_playlist(
+        db=db,
+        playlist_id=playlist.id,
+        debug=payload.debug,
+        refresh=payload.refresh,
+        limit=payload.limit,
+        exclude_track_ids=None,
         user_id=current_user.id,
     )
 

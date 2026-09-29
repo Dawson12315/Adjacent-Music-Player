@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.playlist import Playlist
 from app.models.playlist_track import PlaylistTrack
 from app.models.track import Track
+from app.services.recommendations.dismissals import dismissed_track_ids
 from app.services.recommendations.diversification import diversify_tracks
 from app.services.recommendations.genre_utils import (
     get_track_families,
@@ -603,6 +604,12 @@ def get_playlist_recommendations_for_playlist(
 
     playlist_track_ids = [row.track_id for row in playlist_track_rows]
 
+    # What the listener recycled out of this playlist recently stays out,
+    # on top of whatever the caller asked to exclude.
+    held_out = list(exclude_track_ids or [])
+    if user_id is not None:
+        held_out.extend(dismissed_track_ids(db, user_id, playlist_id))
+
     return get_playlist_recommendations_from_track_ids(
         db=db,
         seed_track_ids=playlist_track_ids,
@@ -610,6 +617,6 @@ def get_playlist_recommendations_for_playlist(
         refresh=refresh,
         playlist_id=playlist_id,
         limit=limit,
-        exclude_track_ids=exclude_track_ids,
+        exclude_track_ids=held_out,
         user_id=user_id,
     )

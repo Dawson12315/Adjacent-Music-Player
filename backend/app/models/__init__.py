@@ -15,6 +15,7 @@ from app.models.track_lastfm_similarity import TrackLastfmSimilarity
 from app.models.album_artwork import AlbumArtwork
 from app.models.artist_artwork import ArtistArtwork
 from app.models.recommendation_eval_run import RecommendationEvalRun
+from app.models.recommendation_dismissal import RecommendationDismissal
 from app.models.user import User
 
 __all__ = [
@@ -35,5 +36,6 @@ __all__ = [
     "ArtistArtwork",
     "AlbumArtwork",
     "RecommendationEvalRun",
+    "RecommendationDismissal",
     "User"
     ]

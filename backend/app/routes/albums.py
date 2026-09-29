@@ -15,6 +15,7 @@ from app.models.track import Track
 from app.models.user import User
 from app.services.track_responses import build_track_payloads, track_load_options
 from app.routes.artists import page_envelope
+from app.services.track_order import album_track_order
 
 router = APIRouter()
 
@@ -154,7 +155,7 @@ def get_mobile_album_tracks(
     if isinstance(artist, str) and artist.strip():
         query = query.filter(func.lower(func.coalesce(Track.artist, "")) == artist.strip().lower()[:300])
 
-    tracks = query.order_by(Track.title.asc()).all()
+    tracks = query.order_by(*album_track_order()).all()
 
     return paginate_flat(build_track_payloads(db, tracks, fields), limit, offset)
 

@@ -15,6 +15,7 @@ from app.models.track import Track
 from app.models.track_artist import TrackArtist
 from app.models.user import User
 from app.services.track_responses import build_track_payloads, track_load_options
+from app.services.track_order import album_track_order
 from app.utils.artist_normalization import normalize_artist_name
 
 router = APIRouter()
@@ -232,7 +233,7 @@ def get_mobile_artist_tracks(
         # lower() with Python casefold() made names containing ß/İ-class
         # characters unmatchable.
         .filter(func.lower(TrackArtist.artist_name) == func.lower(artist_name))
-        .order_by(Track.album.asc(), Track.title.asc())
+        .order_by(func.lower(func.coalesce(Track.album, "")), *album_track_order())
         .all()
     )
 

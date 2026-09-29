@@ -41,6 +41,13 @@ class Track(Base):
     file_size = Column(BigInteger, nullable=True)
     file_mtime_ns = Column(BigInteger, nullable=True)
 
+    # Position on the record, from the tag or from a numbered filename. An
+    # album page sorted by title until these existed: "01 Blessing" through
+    # "21 Handling the Death" came back alphabetically. 0 means the file was
+    # read and carries no number, so the scanner does not read it again.
+    track_number = Column(Integer, nullable=True)
+    disc_number = Column(Integer, nullable=True)
+
     # The track list sorts on lower(column) and the section jump counts on
     # it; declared here, not only in the SQLite migration runner, so Postgres
     # gets them too and the two schemas stop drifting.

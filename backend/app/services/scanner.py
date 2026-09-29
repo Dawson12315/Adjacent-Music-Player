@@ -6,7 +6,10 @@ from app.db import SessionLocal
 from app.models.track import Track
 from app.models.track_artist import TrackArtist
 from app.models.track_genre import TrackGenre
-from app.services.filename_metadata import extract_metadata_from_filename
+from app.services.filename_metadata import (
+    extract_metadata_from_filename,
+    extract_track_number_from_filename,
+)
 from app.services.metadata import extract_track_metadata
 from app.services.metadata_normalizer import (
     normalize_album,
@@ -63,6 +66,8 @@ def _refresh_track_metadata(db, track_id: int, file_path: Path, stat) -> bool:
     track.duration_seconds = metadata.get("duration_seconds") or track.duration_seconds
     track.file_size = stat.st_size
     track.file_mtime_ns = stat.st_mtime_ns
+    track.track_number = resolve_track_number(metadata, str(file_path))
+    track.disc_number = metadata.get("disc_number")
 
     db.query(TrackArtist).filter(TrackArtist.track_id == track.id).delete(synchronize_session=False)
     for index, artist_name in enumerate(normalize_artist_list(resolved_artist)):
@@ -70,6 +75,33 @@ def _refresh_track_metadata(db, track_id: int, file_path: Path, stat) -> bool:
 
     db.commit()
     return True
+
+
+def resolve_track_number(metadata: dict, file_path: str) -> int:
+    """The tag's number, else the filename's, else 0 for "read, none"."""
+    tagged = metadata.get("track_number")
+    if tagged:
+        return int(tagged)
+    return extract_track_number_from_filename(file_path) or 0
+
+
+def _backfill_track_number(db, track_id: int, file_path) -> None:
+    """Number a row imported before numbers were read: the name first, and
+    the tag only when the name says nothing; either way the row is marked
+    read so a library is walked for numbers once, not on every scan."""
+    number = extract_track_number_from_filename(str(file_path))
+    disc = None
+    if not number:
+        try:
+            metadata = extract_track_metadata(str(file_path))
+            number = metadata.get("track_number")
+            disc = metadata.get("disc_number")
+        except Exception:  # noqa: BLE001
+            number = None
+    db.query(Track).filter(Track.id == track_id).update(
+        {Track.track_number: int(number or 0), Track.disc_number: disc},
+        synchronize_session=False,
+    )
 
 
 def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> dict:
@@ -151,10 +183,21 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
         # how a moved file is recognised and how an edited tag is noticed.
         known = {
             path: (track_id, size, mtime_ns)
-            for track_id, path, size, mtime_ns in db.query(
-                Track.id, Track.file_path, Track.file_size, Track.file_mtime_ns
+            for track_id, path, size, mtime_ns, _number in db.query(
+                Track.id, Track.file_path, Track.file_size, Track.file_mtime_ns, Track.track_number
             ).all()
         }
+        # Rows from before track numbers were read; numbered as the walk
+        # passes them, in batches, so the first scan after the upgrade does
+        # the work once.
+        unnumbered = {
+            path
+            for _id, path, _s, _m, number in db.query(
+                Track.id, Track.file_path, Track.file_size, Track.file_mtime_ns, Track.track_number
+            ).all()
+            if number is None
+        }
+        backfilled = 0
         known_file_paths = set(known)
         # (size, mtime) → track ids, for spotting a file that moved. A match
         # only counts when the old path is really gone.
@@ -208,6 +251,11 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
                     # The file changed under the same name: tags were edited.
                     if _refresh_track_metadata(db, track_id, file_path, stat):
                         refreshed += 1
+                elif path_text in unnumbered:
+                    _backfill_track_number(db, track_id, file_path)
+                    backfilled += 1
+                    if backfilled % 200 == 0:
+                        db.commit()
                 continue
 
             # A new path with a known size and mtime whose old path is gone
@@ -245,6 +293,12 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
                 str(file_path)
             )
 
+            # The tag wins where both speak; the name fills what the tag
+            # left out. When they disagree it is worth a line in the log,
+            # because that is where a mis-tagged rip shows up.
+            if raw_artist and filename_album and filename_artist and raw_artist.strip().lower() != filename_artist.strip().lower():
+                logger.debug("Tag and filename disagree on the artist for %s (%r vs %r)", file_path, raw_artist, filename_artist)
+
             use_filename_title = False
 
             if not raw_title:
@@ -277,6 +331,8 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
                         "duration_seconds": metadata.get("duration_seconds"),
                         "file_size": stat.st_size,
                         "file_mtime_ns": stat.st_mtime_ns,
+                        "track_number": resolve_track_number(metadata, str(file_path)),
+                        "disc_number": metadata.get("disc_number"),
                     },
                     "artists": artist_list,
                     "genres": normalized_genres,
@@ -292,6 +348,10 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
 
         if pending_batch:
             write_batch()
+
+        if backfilled:
+            db.commit()
+            logger.info("Numbered %s tracks imported before track numbers were read.", backfilled)
 
         report_progress()
         logger.info(

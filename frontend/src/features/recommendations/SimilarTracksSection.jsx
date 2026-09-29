@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Artwork } from "../../components/Artwork";
 import { Icon } from "../../components/Icon";
 import { useLibrary } from "../../contexts/LibraryContext";
-import { getPlaylistRecommendations } from "../../services/recommendationsService";
+import {
+  getPlaylistRecommendations,
+  recyclePlaylistRecommendations,
+} from "../../services/recommendationsService";
 import { getSimilarTracks } from "../../services/tracksService";
 import { resolveAlbumArtwork } from "../../utils/artwork";
 
@@ -23,8 +26,32 @@ export function SimilarTracksSection({ sourceTrack, playlistId, onPlay, onAdd })
   const [tracks, setTracks] = useState([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const recycleCount = useRef(0);
 
-  const refresh = useCallback(() => setRefreshKey((key) => key + 1), []);
+  // For a playlist, refresh means "not these": the rows on screen are handed
+  // back and held out of this playlist's suggestions for a few days. The
+  // per-track list has no such memory and simply asks again.
+  const refresh = useCallback(async () => {
+    if (!playlistId) {
+      setRefreshKey((key) => key + 1);
+      return;
+    }
+
+    recycleCount.current += 1;
+    setIsLoading(true);
+
+    try {
+      const results = await recyclePlaylistRecommendations(playlistId, {
+        shownTrackIds: tracks.map((track) => track.id),
+        refresh: recycleCount.current,
+      });
+      setTracks(results.slice(0, LIMIT));
+    } catch {
+      setTracks([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [playlistId, tracks]);
 
   useEffect(() => {
     if (!playlistId && !sourceTrack) {

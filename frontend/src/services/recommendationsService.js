@@ -15,6 +15,28 @@ export async function getPlaylistRecommendations(playlistId, { refresh = 0, sign
     signal,
   });
 
+  return normalizeRecommendations(data);
+}
+
+/**
+ * "Refresh" on a playlist's suggestions: the rows on screen go back as "not
+ * these" and stay out of this playlist's answers for a few days. The next
+ * set comes back in the same shape as a plain load.
+ */
+export async function recyclePlaylistRecommendations(
+  playlistId,
+  { shownTrackIds = [], refresh = 1, signal } = {},
+) {
+  const data = await apiClient.post(
+    `/api/playlists/${playlistId}/recommendations/recycle`,
+    { shown_track_ids: shownTrackIds, refresh, limit: 20, debug: true },
+    { signal },
+  );
+
+  return normalizeRecommendations(data);
+}
+
+function normalizeRecommendations(data) {
   const recommendations = data?.recommendations || [];
 
   return recommendations

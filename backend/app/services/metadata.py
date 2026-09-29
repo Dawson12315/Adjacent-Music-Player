@@ -10,6 +10,19 @@ def _first_value(value):
     return value
 
 
+def parse_position(value) -> int | None:
+    """"7", "7/12", "07" and the ID3 forms, to 7; anything else to None."""
+    text = str(_first_value(value) or "").strip()
+    if not text:
+        return None
+    head = text.split("/")[0].strip()
+    digits = "".join(ch for ch in head if ch.isdigit())
+    if not digits:
+        return None
+    number = int(digits)
+    return number if 0 < number < 10000 else None
+
+
 def extract_track_metadata(file_path: str) -> dict:
     path = Path(file_path)
 
@@ -24,6 +37,8 @@ def extract_track_metadata(file_path: str) -> dict:
     artist = _first_value(tags.get("TPE1")) or _first_value(tags.get("artist"))
     album = _first_value(tags.get("TALB")) or _first_value(tags.get("album"))
     genre = _first_value(tags.get("TCON")) or _first_value(tags.get("genre"))
+    track_number = parse_position(tags.get("TRCK")) or parse_position(tags.get("tracknumber"))
+    disc_number = parse_position(tags.get("TPOS")) or parse_position(tags.get("discnumber"))
 
     if title is not None:
         title = str(title)
@@ -46,6 +61,8 @@ def extract_track_metadata(file_path: str) -> dict:
         "raw_artist": artist,
         "raw_album": album,
         "raw_genre": genre,
+        "track_number": track_number,
+        "disc_number": disc_number,
         "file_path": str(path),
         "duration_seconds": getattr(getattr(audio, "info", None), "length", None),
     }

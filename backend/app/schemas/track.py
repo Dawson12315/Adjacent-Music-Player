@@ -23,6 +23,8 @@ class TrackResponse(BaseModel):
     musicbrainz_recording_id: Optional[str] = None
     lastfm_tags_enriched: bool = False
     duration_seconds: Optional[float] = None
+    track_number: Optional[int] = None
+    disc_number: Optional[int] = None
 
     class Config:
         from_attributes = True

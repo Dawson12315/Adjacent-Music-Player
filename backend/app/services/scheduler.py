@@ -10,6 +10,7 @@ from app.services.maintenance import (
     LibraryUnavailable,
     cleanup_missing_tracks,
 )
+from app.services.recommendations.dismissals import prune_expired_dismissals
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,9 @@ def _run_cleanup_job():
             logger.info("Running scheduled cleanup...")
             result = cleanup_missing_tracks(db)
             logger.info("Scheduled cleanup: %s", result)
+            pruned = prune_expired_dismissals(db)
+            if pruned:
+                logger.info("Scheduled cleanup: %s expired recommendation holds removed", pruned)
         except LibraryUnavailable as error:
             db.rollback()
             logger.warning("Scheduled cleanup refused: %s", error)

@@ -94,6 +94,8 @@ def build_track_response_from_maps(
         musicbrainz_recording_id=track.musicbrainz_recording_id,
         lastfm_tags_enriched=track.lastfm_tags_enriched,
         duration_seconds=track.duration_seconds,
+        track_number=track.track_number or None,
+        disc_number=track.disc_number,
     )
 
 
@@ -133,6 +135,7 @@ LIST_FIELDS = (
     "artist_artwork_path",
     "duration_seconds",
     "file_ext",
+    "track_number",
 )
 
 
@@ -169,6 +172,7 @@ def build_track_list_items(db: Session, tracks: list[Track]) -> list[dict]:
                 "artist_artwork_path": artist_map.get(normalize_artist_name(track.artist)),
                 "duration_seconds": track.duration_seconds,
                 "file_ext": file_extension_of(track.file_path),
+                "track_number": track.track_number or None,
             }
         )
 
