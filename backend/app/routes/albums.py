@@ -30,11 +30,50 @@ def normalize_album_name(album_name: str) -> str:
     return " ".join((album_name or "").strip().casefold().split())
 
 
+def album_index_query(db: Session):
+    """One row per (title, artist), the identity an album actually has.
+
+    Grouping by title alone folded two artists' "Greatest Hits" into one
+    entry, and every page that opened it showed both records interleaved.
+    """
+    artist_expr = func.coalesce(Track.artist, literal(""))
+    return (
+        db.query(
+            Track.album.label("album"),
+            artist_expr.label("artist"),
+            func.count(Track.id).label("track_count"),
+        )
+        .filter(Track.album.isnot(None))
+        .group_by(Track.album, artist_expr)
+        .order_by(func.lower(Track.album), func.lower(artist_expr))
+    ), artist_expr
+
+
+def album_identity(album: str, artist: str | None) -> str:
+    return f"{album}\u001f{artist or ''}"
+
+
 @router.get("/albums", tags=["albums"])
 def list_albums(
+    # `detailed=1` answers with one object per (title, artist); the bare
+    # list of titles stays the default for clients built against it.
+    detailed: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if detailed:
+        grouped, _ = album_index_query(db)
+        return [
+            {
+                "id": album_identity(row.album, row.artist),
+                "name": row.album,
+                "artist": row.artist or None,
+                "track_count": row.track_count,
+            }
+            for row in grouped.all()
+            if row.album
+        ]
+
     albums = (
         db.query(Track.album)
         .filter(Track.album.isnot(None))
@@ -74,17 +113,7 @@ def list_mobile_albums(
     # One expression object for select, group and order: Postgres binds each
     # `coalesce(artist, '')` literal separately and then cannot see that the
     # grouped one is the selected one.
-    artist_expr = func.coalesce(Track.artist, literal(""))
-    grouped = (
-        db.query(
-            Track.album.label("album"),
-            artist_expr.label("artist"),
-            func.count(Track.id).label("track_count"),
-        )
-        .filter(Track.album.isnot(None))
-        .group_by(Track.album, artist_expr)
-        .order_by(func.lower(Track.album), func.lower(artist_expr))
-    )
+    grouped, artist_expr = album_index_query(db)
 
     # The page is cut in SQL, and the artwork lookup covers only the page:
     # every page used to re-aggregate the whole table and then slice a list.
@@ -109,7 +138,7 @@ def list_mobile_albums(
     items = [
         {
             # A stable identity a list can key on; `name` stays the title.
-            "id": f"{row.album}\u001f{row.artist or ''}",
+            "id": album_identity(row.album, row.artist),
             "name": row.album,
             "album": row.album,
             "artist": row.artist or "Unknown Artist",
@@ -181,6 +210,10 @@ def get_album_tracks(
     album_name: str,
     limit: int | None = Query(None, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    # One artist's record of the title; without it every record of that
+    # title, as before.
+    artist: str | None = Query(None),
+    fields: str | None = Query(None, pattern="^(list|full)$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -188,6 +221,8 @@ def get_album_tracks(
         album_name=album_name,
         limit=limit,
         offset=offset,
+        artist=artist,
+        fields=fields,
         db=db,
         current_user=current_user,
     )

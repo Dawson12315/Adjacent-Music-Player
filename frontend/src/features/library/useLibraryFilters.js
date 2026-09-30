@@ -22,7 +22,14 @@ export function useLibraryFilters() {
   );
 
   const visibleAlbums = useMemo(
-    () => (query ? albums.filter((a) => a.toLowerCase().includes(query)) : albums),
+    () =>
+      query
+        ? albums.filter(
+            (a) =>
+              a.name.toLowerCase().includes(query) ||
+              (a.artist || "").toLowerCase().includes(query),
+          )
+        : albums,
     [albums, query],
   );
 

@@ -30,6 +30,7 @@ export function PageHeader() {
     activeView,
     selectedArtist,
     selectedAlbum,
+    selectedAlbumArtist,
     selectedGenre,
     selectedPlaylistId,
   } = useNavigation();
@@ -140,11 +141,15 @@ export function PageHeader() {
     ? selectedArtist || selectedAlbum || selectedGenre
     : config.title;
 
+  // An album's eyebrow names its artist: two records with one title are
+  // told apart by it.
   const eyebrow = isEntityView
     ? selectedArtist
       ? "Artist"
       : selectedAlbum
-      ? "Album"
+      ? selectedAlbumArtist
+        ? `Album · ${selectedAlbumArtist}`
+        : "Album"
       : "Genre"
     : config.eyebrow;
 

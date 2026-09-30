@@ -2,9 +2,15 @@ import { apiClient } from "./apiClient";
 
 const encode = (name) => encodeURIComponent(name);
 
-/** Bare string array of album names. */
-export function listAlbums(options) {
-  return apiClient.get("/api/albums", options);
+/**
+ * One entry per album: `{ id, name, artist, track_count }`.
+ *
+ * An album is a title and an artist. The bare list of titles this used to
+ * ask for folded two artists' "Greatest Hits" into one card, and the page
+ * behind it showed both records interleaved.
+ */
+export function listAlbums(options = {}) {
+  return apiClient.get("/api/albums", { ...options, params: { ...(options.params || {}), detailed: 1 } });
 }
 
 /**

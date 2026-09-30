@@ -19,7 +19,8 @@ export const TRACK_UPDATED_EVENT = "adjacent:track-updated";
  * This replaces holding all 36,534 tracks in memory and filtering them on every keystroke.
  */
 export function useTrackFeed() {
-  const { selectedArtist, selectedAlbum, selectedGenre, searchQuery } = useNavigation();
+  const { selectedArtist, selectedAlbum, selectedAlbumArtist, selectedGenre, searchQuery } =
+    useNavigation();
 
   const [tracks, setTracks] = useState([]);
   const [total, setTotal] = useState(0);
@@ -42,7 +43,7 @@ export function useTrackFeed() {
   const source = selectedArtist
     ? `artist:${selectedArtist}`
     : selectedAlbum
-    ? `album:${selectedAlbum}`
+    ? `album:${selectedAlbum}\u001f${selectedAlbumArtist || ""}`
     : selectedGenre
     ? `genre:${selectedGenre}`
     : `library:${debouncedSearch}`;
@@ -55,7 +56,10 @@ export function useTrackFeed() {
       }
 
       if (selectedAlbum) {
-        const items = await tracksService.getAlbumTracks(selectedAlbum, { signal });
+        const items = await tracksService.getAlbumTracks(selectedAlbum, {
+          artist: selectedAlbumArtist,
+          signal,
+        });
         return { items, total: items.length, hasMore: false };
       }
 
@@ -74,7 +78,7 @@ export function useTrackFeed() {
         signal,
       });
     },
-    [selectedArtist, selectedAlbum, selectedGenre, debouncedSearch],
+    [selectedArtist, selectedAlbum, selectedAlbumArtist, selectedGenre, debouncedSearch],
   );
 
   // First page, and a full reset whenever the source changes.

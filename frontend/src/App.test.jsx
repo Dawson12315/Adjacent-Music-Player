@@ -73,7 +73,10 @@ function stubApi({ signedIn = true, overrides = {} } = {}) {
 
     "/api/tracks/count": { count: TRACKS.length },
     "/api/artists": ["New Order", "Queen"],
-    "/api/albums": ["A Night at the Opera", "Power, Corruption & Lies"],
+    "/api/albums": [
+      { id: "A Night at the Opera\u001fQueen", name: "A Night at the Opera", artist: "Queen", track_count: 12 },
+      { id: "Power, Corruption & Lies\u001fNew Order", name: "Power, Corruption & Lies", artist: "New Order", track_count: 8 },
+    ],
     "/api/genres": ["Rock", "Synth-pop"],
     "/api/playlists": PLAYLISTS,
     "/api/albums/artwork": { artwork: {} },

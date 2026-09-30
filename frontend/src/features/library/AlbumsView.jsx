@@ -91,24 +91,24 @@ export function AlbumsView() {
       {viewMode === "grid" ? (
         <div className="entity-grid">
           {shown.map((album) => (
-            <div key={album} className="entity-card">
-              <Link to={buildAlbumPath(album)} style={{ display: "contents" }}>
+            <div key={album.id} className="entity-card">
+              <Link to={buildAlbumPath(album.name, album.artist)} style={{ display: "contents" }}>
                 <Artwork
-                  artwork={resolveAlbumArtwork(album, albumArtworkMap)}
+                  artwork={resolveAlbumArtwork(album.name, albumArtworkMap)}
                   className="entity-card__art"
                   size={160}
                 />
                 <span className="entity-card__body">
-                  <span className="entity-card__name">{album}</span>
-                  <span className="entity-card__meta">Album</span>
+                  <span className="entity-card__name">{album.name}</span>
+                  <span className="entity-card__meta">{album.artist || "Album"}</span>
                 </span>
               </Link>
 
               <button
                 className="entity-card__menu-button"
                 type="button"
-                onClick={() => openArtworkEditor(album)}
-                aria-label={`Change artwork for ${album}`}
+                onClick={() => openArtworkEditor(album.name)}
+                aria-label={`Change artwork for ${album.name}`}
               >
                 <Icon name="more" size={16} />
               </button>
@@ -118,21 +118,21 @@ export function AlbumsView() {
       ) : (
         <div className="entity-list">
           {shown.map((album) => (
-            <div key={album} className="entity-row">
+            <div key={album.id} className="entity-row">
               <Artwork
-                artwork={resolveAlbumArtwork(album, albumArtworkMap)}
+                artwork={resolveAlbumArtwork(album.name, albumArtworkMap)}
                 className="entity-row__art"
                 size={44}
               />
-              <Link to={buildAlbumPath(album)} className="entity-card__body">
-                <span className="entity-row__name">{album}</span>
-                <span className="entity-row__meta">Album</span>
+              <Link to={buildAlbumPath(album.name, album.artist)} className="entity-card__body">
+                <span className="entity-row__name">{album.name}</span>
+                <span className="entity-row__meta">{album.artist || "Album"}</span>
               </Link>
               <button
                 className="btn btn--icon btn--ghost btn--sm"
                 type="button"
-                onClick={() => openArtworkEditor(album)}
-                aria-label={`Change artwork for ${album}`}
+                onClick={() => openArtworkEditor(album.name)}
+                aria-label={`Change artwork for ${album.name}`}
               >
                 <Icon name="more" size={16} />
               </button>

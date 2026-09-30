@@ -16,8 +16,11 @@ export function buildArtistPath(name) {
   return `/artists/${encodeURIComponent(name)}`;
 }
 
-export function buildAlbumPath(name) {
-  return `/albums/${encodeURIComponent(name)}`;
+export function buildAlbumPath(name, artist) {
+  // The artist rides in the query: an album is a title and an artist, and
+  // two artists' "Greatest Hits" are two pages.
+  const base = `/albums/${encodeURIComponent(name)}`;
+  return artist ? `${base}?artist=${encodeURIComponent(artist)}` : base;
 }
 
 export function buildGenrePath(name) {
@@ -76,6 +79,7 @@ export function useNavigation() {
   } = parseLocation(pathname);
 
   const searchQuery = searchParams.get("q") || "";
+  const selectedAlbumArtist = selectedAlbum ? searchParams.get("artist") || null : null;
   const page = Math.max(1, Number(searchParams.get("page") || 1));
 
   const setSearchQuery = useCallback(
@@ -119,7 +123,7 @@ export function useNavigation() {
   );
 
   const goToArtist = useCallback((name) => navigate(buildArtistPath(name)), [navigate]);
-  const goToAlbum = useCallback((name) => navigate(buildAlbumPath(name)), [navigate]);
+  const goToAlbum = useCallback((name, artist) => navigate(buildAlbumPath(name, artist)), [navigate]);
   const goToGenre = useCallback((name) => navigate(buildGenrePath(name)), [navigate]);
   const goToPlaylist = useCallback(
     (playlistId) => navigate(buildPlaylistPath(playlistId)),
@@ -133,6 +137,7 @@ export function useNavigation() {
       activeView,
       selectedArtist,
       selectedAlbum,
+      selectedAlbumArtist,
       selectedGenre,
       selectedPlaylistId,
       searchQuery,
@@ -151,6 +156,7 @@ export function useNavigation() {
       activeView,
       selectedArtist,
       selectedAlbum,
+      selectedAlbumArtist,
       selectedGenre,
       selectedPlaylistId,
       searchQuery,

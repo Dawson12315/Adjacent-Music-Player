@@ -68,12 +68,12 @@ export async function getArtistTracks(artistName, options) {
   return normalizeTracks(data, { metadataComplete: true });
 }
 
-/** Every track on one album. */
-export async function getAlbumTracks(albumName, options) {
-  const data = await apiClient.get(
-    `/api/albums/${encodeURIComponent(albumName)}/tracks`,
-    options,
-  );
+/** Every track on one album; one artist's record of it when `artist` is given. */
+export async function getAlbumTracks(albumName, { artist, signal } = {}) {
+  const data = await apiClient.get(`/api/albums/${encodeURIComponent(albumName)}/tracks`, {
+    params: artist ? { artist } : undefined,
+    signal,
+  });
 
   return normalizeTracks(data, { metadataComplete: true });
 }

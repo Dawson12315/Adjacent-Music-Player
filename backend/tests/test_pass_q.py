@@ -166,3 +166,20 @@ def test_album_tracks_can_be_narrowed_to_one_artist(client, two_greatest_hits):
 
     nobody = _items(client.get("/api/mobile/albums/Greatest%20Hits/tracks", params={"artist": "Nobody"}))
     assert nobody == []
+
+
+def test_the_web_album_index_and_page_tell_artists_apart(client, two_greatest_hits):
+    ids, _ = two_greatest_hits
+
+    titles = client.get("/api/albums").json()
+    assert titles.count("Greatest Hits") == 1
+
+    detailed = [row for row in client.get("/api/albums", params={"detailed": 1}).json() if row["name"] == "Greatest Hits"]
+    assert sorted((row["artist"], row["track_count"]) for row in detailed) == [("Fen", 2), ("Olafur", 1)]
+    assert len({row["id"] for row in detailed}) == 2
+
+    everything = _items(client.get("/api/albums/Greatest%20Hits/tracks"))
+    assert len(everything) == 3
+    fen_only = _items(client.get("/api/albums/Greatest%20Hits/tracks", params={"artist": "Fen", "fields": "list"}))
+    assert sorted(track["title"] for track in fen_only) == ["Fen 0", "Fen 1"]
+    assert "file_path" not in fen_only[0]
