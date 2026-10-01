@@ -33,6 +33,7 @@ from app.services.auth import (
     create_access_token,
     get_user_by_username,
     hash_password,
+    set_session_cookie,
     verify_password,
 )
 from app.services.rate_limit import (
@@ -54,15 +55,9 @@ router = APIRouter(tags=["auth"])
 
 
 def set_auth_cookie(response: Response, token: str):
-    response.set_cookie(
-        key=settings.auth_cookie_name,
-        value=token,
-        httponly=True,
-        secure=settings.cookie_secure,
-        samesite="lax",
-        max_age=settings.access_token_expire_minutes * 60,
-        path="/",
-    )
+    # The attributes live with the token helpers, because the middleware that
+    # renews a session mid-use has to write exactly the same cookie.
+    set_session_cookie(response, token)
 
 
 def rate_limit_key(request: Request, username: str) -> str:

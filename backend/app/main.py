@@ -121,6 +121,13 @@ from app.middleware.etag import ETagMiddleware  # noqa: E402
 
 app.add_middleware(ETagMiddleware)
 
+# Outside the ETag middleware, so a 304 carries the refreshed cookie too: the
+# phone's index requests are mostly 304s, and they are proof of life like any
+# other request.
+from app.middleware.session_refresh import SessionRefreshMiddleware  # noqa: E402
+
+app.add_middleware(SessionRefreshMiddleware)
+
 from app.middleware.security_headers import SecurityHeadersMiddleware  # noqa: E402
 
 app.add_middleware(SecurityHeadersMiddleware)
