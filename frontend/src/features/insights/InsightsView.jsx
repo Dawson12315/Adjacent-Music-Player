@@ -299,7 +299,7 @@ function TrackPanel({ title, icon, tracks, countKey, unit, albumArtworkMap, onPl
               >
                 <span className="track-row__index">{index + 1}</span>
                 <Artwork
-                  artwork={resolveAlbumArtwork(track.album, albumArtworkMap)}
+                  artwork={resolveAlbumArtwork(track.album, albumArtworkMap, track.artist)}
                   className="track-row__art"
                   size={40}
                 />

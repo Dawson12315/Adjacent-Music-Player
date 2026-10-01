@@ -11,7 +11,7 @@ import { useArtworkUpload } from "../../hooks/useArtworkUpload";
 import { useInfiniteScroll } from "../../hooks/useInfiniteScroll";
 import { buildAlbumPath } from "../../hooks/useNavigation";
 import { uploadAlbumArtwork } from "../../services/albumsService";
-import { getAlbumKey, resolveAlbumArtwork } from "../../utils/artwork";
+import { getAlbumArtworkPath, getAlbumKey, resolveAlbumArtwork } from "../../utils/artwork";
 import { useLibraryFilters } from "./useLibraryFilters";
 
 const PAGE_SIZE = 60;
@@ -45,7 +45,7 @@ export function AlbumsView() {
 
   function openArtworkEditor(album) {
     setArtworkAlbum(album);
-    upload.setExistingArtwork(albumArtworkMap[getAlbumKey(album)]);
+    upload.setExistingArtwork(getAlbumArtworkPath(album.name, albumArtworkMap, album.artist));
   }
 
   function closeArtworkEditor() {
@@ -59,8 +59,12 @@ export function AlbumsView() {
     setIsSaving(true);
 
     try {
-      const result = await uploadAlbumArtwork(artworkAlbum, upload.file);
-      setAlbumArtwork(getAlbumKey(artworkAlbum), result.artwork_path || "");
+      const result = await uploadAlbumArtwork(artworkAlbum.name, upload.file, artworkAlbum.artist);
+      // The server names the key it stored the picture under; the record's own.
+      setAlbumArtwork(
+        result.album_key || getAlbumKey(artworkAlbum.name, artworkAlbum.artist),
+        result.artwork_path || ""
+      );
       notify("Album artwork updated.");
       closeArtworkEditor();
     } catch (error) {
@@ -94,7 +98,7 @@ export function AlbumsView() {
             <div key={album.id} className="entity-card">
               <Link to={buildAlbumPath(album.name, album.artist)} style={{ display: "contents" }}>
                 <Artwork
-                  artwork={resolveAlbumArtwork(album.name, albumArtworkMap)}
+                  artwork={resolveAlbumArtwork(album.name, albumArtworkMap, album.artist)}
                   className="entity-card__art"
                   size={160}
                 />
@@ -107,7 +111,7 @@ export function AlbumsView() {
               <button
                 className="entity-card__menu-button"
                 type="button"
-                onClick={() => openArtworkEditor(album.name)}
+                onClick={() => openArtworkEditor(album)}
                 aria-label={`Change artwork for ${album.name}`}
               >
                 <Icon name="more" size={16} />
@@ -120,7 +124,7 @@ export function AlbumsView() {
           {shown.map((album) => (
             <div key={album.id} className="entity-row">
               <Artwork
-                artwork={resolveAlbumArtwork(album.name, albumArtworkMap)}
+                artwork={resolveAlbumArtwork(album.name, albumArtworkMap, album.artist)}
                 className="entity-row__art"
                 size={44}
               />
@@ -131,7 +135,7 @@ export function AlbumsView() {
               <button
                 className="btn btn--icon btn--ghost btn--sm"
                 type="button"
-                onClick={() => openArtworkEditor(album.name)}
+                onClick={() => openArtworkEditor(album)}
                 aria-label={`Change artwork for ${album.name}`}
               >
                 <Icon name="more" size={16} />
@@ -152,7 +156,7 @@ export function AlbumsView() {
       {artworkAlbum && (
         <ArtworkUploadModal
           title="Change album artwork"
-          previewLabel={artworkAlbum}
+          previewLabel={artworkAlbum.artist ? `${artworkAlbum.name} · ${artworkAlbum.artist}` : artworkAlbum.name}
           previewUrl={upload.previewUrl}
           fileName={upload.file?.name}
           onSelectFile={upload.selectFile}

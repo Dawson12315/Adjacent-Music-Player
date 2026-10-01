@@ -13,7 +13,13 @@ from app.dependencies.auth import get_current_user, require_admin
 from app.models.album_artwork import AlbumArtwork
 from app.models.track import Track
 from app.models.user import User
-from app.services.track_responses import build_track_payloads, track_load_options
+from app.services.track_responses import (
+    album_artwork_key,
+    album_artwork_keys,
+    build_track_payloads,
+    resolve_album_artwork,
+    track_load_options,
+)
 from app.routes.artists import page_envelope
 from app.services.track_order import album_track_order
 
@@ -124,7 +130,10 @@ def list_mobile_albums(
         total = db.query(func.count()).select_from(grouped.subquery()).scalar() or 0
         album_rows = grouped.offset(offset).limit(limit).all()
 
-    album_keys = list({normalize_album_name(row.album) for row in album_rows if row.album})
+    # Each record's own key and the bare title key it may still live under.
+    album_keys = list(
+        {key for row in album_rows for key in album_artwork_keys(row.album, row.artist)}
+    )
     artwork_by_key: dict[str, str] = {}
     for start in range(0, len(album_keys), _IN_CHUNK_SIZE):
         chunk = album_keys[start : start + _IN_CHUNK_SIZE]
@@ -144,8 +153,8 @@ def list_mobile_albums(
             "artist": row.artist or "Unknown Artist",
             "trackCount": row.track_count,
             "track_count": row.track_count,
-            "artwork_path": artwork_by_key.get(normalize_album_name(row.album)),
-            "album_artwork_path": artwork_by_key.get(normalize_album_name(row.album)),
+            "artwork_path": resolve_album_artwork(artwork_by_key, row.album, row.artist),
+            "album_artwork_path": resolve_album_artwork(artwork_by_key, row.album, row.artist),
         }
         for row in album_rows
         if row.album
@@ -231,32 +240,41 @@ def get_album_tracks(
 @router.get("/albums/{album_name:path}/artwork", tags=["albums"])
 def get_album_artwork(
     album_name: str,
+    # One artist's record of the title. Without it, the title's shared
+    # artwork, as before.
+    artist: str | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    album_key = normalize_album_name(album_name)
-
-    artwork = (
-        db.query(AlbumArtwork)
-        .filter(AlbumArtwork.album_key == album_key)
-        .first()
+    keys = album_artwork_keys(album_name, artist)
+    rows = (
+        db.query(AlbumArtwork.album_key, AlbumArtwork.artwork_path)
+        .filter(AlbumArtwork.album_key.in_(keys))
+        .all()
+        if keys
+        else []
     )
 
     return {
         "album_name": album_name,
-        "album_key": album_key,
-        "artwork_path": artwork.artwork_path if artwork else None,
+        "album_key": album_artwork_key(album_name, artist),
+        "artwork_path": resolve_album_artwork(
+            {row.album_key: row.artwork_path for row in rows}, album_name, artist
+        ),
     }
 
 
 @router.post("/albums/{album_name:path}/artwork", tags=["albums"])
 def upload_album_artwork(
     album_name: str,
+    # The record the picture is for. Artwork used to be keyed by the title
+    # alone, so two artists' "Greatest Hits" shared one picture.
+    artist: str | None = Query(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    album_key = normalize_album_name(album_name)
+    album_key = album_artwork_key(album_name, artist)
 
     if not album_key:
         raise HTTPException(status_code=400, detail="Invalid album name")
@@ -283,6 +301,19 @@ def upload_album_artwork(
         .first()
     )
 
+    # A picture set before records were told apart sits under the bare title
+    # and shows on every record of that title. Setting one record's artwork
+    # claims that row for it, so the other records stop showing a picture
+    # that was never theirs.
+    if artwork is None:
+        plain_key = normalize_album_name(album_name)
+        if plain_key != album_key:
+            artwork = (
+                db.query(AlbumArtwork)
+                .filter(AlbumArtwork.album_key == plain_key)
+                .first()
+            )
+
     if artwork:
         if artwork.artwork_path:
             old_filename = os.path.basename(artwork.artwork_path)
@@ -295,6 +326,7 @@ def upload_album_artwork(
                     pass
 
         artwork.album_name = album_name
+        artwork.album_key = album_key
         artwork.artwork_path = artwork_path
     else:
         artwork = AlbumArtwork(

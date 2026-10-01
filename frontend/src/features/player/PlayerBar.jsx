@@ -31,7 +31,7 @@ export function PlayerBar() {
     toggleLike,
   } = usePlayer();
 
-  const artwork = currentTrack ? resolveAlbumArtwork(currentTrack.album, albumArtworkMap) : null;
+  const artwork = currentTrack ? resolveAlbumArtwork(currentTrack.album, albumArtworkMap, currentTrack.artist) : null;
 
   return (
     <footer className="player-bar">

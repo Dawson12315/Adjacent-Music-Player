@@ -24,14 +24,59 @@ def normalize_album_key(album_name: str | None) -> str:
     return " ".join((album_name or "").strip().casefold().split())
 
 
+# Between the title and the artist in a record's artwork key. Artwork used to
+# be keyed by the title alone, so two artists' "Greatest Hits" shared one
+# picture: setting it for either changed both.
+ARTWORK_KEY_SEPARATOR = "\u001f"
+
+
+def album_artwork_key(album_name: str | None, artist: str | None) -> str:
+    """The key one artist's record of a title is stored under.
+
+    A record without an artist keeps the bare title key.
+    """
+    album_key = normalize_album_key(album_name)
+    artist_key = normalize_album_key(artist)
+    if not album_key or not artist_key:
+        return album_key
+    return f"{album_key}{ARTWORK_KEY_SEPARATOR}{artist_key}"
+
+
+def album_artwork_keys(album_name: str | None, artist: str | None) -> list[str]:
+    """The keys a record's artwork may sit under, most specific first.
+
+    The bare title key is where artwork set before records were told apart
+    still lives; it answers until that record gets its own.
+    """
+    keyed = album_artwork_key(album_name, artist)
+    plain = normalize_album_key(album_name)
+    if not plain:
+        return []
+    return [keyed, plain] if keyed != plain else [plain]
+
+
+def resolve_album_artwork(
+    album_map: dict[str, str], album_name: str | None, artist: str | None
+) -> str | None:
+    for key in album_artwork_keys(album_name, artist):
+        path = album_map.get(key)
+        if path:
+            return path
+    return None
+
+
 def get_artwork_maps(
     db: Session, tracks: list[Track]
 ) -> tuple[dict[str, str], dict[str, str]]:
-    """(album_key -> path, artist_key -> path) for exactly the keys needed."""
+    """(album_key -> path, artist_key -> path) for exactly the keys needed.
+
+    The album map holds whichever of a record's keys have artwork; read it
+    through `resolve_album_artwork`, which tries them in order.
+    """
     album_keys = {
         key
-        for key in (normalize_album_key(track.album) for track in tracks)
-        if key
+        for track in tracks
+        for key in album_artwork_keys(track.album, track.artist)
     }
     artist_keys = {
         key
@@ -72,7 +117,7 @@ def build_track_response_from_maps(
     album_map: dict[str, str],
     artist_map: dict[str, str],
 ) -> TrackResponse:
-    album_artwork_path = album_map.get(normalize_album_key(track.album))
+    album_artwork_path = resolve_album_artwork(album_map, track.album, track.artist)
     artist_artwork_path = artist_map.get(normalize_artist_name(track.artist))
 
     return TrackResponse(
@@ -159,7 +204,7 @@ def build_track_list_items(db: Session, tracks: list[Track]) -> list[dict]:
     items = []
 
     for track in tracks:
-        album_artwork_path = album_map.get(normalize_album_key(track.album))
+        album_artwork_path = resolve_album_artwork(album_map, track.album, track.artist)
         items.append(
             {
                 "id": track.id,

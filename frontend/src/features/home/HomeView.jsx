@@ -33,7 +33,7 @@ export function HomeView() {
   );
 
   const artworkFor = useCallback(
-    (track) => resolveAlbumArtwork(track.album, albumArtworkMap),
+    (track) => resolveAlbumArtwork(track.album, albumArtworkMap, track.artist),
     [albumArtworkMap],
   );
 

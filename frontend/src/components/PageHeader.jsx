@@ -89,7 +89,7 @@ export function PageHeader() {
     ? getArtistArtworkPath(selectedArtist, artistArtworkMap)
     : null;
   const albumArtwork = selectedAlbum
-    ? resolveAlbumArtwork(selectedAlbum, albumArtworkMap)
+    ? resolveAlbumArtwork(selectedAlbum, albumArtworkMap, selectedAlbumArtist)
     : null;
 
   const isEntityView = Boolean(selectedArtist || selectedAlbum || selectedGenre);

@@ -23,7 +23,7 @@ router = APIRouter()
 
 # Bumped whenever a client-facing route or field is added. Clients compare it
 # with the version they were built against.
-API_VERSION = 4
+API_VERSION = 5
 
 # The oldest mobile build this API still serves whole.
 MIN_CLIENT_VERSION = "1.0.31"
@@ -43,6 +43,9 @@ CAPABILITIES = [
     "etag",
     "top-genres",
     "liked-track-ids",
+    # Album artwork belongs to one artist's record of a title, not to every
+    # record that shares the title: the artwork routes take `artist`.
+    "album-artwork-by-artist",
 ]
 
 _FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None

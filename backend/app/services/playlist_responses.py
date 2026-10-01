@@ -13,7 +13,11 @@ from app.models.playlist import Playlist
 from app.models.playlist_track import PlaylistTrack
 from app.models.track import Track
 from app.schemas.playlist import PlaylistPreviewItem, PlaylistResponse
-from app.services.track_responses import get_artwork_maps, normalize_album_key
+from app.services.track_responses import (
+    album_artwork_key,
+    get_artwork_maps,
+    resolve_album_artwork,
+)
 
 # A mosaic is four tiles: the first four distinct albums, in playlist order.
 PREVIEW_TILES = 4
@@ -78,7 +82,7 @@ def _previews(db: Session, playlist_ids: list[int]) -> dict[int, list[PlaylistPr
         items = previews.setdefault(playlist_id, [])
         if len(items) >= PREVIEW_TILES:
             continue
-        album_key = normalize_album_key(track.album)
+        album_key = album_artwork_key(track.album, track.artist)
         key = album_key or f"track:{track.id}"
         keys = seen.setdefault(playlist_id, set())
         if key in keys:
@@ -88,7 +92,7 @@ def _previews(db: Session, playlist_ids: list[int]) -> dict[int, list[PlaylistPr
             PlaylistPreviewItem(
                 title=track.title,
                 album=track.album,
-                artwork_path=album_map.get(album_key) if album_key else None,
+                artwork_path=resolve_album_artwork(album_map, track.album, track.artist),
             )
         )
     return previews

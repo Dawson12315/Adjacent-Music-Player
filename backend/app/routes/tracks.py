@@ -36,17 +36,18 @@ from app.models.track_genre import TrackGenre
 from app.models.track_lastfm_similarity import TrackLastfmSimilarity
 from app.models.track_user_stats import TrackUserStats
 from app.models.user import User
-from app.routes.albums import normalize_album_name
 from app.schemas.track import TrackResponse
 from app.schemas.track_edit import TrackUpdate
 from app.services.auth import get_user_by_id
 from app.services.lastfm import scrobble_track, update_now_playing
 from app.services.stream_cache_maintenance import clear_stream_caches
 from app.services.track_responses import (
+    album_artwork_keys,
     build_single_track_response,
     build_track_payloads,
     build_track_response_from_maps,
     build_track_responses,
+    resolve_album_artwork,
     track_load_options,
 )
 from app.services.metadata_normalizer import normalize_genre_list
@@ -1041,22 +1042,21 @@ def verify_stream_token(token: str, track_id: int, db: Session) -> bool:
     return bool(user and user.is_active)
 
 
-def get_album_artwork_path(db: Session, album_name: str | None) -> str | None:
-    if not album_name:
+def get_album_artwork_path(
+    db: Session, album_name: str | None, artist: str | None = None
+) -> str | None:
+    keys = album_artwork_keys(album_name, artist)
+    if not keys:
         return None
 
-    album_key = normalize_album_name(album_name)
-
-    if not album_key:
-        return None
-
-    artwork = (
-        db.query(AlbumArtwork)
-        .filter(AlbumArtwork.album_key == album_key)
-        .first()
+    rows = (
+        db.query(AlbumArtwork.album_key, AlbumArtwork.artwork_path)
+        .filter(AlbumArtwork.album_key.in_(keys))
+        .all()
     )
-
-    return artwork.artwork_path if artwork else None
+    return resolve_album_artwork(
+        {row.album_key: row.artwork_path for row in rows}, album_name, artist
+    )
 
 
 def get_artist_artwork_path(db: Session, artist_name: str | None) -> str | None:

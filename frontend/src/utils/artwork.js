@@ -14,9 +14,36 @@ const TONE_COUNT = 10;
  * normalizers (`normalize_album_name`, `normalize_artist_name`) — look up with a raw
  * display name and every "AC/DC" or "Awaken, My Love!" silently misses its photo.
  */
-export function getAlbumKey(albumName) {
+/**
+ * Between the title and the artist in a record's key. Artwork used to be keyed by the
+ * title alone, so two artists' "Greatest Hits" shared one picture.
+ */
+const ALBUM_KEY_SEPARATOR = "\u001f";
+
+function normalizeAlbumPart(value) {
   // Python: " ".join(name.strip().casefold().split())
-  return (albumName || "").trim().toLowerCase().split(/\s+/).join(" ");
+  return (value || "").trim().toLowerCase().split(/\s+/).join(" ");
+}
+
+/** The key one artist's record of a title is stored under; the bare title without one. */
+export function getAlbumKey(albumName, artist) {
+  const albumKey = normalizeAlbumPart(albumName);
+  const artistKey = normalizeAlbumPart(artist);
+  if (!albumKey || !artistKey) {
+    return albumKey;
+  }
+  return `${albumKey}${ALBUM_KEY_SEPARATOR}${artistKey}`;
+}
+
+/**
+ * The record's own picture, else the title-wide one set before records were told apart.
+ */
+export function getAlbumArtworkPath(albumName, artworkMap, artist) {
+  const own = artworkMap?.[getAlbumKey(albumName, artist)];
+  if (own) {
+    return own;
+  }
+  return artworkMap?.[getAlbumKey(albumName)] || "";
 }
 
 export function getArtistKey(artistName) {
@@ -86,8 +113,8 @@ function generated(name) {
   };
 }
 
-export function resolveAlbumArtwork(albumName, artworkMap) {
-  const path = artworkMap?.[getAlbumKey(albumName)];
+export function resolveAlbumArtwork(albumName, artworkMap, artist) {
+  const path = getAlbumArtworkPath(albumName, artworkMap, artist);
 
   if (path) {
     return { type: "image", src: artworkUrl(path), alt: albumName || "" };

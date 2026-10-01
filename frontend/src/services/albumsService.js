@@ -29,9 +29,11 @@ export function getAlbumArtwork(albumName, options) {
   return apiClient.get(`/api/albums/${encode(albumName)}/artwork`, options);
 }
 
-export function uploadAlbumArtwork(albumName, file) {
+/** The picture is one artist's record's, not the title's; pass the album's artist. */
+export function uploadAlbumArtwork(albumName, file, artist) {
   const formData = new FormData();
   formData.append("file", file);
 
-  return apiClient.post(`/api/albums/${encode(albumName)}/artwork`, formData);
+  const query = artist ? `?artist=${encode(artist)}` : "";
+  return apiClient.post(`/api/albums/${encode(albumName)}/artwork${query}`, formData);
 }

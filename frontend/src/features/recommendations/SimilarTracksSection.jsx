@@ -117,7 +117,7 @@ export function SimilarTracksSection({ sourceTrack, playlistId, onPlay, onAdd })
                 <Icon name="play" size={12} />
               </span>
               <Artwork
-                artwork={resolveAlbumArtwork(track.album, albumArtworkMap)}
+                artwork={resolveAlbumArtwork(track.album, albumArtworkMap, track.artist)}
                 className="track-row__art"
                 size={40}
               />
