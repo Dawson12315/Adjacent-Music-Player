@@ -10,13 +10,13 @@ const TONE_COUNT = 10;
 
 /**
  * The artwork maps from `/api/albums/artwork` and `/api/artists/artwork` are keyed by
- * the backend's *normalized* names, not display names. These two mirror the Python
- * normalizers (`normalize_album_name`, `normalize_artist_name`) — look up with a raw
+ * the backend's *normalized* names, not display names. The key builders here mirror the
+ * Python ones (`album_artwork_key`, `normalize_artist_name`) — look up with a raw
  * display name and every "AC/DC" or "Awaken, My Love!" silently misses its photo.
- */
-/**
- * Between the title and the artist in a record's key. Artwork used to be keyed by the
- * title alone, so two artists' "Greatest Hits" shared one picture.
+ *
+ * `ALBUM_KEY_SEPARATOR` is what sits between a record's title and its artist. Artwork
+ * used to be keyed by the title alone, so two artists' "Greatest Hits" shared one
+ * picture: setting it for either changed both.
  */
 const ALBUM_KEY_SEPARATOR = "\u001f";
 
