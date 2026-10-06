@@ -1,7 +1,7 @@
 import hashlib
 from datetime import datetime, timedelta, timezone
 
-from jose import JWTError, jwt
+import jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from starlette.responses import Response
@@ -135,7 +135,7 @@ def decode_access_token(token: str) -> dict | None:
             settings.auth_secret_key,
             algorithms=[settings.auth_algorithm],
         )
-    except JWTError:
+    except jwt.PyJWTError:
         return None
 
 

@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
-from jose import JWTError, jwt
+import jwt
 from uuid import uuid4
 
 from app.config import settings
@@ -1021,7 +1021,7 @@ def verify_stream_token(token: str, track_id: int, db: Session) -> bool:
             settings.auth_secret_key,
             algorithms=[settings.auth_algorithm],
         )
-    except JWTError:
+    except jwt.PyJWTError:
         return False
 
     if payload.get("purpose") != "mobile_stream":

@@ -144,7 +144,7 @@ def test_tokens_without_a_pwd_claim_are_grandfathered(signed_in):
     before the claim existed carry no 'pwd' and stay valid."""
     from datetime import datetime, timedelta, timezone
 
-    from jose import jwt
+    import jwt
 
     from app.config import settings
     from app.main import app

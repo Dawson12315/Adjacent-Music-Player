@@ -7,8 +7,8 @@ a session past half its life now goes back out with a fresh cookie.
 
 from datetime import datetime, timedelta, timezone
 
+import jwt
 import pytest
-from jose import jwt
 
 from app.config import settings
 from app.services.auth import (
