@@ -64,6 +64,19 @@ export function PlaylistView() {
     [actions, playTrack, playlistTracks, selectedPlaylistId],
   );
 
+  // A suggestion plays inside the suggestions, so next and previous walk
+  // the list on screen rather than the playlist above it.
+  const handlePlayRecommendation = useCallback(
+    (track, suggestions) => {
+      actions.closeMenu();
+      playTrack(track, suggestions, {
+        source_type: "recommendation",
+        source_id: selectedPlaylistId,
+      });
+    },
+    [actions, playTrack, selectedPlaylistId],
+  );
+
   const handleRemove = useCallback(
     async (trackId) => {
       try {
@@ -112,7 +125,7 @@ export function PlaylistView() {
 
         <SimilarTracksSection
           playlistId={selectedPlaylistId}
-          onPlay={handlePlay}
+          onPlay={handlePlayRecommendation}
           onAdd={handleAddRecommendation}
         />
       </>
@@ -145,7 +158,7 @@ export function PlaylistView() {
 
       <SimilarTracksSection
         playlistId={selectedPlaylistId}
-        onPlay={handlePlay}
+        onPlay={handlePlayRecommendation}
         onAdd={handleAddRecommendation}
       />
     </>

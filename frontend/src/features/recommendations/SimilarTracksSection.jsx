@@ -21,6 +21,8 @@ const LIMIT = 10;
  * Last.fm similarity tables, the co-occurrence data, or listening behaviour.
  */
 export function SimilarTracksSection({ sourceTrack, playlistId, onPlay, onAdd }) {
+  // `onPlay(track, tracks)`: the whole list rides along, so a caller can
+  // make the suggestions the queue rather than whatever list it sits under.
   const { albumArtworkMap } = useLibrary();
 
   const [tracks, setTracks] = useState([]);
@@ -112,7 +114,11 @@ export function SimilarTracksSection({ sourceTrack, playlistId, onPlay, onAdd })
       <div className="similar-section__list">
         {tracks.map((track) => (
           <div className="track-row" key={track.id}>
-            <button className="track-row__main" type="button" onClick={() => onPlay(track)}>
+            <button
+              className="track-row__main"
+              type="button"
+              onClick={() => onPlay(track, tracks)}
+            >
               <span className="track-row__index">
                 <Icon name="play" size={12} />
               </span>
