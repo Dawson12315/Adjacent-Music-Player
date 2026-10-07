@@ -297,6 +297,31 @@
   align-items: center;
 }
 
+/* A row that opens what it names: a button dressed as the rows around it. */
+.bar-row--link {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm, 6px);
+}
+
+.bar-row--link:hover .bar-row__label,
+.bar-row--link:focus-visible .bar-row__label {
+  color: var(--blue-300);
+}
+
+.bar-row--link:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
 .bar-row__label {
   font-size: var(--text-xs);
   overflow: hidden;

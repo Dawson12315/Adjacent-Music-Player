@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import * as statsService from "../../services/statsService";
+import { browserTimeZone } from "../../utils/timezone";
 
 const EMPTY = {
   summary: null,
@@ -45,13 +46,16 @@ export function useInsightsData() {
         })
         .catch(() => {});
 
+    // The browser's zone rides along; a zone chosen in Settings wins over it.
+    const tz = browserTimeZone();
+
     Promise.all([
-      settle(statsService.getSummary({ signal }), "summary"),
-      settle(statsService.getPlaysOverTime({ days: 30, signal }), "playsOverTime"),
+      settle(statsService.getSummary({ tz, signal }), "summary"),
+      settle(statsService.getPlaysOverTime({ days: 30, tz, signal }), "playsOverTime"),
       settle(statsService.getTopArtists({ limit: 8, signal }), "topArtists"),
       settle(statsService.getTopAlbums({ limit: 8, signal }), "topAlbums"),
       settle(statsService.getBySource({ signal }), "bySource"),
-      settle(statsService.getByHour({ signal }), "byHour"),
+      settle(statsService.getByHour({ tz, signal }), "byHour"),
       settle(statsService.getTopPlayed(8, signal), "topPlayed"),
       settle(statsService.getMostLiked(8, signal), "mostLiked"),
       settle(statsService.getMostSkipped(8, signal), "mostSkipped"),

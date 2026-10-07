@@ -33,3 +33,9 @@ class User(Base):
     # TEMP_PASSWORD_TTL_HOURS and the admin re-issues. NULL means "no temp
     # password pending" — including for every account that predates this.
     temp_password_issued_at = Column(DateTime, nullable=True)
+
+    # The IANA zone this account's days and hours are counted in
+    # (routes/stats.py). NULL means "not chosen": the client's device zone
+    # stands in, then the server's own. Added nullable so sync_model_columns
+    # applies it on both engines without a hand migration.
+    timezone = Column(String(64), nullable=True)

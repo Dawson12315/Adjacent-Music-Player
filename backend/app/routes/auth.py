@@ -14,6 +14,7 @@ TEMP_PASSWORD_TTL_HOURS = 48
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
+from app.services.timezones import normalize_zone_name
 from app.config import settings
 from app.db import get_db
 from app.dependencies.auth import get_current_user
@@ -27,6 +28,7 @@ from app.schemas.auth import (
     UserResponse,
     PasswordRecoveryRequest,
     RecoveryCodesResponse,
+    PreferencesUpdateRequest,
 )
 from app.services.auth import (
     admin_exists,
@@ -365,6 +367,31 @@ def regenerate_recovery_codes(
     db.commit()
 
     return {"recovery_codes": recovery_codes}
+
+
+@router.patch("/auth/me/preferences", response_model=UserResponse, tags=["auth"])
+def update_preferences(
+    payload: PreferencesUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """A preference, not a credential: no password asked.
+
+    The account route above re-fingerprints the session and insists on the
+    current password, which is right for a username or password and wrong
+    for a time zone. Allowed to an account still owing a password, too.
+    """
+    if payload.timezone is None or not payload.timezone.strip():
+        current_user.timezone = None
+    else:
+        zone = normalize_zone_name(payload.timezone)
+        if zone is None:
+            raise HTTPException(status_code=422, detail=f"Unknown time zone: {payload.timezone}")
+        current_user.timezone = zone
+
+    db.commit()
+    db.refresh(current_user)
+    return current_user
 
 
 @router.post("/auth/recover-password")

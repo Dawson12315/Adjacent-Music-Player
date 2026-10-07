@@ -17,10 +17,19 @@ class UserResponse(BaseModel):
     is_active: bool
     must_change_password: bool = False
     created_at: datetime | None = None
+    # The IANA zone chosen in Settings, or null for "this device's".
+    timezone: str | None = None
 
     model_config = {
         "from_attributes": True,
     }
+
+
+class PreferencesUpdateRequest(BaseModel):
+    """Settings that are not credentials and need no password to change."""
+
+    # An IANA name, or null to go back to following the device.
+    timezone: str | None = Field(default=None, max_length=64)
 
 class StreamTokenResponse(BaseModel):
     token: str

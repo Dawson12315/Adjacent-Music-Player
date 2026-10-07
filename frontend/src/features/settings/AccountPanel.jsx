@@ -3,9 +3,31 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTransientMessage } from "../../hooks/useTransientMessage";
 import { generateRecoveryCodes } from "../../services/authService";
+import { browserTimeZone, timeZoneChoices, zoneLabel } from "../../utils/timezone";
 
 export function AccountPanel() {
-  const { currentUser, updateAccount, logout } = useAuth();
+  const { currentUser, updateAccount, updatePreferences, logout } = useAuth();
+
+  // Insights count days and hours in this zone. Empty means "follow this
+  // browser", which is what a fresh account gets.
+  const browserZone = browserTimeZone();
+  const [timezoneSaving, setTimezoneSaving] = useState(false);
+  const [timezoneError, setTimezoneError] = useTransientMessage();
+  const zoneChoices = timeZoneChoices();
+
+  async function handleTimezoneChange(event) {
+    const chosen = event.target.value || null;
+    setTimezoneError("");
+    setTimezoneSaving(true);
+
+    try {
+      await updatePreferences({ timezone: chosen });
+    } catch (saveError) {
+      setTimezoneError(saveError.message || "Could not save the time zone.");
+    } finally {
+      setTimezoneSaving(false);
+    }
+  }
 
   const [username, setUsername] = useState(currentUser?.username || "");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -159,6 +181,37 @@ export function AccountPanel() {
             Sign out
           </button>
         </div>
+      </div>
+
+      <div className="settings-card">
+        <div className="settings-card__title">Time zone</div>
+        <div className="settings-card__text">
+          Insights count your days, streaks and listening hours in this zone.
+          Left on this browser's, it follows wherever you sign in from.
+        </div>
+
+        <div aria-live="polite">
+          {timezoneError && <div className="settings-error">{timezoneError}</div>}
+        </div>
+
+        <label className="field">
+          <span className="field__label">Count my days in</span>
+          <select
+            className="input"
+            value={currentUser?.timezone || ""}
+            onChange={handleTimezoneChange}
+            disabled={timezoneSaving}
+          >
+            <option value="">
+              {browserZone ? `This browser's time zone (${zoneLabel(browserZone)})` : "This browser's time zone"}
+            </option>
+            {zoneChoices.map((zone) => (
+              <option key={zone} value={zone}>
+                {zoneLabel(zone)}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="settings-card">

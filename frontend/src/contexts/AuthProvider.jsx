@@ -121,6 +121,13 @@ export function AuthProvider({ children }) {
     return user;
   }, []);
 
+  // A preference, not a credential: the time zone Insights counts in.
+  const updatePreferences = useCallback(async (payload) => {
+    const user = await authService.updatePreferences(payload);
+    setCurrentUser(user);
+    return user;
+  }, []);
+
   const value = useMemo(
     () => ({
       currentUser,
@@ -134,6 +141,7 @@ export function AuthProvider({ children }) {
       login,
       logout,
       updateAccount,
+      updatePreferences,
     }),
     [
       currentUser,
@@ -146,6 +154,7 @@ export function AuthProvider({ children }) {
       login,
       logout,
       updateAccount,
+      updatePreferences,
     ],
   );
 

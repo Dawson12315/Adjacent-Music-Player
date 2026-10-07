@@ -58,6 +58,11 @@ export async function updateAccount({
   return data.user;
 }
 
+/** A preference, not a credential: no password asked. `null` follows the browser. */
+export async function updatePreferences({ timezone }) {
+  return apiClient.patch("/api/auth/me/preferences", { timezone: timezone || null });
+}
+
 export async function generateRecoveryCodes() {
   const data = await apiClient.post("/api/auth/recovery-codes");
   return data.recovery_codes || [];

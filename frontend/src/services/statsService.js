@@ -38,12 +38,17 @@ export const getRecentlyPlayed = (limit, signal) =>
   detailed("/api/stats/recently-played-detailed", limit, signal);
 
 /** Headline totals, rates and streaks. */
-export function getSummary(options) {
-  return apiClient.get("/api/stats/summary", options);
+/**
+ * `tz` is this browser's zone: the server counts days and hours in the
+ * account's saved zone when there is one, and in this otherwise, so a
+ * fresh account reads right before Settings has been visited.
+ */
+export function getSummary({ tz, ...options } = {}) {
+  return apiClient.get("/api/stats/summary", { ...options, params: { tz } });
 }
 
-export function getPlaysOverTime({ days = 30, signal } = {}) {
-  return apiClient.get("/api/stats/plays-over-time", { params: { days }, signal });
+export function getPlaysOverTime({ days = 30, tz, signal } = {}) {
+  return apiClient.get("/api/stats/plays-over-time", { params: { days, tz }, signal });
 }
 
 export function getTopArtists({ limit = 10, signal } = {}) {
@@ -63,8 +68,8 @@ export function getBySource(options) {
   return apiClient.get("/api/stats/by-source", options);
 }
 
-export function getByHour(options) {
-  return apiClient.get("/api/stats/by-hour", options);
+export function getByHour({ tz, ...options } = {}) {
+  return apiClient.get("/api/stats/by-hour", { ...options, params: { tz } });
 }
 
 /** The original overview, still used for its top_genres aggregate. */

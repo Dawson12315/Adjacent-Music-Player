@@ -1,6 +1,6 @@
-from datetime import date, datetime, timedelta
+from datetime import timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -11,10 +11,24 @@ from app.models.listening_event import ListeningEvent
 from app.models.track_genre import TrackGenre
 from app.models.track_user_stats import TrackUserStats
 from app.models.user import User
+from app.models.album_artwork import AlbumArtwork
+from app.routes.artists import artist_artwork_by_key
 from app.routes.tracks import build_track_response as build_artwork_track_response
-from app.utils.db_compat import hour_of_day, local_day
 from app.schemas.track import TrackResponse, TrackWithStatsResponse
-from app.services.track_responses import build_track_payloads, build_track_responses
+from app.services.timezones import (
+    local_day_of,
+    local_hour_of,
+    normalize_zone_name,
+    today_in,
+    utc_start_of_day,
+    zone_for,
+)
+from app.services.track_responses import (
+    album_artwork_keys,
+    build_track_payloads,
+    build_track_responses,
+)
+from app.utils.artist_normalization import normalize_artist_name
 from app.services.stats_service import (
     get_most_liked_tracks,
     get_most_liked_tracks_with_stats,
@@ -27,6 +41,32 @@ from app.services.stats_service import (
 )
 
 router = APIRouter()
+
+
+def stats_zone(current_user: User, tz: str | None):
+    """The zone this account's days and hours are counted in.
+
+    `tz` is the client's hint — its device zone — and only stands in where
+    the account has not chosen one in Settings. A name that is not a zone
+    is refused rather than silently falling back to the server's.
+    """
+    override = None
+    if tz:
+        override = normalize_zone_name(tz)
+        if override is None:
+            raise HTTPException(status_code=422, detail=f"Unknown time zone: {tz}")
+    return zone_for(getattr(current_user, "timezone", None), override)
+
+
+def play_started_stamps(db: Session, user_id: int, since=None) -> list:
+    """The timestamps of this account's play starts, oldest first."""
+    query = db.query(ListeningEvent.created_at).filter(
+        ListeningEvent.user_id == user_id,
+        ListeningEvent.event_type == "play_started",
+    )
+    if since is not None:
+        query = query.filter(ListeningEvent.created_at >= since)
+    return [row.created_at for row in query.order_by(ListeningEvent.created_at.asc()).all() if row.created_at]
 
 
 def build_track_with_stats_response(
@@ -184,9 +224,11 @@ def recently_played_tracks_detailed(
 
 @router.get("/stats/summary", tags=["stats"])
 def stats_summary(
+    tz: str | None = Query(None, max_length=64),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    zone = stats_zone(current_user, tz)
     event_count_rows = (
         db.query(
             ListeningEvent.event_type.label("event_type"),
@@ -236,24 +278,12 @@ def stats_summary(
     )
 
     # Timestamps are stored in UTC; days and streaks are a human concept, so
-    # bucket them in the server's local timezone or evening listening bleeds
-    # into the next day.
-    day_expr = local_day(ListeningEvent.created_at)
-    active_day_rows = (
-        db.query(day_expr.label("day"))
-        .filter(
-            ListeningEvent.user_id == current_user.id,
-            ListeningEvent.event_type == "play_started",
-        )
-        .group_by(day_expr)
-        .all()
-    )
-
+    # they are counted in the listener's own zone — see services/timezones.
     active_days = sorted(
-        date.fromisoformat(row.day) for row in active_day_rows if row.day
+        {local_day_of(stamp, zone) for stamp in play_started_stamps(db, current_user.id)}
     )
 
-    today = datetime.now().date()
+    today = today_in(zone)
     current_streak_days = 0
 
     if active_days and active_days[-1] in (today, today - timedelta(days=1)):
@@ -304,29 +334,19 @@ def stats_summary(
 @router.get("/stats/plays-over-time", tags=["stats"])
 def plays_over_time(
     days: int = Query(30, ge=1, le=365),
+    tz: str | None = Query(None, max_length=64),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Local days, matching the summary's streaks — see the note there.
-    end_day = datetime.now().date()
+    # The listener's days, matching the summary's streaks.
+    zone = stats_zone(current_user, tz)
+    end_day = today_in(zone)
     start_day = end_day - timedelta(days=days - 1)
 
-    day_expr = local_day(ListeningEvent.created_at)
-    play_rows = (
-        db.query(
-            day_expr.label("day"),
-            func.count(ListeningEvent.id).label("plays"),
-        )
-        .filter(
-            ListeningEvent.user_id == current_user.id,
-            ListeningEvent.event_type == "play_started",
-            day_expr >= start_day.isoformat(),
-        )
-        .group_by(day_expr)
-        .all()
-    )
-
-    plays_by_day = {row.day: row.plays for row in play_rows if row.day}
+    plays_by_day: dict[str, int] = {}
+    for stamp in play_started_stamps(db, current_user.id, since=utc_start_of_day(start_day, zone)):
+        key = local_day_of(stamp, zone).isoformat()
+        plays_by_day[key] = plays_by_day.get(key, 0) + 1
 
     return [
         {
@@ -361,9 +381,18 @@ def top_artists(
         .all()
     )
 
+    # With a picture where the server has one, so a row can open the artist
+    # page without the header flashing.
+    keys = [normalize_artist_name(row.name) for row in artist_rows]
+    artwork = artist_artwork_by_key(db, [key for key in keys if key])
+
     return [
-        {"name": row.name, "play_count": row.play_count}
-        for row in artist_rows
+        {
+            "name": row.name,
+            "play_count": row.play_count,
+            "artwork_path": artwork.get(key) if key else None,
+        }
+        for row, key in zip(artist_rows, keys)
     ]
 
 
@@ -392,8 +421,36 @@ def top_albums(
         .all()
     )
 
+    wanted = {
+        key
+        for row in album_rows
+        for key in album_artwork_keys(row.name, row.artist)
+    }
+    album_art = (
+        {
+            art.album_key: art.artwork_path
+            for art in db.query(AlbumArtwork.album_key, AlbumArtwork.artwork_path)
+            .filter(AlbumArtwork.album_key.in_(list(wanted)))
+            .all()
+            if art.artwork_path
+        }
+        if wanted
+        else {}
+    )
+
+    def artwork_for(row):
+        for key in album_artwork_keys(row.name, row.artist):
+            if album_art.get(key):
+                return album_art[key]
+        return None
+
     return [
-        {"name": row.name, "artist": row.artist, "play_count": row.play_count}
+        {
+            "name": row.name,
+            "artist": row.artist,
+            "play_count": row.play_count,
+            "artwork_path": artwork_for(row),
+        }
         for row in album_rows
     ]
 
@@ -436,27 +493,16 @@ def plays_by_source(
 
 @router.get("/stats/by-hour", tags=["stats"])
 def plays_by_hour(
+    tz: str | None = Query(None, max_length=64),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Local hours — "when you listen" in UTC put evening plays at 3 AM.
-    hour_expr = hour_of_day(ListeningEvent.created_at)
-    hour_rows = (
-        db.query(
-            hour_expr.label("hour"),
-            func.count(ListeningEvent.id).label("plays"),
-        )
-        .filter(
-            ListeningEvent.user_id == current_user.id,
-            ListeningEvent.event_type == "play_started",
-        )
-        .group_by(hour_expr)
-        .all()
-    )
-
-    plays_by_hour_value = {
-        int(row.hour): row.plays for row in hour_rows if row.hour is not None
-    }
+    # The listener's hours — "when you listen" in UTC put evening plays at 3 AM.
+    zone = stats_zone(current_user, tz)
+    plays_by_hour_value: dict[int, int] = {}
+    for stamp in play_started_stamps(db, current_user.id):
+        hour = local_hour_of(stamp, zone)
+        plays_by_hour_value[hour] = plays_by_hour_value.get(hour, 0) + 1
 
     return [
         {"hour": hour, "plays": plays_by_hour_value.get(hour, 0)}

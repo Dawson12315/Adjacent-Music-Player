@@ -20,6 +20,7 @@ from app.services.auth import (
 PASSWORD_CHANGE_ALLOWED = {
     ("GET", "/api/auth/me"),
     ("PATCH", "/api/auth/me"),
+    ("PATCH", "/api/auth/me/preferences"),
     ("POST", "/api/auth/logout"),
     ("POST", "/api/auth/recovery-codes"),
 }

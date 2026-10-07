@@ -3,6 +3,7 @@ import { Icon } from "../../components/Icon";
 import { formatListeningTime, formatPercent, useInsightsData } from "./useInsightsData";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { usePlayer } from "../../contexts/PlayerContext";
+import { useNavigation } from "../../hooks/useNavigation";
 import { resolveAlbumArtwork } from "../../utils/artwork";
 
 /**
@@ -16,6 +17,7 @@ export function InsightsView() {
   const data = useInsightsData();
   const { albumArtworkMap } = useLibrary();
   const { playTrack } = usePlayer();
+  const { goToArtist, goToAlbum } = useNavigation();
 
   const { summary } = data;
   const hasHistory = summary && summary.total_plays > 0;
@@ -128,7 +130,11 @@ export function InsightsView() {
       <div className="insights__grid insights__grid--quad">
         <BarPanel
           title="Top artists"
-          rows={data.topArtists.map((a) => ({ label: a.name, value: a.play_count }))}
+          rows={data.topArtists.map((a) => ({
+            label: a.name,
+            value: a.play_count,
+            onSelect: () => goToArtist(a.name),
+          }))}
         />
 
         <BarPanel
@@ -137,6 +143,7 @@ export function InsightsView() {
             label: a.name,
             sub: a.artist,
             value: a.play_count,
+            onSelect: () => goToAlbum(a.name, a.artist),
           }))}
         />
 
@@ -255,21 +262,30 @@ function BarPanel({ title, rows }) {
       {rows.length === 0 && <p className="state__text">Not enough listening yet.</p>}
 
       <div className="bar-list">
-        {rows.map((row) => (
-          <div className="bar-row" key={`${row.label}-${row.sub || ""}`}>
-            <span className="bar-row__label">
-              {row.label}
-              {row.sub && <span className="bar-row__value"> · {row.sub}</span>}
-            </span>
-            <span className="bar-row__value">{row.value.toLocaleString()}</span>
-            <span className="bar-row__track">
-              <span
-                className="bar-row__fill"
-                style={{ width: `${Math.max((row.value / max) * 100, 3)}%` }}
-              />
-            </span>
-          </div>
-        ))}
+        {rows.map((row) => {
+          // A row that names something in the library opens it; the rest
+          // (genres, sources) stay as they are.
+          const Row = row.onSelect ? "button" : "div";
+          return (
+            <Row
+              className={`bar-row${row.onSelect ? " bar-row--link" : ""}`}
+              key={`${row.label}-${row.sub || ""}`}
+              {...(row.onSelect ? { type: "button", onClick: row.onSelect } : {})}
+            >
+              <span className="bar-row__label">
+                {row.label}
+                {row.sub && <span className="bar-row__value"> · {row.sub}</span>}
+              </span>
+              <span className="bar-row__value">{row.value.toLocaleString()}</span>
+              <span className="bar-row__track">
+                <span
+                  className="bar-row__fill"
+                  style={{ width: `${Math.max((row.value / max) * 100, 3)}%` }}
+                />
+              </span>
+            </Row>
+          );
+        })}
       </div>
     </section>
   );

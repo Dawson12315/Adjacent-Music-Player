@@ -29,7 +29,7 @@ def session_days() -> int:
 
 # Bumped whenever a client-facing route or field is added. Clients compare it
 # with the version they were built against.
-API_VERSION = 6
+API_VERSION = 7
 
 # The oldest mobile build this API still serves whole.
 MIN_CLIENT_VERSION = "1.0.31"
@@ -55,6 +55,10 @@ CAPABILITIES = [
     # The body carries `session_days`, and a forced password change answers
     # with `code: password_change_required` in its 403 body.
     "session-days",
+    # Days and hours in Insights are counted in the account's own zone
+    # (`users.timezone`, PATCH /auth/me/preferences, `tz` on the stats
+    # routes), and the top-artist and top-album rows carry artwork.
+    "user-timezone",
 ]
 
 _FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
