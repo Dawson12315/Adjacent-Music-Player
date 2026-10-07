@@ -27,6 +27,25 @@ PASSWORD_CHANGE_ALLOWED = {
 # Must match the login-time TTL in routes/auth.py.
 TEMP_PASSWORD_TTL_HOURS = 48
 
+PASSWORD_CHANGE_REQUIRED_CODE = "password_change_required"
+
+
+class PasswordChangeRequired(HTTPException):
+    """A one-time password is still in force and this route is not on the list.
+
+    Carries a machine-readable code (see main.py's handler, which puts it in
+    the body as well as the header): the phone used to read this 403 as a
+    dead session and send the person back to sign in, never reaching the
+    screen that lets them choose a password.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Choose a password before using the app.",
+            headers={"X-Adjacent-Code": PASSWORD_CHANGE_REQUIRED_CODE},
+        )
+
 
 def get_current_user(
     request: Request,
@@ -99,11 +118,7 @@ def get_current_user(
             )
 
         if (request.method, request.url.path) not in PASSWORD_CHANGE_ALLOWED:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Choose a password before using the app.",
-                headers={"X-Adjacent-Code": "password_change_required"},
-            )
+            raise PasswordChangeRequired()
 
     return user
 

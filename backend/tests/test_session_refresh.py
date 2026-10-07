@@ -201,3 +201,56 @@ def test_a_renewal_rides_along_with_a_304(signed_in, only_cookie, db_session_fac
 
     assert again.status_code == 304
     assert len(_session_cookies(again)) == 1
+
+
+# --- what the client is told ---------------------------------------------------
+
+
+def test_health_says_how_long_a_session_is(signed_in):
+    from app.routes.health import session_days
+
+    body = signed_in.get("/api/health").json()
+
+    assert body["session_days"] == session_days()
+    assert body["session_days"] == -(-settings.access_token_expire_minutes // (60 * 24))
+    assert "session-days" in body["capabilities"]
+
+
+def test_a_forced_password_change_answers_with_its_code(signed_in, db_session_factory):
+    """The phone reads `code` off the body; the header stays for anything else.
+
+    This 403 used to be a bare sentence, indistinguishable from any other
+    refusal, and the phone treated it as a dead session.
+    """
+    from app.models.user import User
+
+    db = db_session_factory()
+    try:
+        admin = db.query(User).filter_by(username="admin").one()
+        admin.must_change_password = True
+        admin.temp_password_issued_at = None
+        db.commit()
+    finally:
+        db.close()
+
+    try:
+        refused = signed_in.get("/api/playlists")
+        allowed = signed_in.get("/api/auth/me")
+    finally:
+        db = db_session_factory()
+        try:
+            admin = db.query(User).filter_by(username="admin").one()
+            admin.must_change_password = False
+            db.commit()
+        finally:
+            db.close()
+
+    assert refused.status_code == 403
+    assert refused.json() == {
+        "detail": "Choose a password before using the app.",
+        "code": "password_change_required",
+    }
+    assert refused.headers["x-adjacent-code"] == "password_change_required"
+    # The account can still see itself, which is how it reaches the screen.
+    assert allowed.status_code == 200
+    assert allowed.json()["must_change_password"] is True

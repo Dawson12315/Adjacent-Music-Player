@@ -8,6 +8,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from starlette.types import Receive, Scope, Send
 
 from app import models
+from app.dependencies.auth import PASSWORD_CHANGE_REQUIRED_CODE, PasswordChangeRequired
 from app.config import settings
 from app.db import Base, engine
 from app.db_migrations import run_simple_migrations, sync_model_columns, sync_model_indexes
@@ -144,6 +145,22 @@ app.add_middleware(
     StreamSafeGZipMiddleware,
     minimum_size=1000,
 )
+
+
+@app.exception_handler(PasswordChangeRequired)
+async def password_change_required_handler(request, exc: PasswordChangeRequired):
+    """The forced-change 403, with its code in the body as well as the header.
+
+    Clients read `code` off the body (the migration 503 set that pattern);
+    the header stays for anything that only looks there.
+    """
+    from fastapi.responses import JSONResponse as CodeJSONResponse
+
+    return CodeJSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "code": PASSWORD_CHANGE_REQUIRED_CODE},
+        headers=exc.headers or {},
+    )
 
 
 @app.middleware("http")

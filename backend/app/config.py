@@ -57,7 +57,11 @@ class Settings(BaseSettings):
     # No default on purpose: every deployment must supply its own signing key.
     auth_secret_key: str
     auth_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60 * 24 * 7
+    # How long a device stays signed in after it last used Adjacent. The
+    # cookie renews itself on any request past half its life (see
+    # middleware/session_refresh.py), so this is a limit on absence, not on
+    # use. ACCESS_TOKEN_EXPIRE_MINUTES in the environment overrides it.
+    access_token_expire_minutes: int = 60 * 24 * 30
     auth_cookie_name: str = "adjacent_access_token"
 
     # Whether the auth cookie carries the Secure flag. Self-hosted deployments

@@ -21,9 +21,15 @@ from app.db import SessionLocal
 
 router = APIRouter()
 
+
+def session_days() -> int:
+    """The session life in whole days, rounded up; never less than one."""
+    minutes = int(settings.access_token_expire_minutes)
+    return max(1, -(-minutes // (60 * 24)))
+
 # Bumped whenever a client-facing route or field is added. Clients compare it
 # with the version they were built against.
-API_VERSION = 5
+API_VERSION = 6
 
 # The oldest mobile build this API still serves whole.
 MIN_CLIENT_VERSION = "1.0.31"
@@ -46,6 +52,9 @@ CAPABILITIES = [
     # Album artwork belongs to one artist's record of a title, not to every
     # record that shares the title: the artwork routes take `artist`.
     "album-artwork-by-artist",
+    # The body carries `session_days`, and a forced password change answers
+    # with `code: password_change_required` in its 403 body.
+    "session-days",
 ]
 
 _FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
@@ -91,4 +100,6 @@ def health_check(response: Response):
         "api_version": API_VERSION,
         "min_client": MIN_CLIENT_VERSION,
         "capabilities": CAPABILITIES,
+        # So the sign-in screen can say how long "stay signed in" is.
+        "session_days": session_days(),
     }
