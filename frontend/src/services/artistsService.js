@@ -37,7 +37,7 @@ export function uploadArtistArtwork(artistName, file) {
   return apiClient.post(`/api/artists/${encode(artistName)}/artwork`, formData);
 }
 
-/** Admin only. Updates `tracks.artist` but not `track_artists` or stored artwork keys. */
+/** Admin only. Renames the tracks, the credits, and the stored picture and similarity rows. */
 export function renameArtist(currentArtist, newArtist) {
   return apiClient.patch("/api/artists/rename", {
     current_artist: currentArtist,
@@ -45,7 +45,11 @@ export function renameArtist(currentArtist, newArtist) {
   });
 }
 
-/** Admin only. Both artists must already exist. */
+/**
+ * Admin only. Both artists must already exist. The source's picture goes to
+ * the target if it has none; everything else the source left behind is
+ * removed. Resolves to `{ moved_tracks, artist, retired }`.
+ */
 export function transferArtist(sourceArtist, targetArtist) {
   return apiClient.patch("/api/artists/transfer", {
     source_artist: sourceArtist,

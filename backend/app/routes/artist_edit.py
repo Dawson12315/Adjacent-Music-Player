@@ -7,6 +7,7 @@ from app.models.track import Track
 from app.models.track_artist import TrackArtist
 from app.models.user import User
 from app.schemas.artist_edit import ArtistRenameRequest, ArtistTransferRequest
+from app.services.artist_identity import carry_artist_over, rekey_artist
 from app.services.recommendations.rec_cache import invalidate_library_caches
 
 router = APIRouter()
@@ -33,10 +34,26 @@ def rename_artist(
         track.artist = new_artist
 
     # The index reads track_artists; rename the credit rows too, or the old
-    # name keeps its page and the new one has none.
-    db.query(TrackArtist).filter(TrackArtist.artist_name == current_artist).update(
-        {TrackArtist.artist_name: new_artist}, synchronize_session=False
-    )
+    # name keeps its page and the new one has none. One credit at a time:
+    # a track already crediting the new name would collide with the unique
+    # (track, name) pair under a bulk update.
+    for credit in db.query(TrackArtist).filter(TrackArtist.artist_name == current_artist).all():
+        clash = (
+            db.query(TrackArtist.id)
+            .filter(
+                TrackArtist.track_id == credit.track_id,
+                TrackArtist.artist_name == new_artist,
+                TrackArtist.id != credit.id,
+            )
+            .first()
+        )
+        if clash is not None:
+            db.delete(credit)
+        else:
+            credit.artist_name = new_artist
+
+    # The picture and the similarity rows follow the name.
+    followed = rekey_artist(db, current_artist, new_artist)
 
     db.commit()
     invalidate_library_caches()
@@ -45,6 +62,7 @@ def rename_artist(
         "message": "Artist renamed successfully",
         "updated_tracks": len(tracks),
         "artist": new_artist,
+        **followed,
     }
 
 
@@ -94,11 +112,17 @@ def transfer_artist(
         else:
             credit.artist_name = target_artist
 
+    # The source has no songs now. Its picture goes to the target if the
+    # target has none, and everything else it left behind is removed — the
+    # artwork row and file and the similarity rows used to outlive it.
+    retired = carry_artist_over(db, source_artist, target_artist)
+
     db.commit()
     invalidate_library_caches()
 
     return {
         "message": "Artist transferred successfully",
+        "retired": retired,
         "moved_tracks": len(source_tracks),
         "artist": target_artist,
     }

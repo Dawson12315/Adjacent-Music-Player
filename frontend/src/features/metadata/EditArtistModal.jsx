@@ -44,18 +44,29 @@ export function EditArtistModal({ artistName, artworkPath, onClose }) {
         currentName = trimmedName;
       }
 
-      if (trimmedTarget) {
-        await artistsService.transferArtist(currentName, trimmedTarget);
-        currentName = trimmedTarget;
-      }
-
+      // The picture goes to the artist that will exist. Uploaded after a
+      // transfer it landed on the target anyway, but the source's old
+      // picture was left behind; uploaded before, the transfer carries it.
       if (upload.file) {
         const result = await artistsService.uploadArtistArtwork(currentName, upload.file);
         setArtistArtwork(currentName, result.artwork_path || "");
       }
 
+      let moved = null;
+      if (trimmedTarget) {
+        moved = await artistsService.transferArtist(currentName, trimmedTarget);
+        currentName = trimmedTarget;
+      }
+
       await refreshLibrary();
       onClose();
+
+      if (moved) {
+        const count = moved.moved_tracks ?? 0;
+        notify(
+          `Moved ${count} ${count === 1 ? "song" : "songs"} to ${currentName} and retired the old artist.`,
+        );
+      }
 
       if (currentName !== artistName) {
         goToArtist(currentName);

@@ -32,6 +32,7 @@ from app.models.track_cooccurrence import TrackCooccurrence
 from app.models.track_genre import TrackGenre
 from app.models.track_lastfm_similarity import TrackLastfmSimilarity
 from app.models.track_user_stats import TrackUserStats
+from app.services.artist_identity import retire_orphan_artists
 from app.services.db_backup import backup_sqlite_database
 from app.services.job_locking import JobHeartbeat
 from app.services.recommendations.rec_cache import invalidate_library_caches
@@ -201,6 +202,9 @@ def cleanup_missing_tracks(
 
     _delete_tracks(db, [track.id for track in to_delete])
 
+    # An artist whose last file went is retired like a transferred one.
+    retired = retire_orphan_artists(db)
+
     db.commit()
     invalidate_library_caches()
 
@@ -212,16 +216,25 @@ def cleanup_missing_tracks(
         still_missing,
         returned,
     )
-    return _summary(len(to_delete), newly_missing, still_missing, returned)
+    return _summary(len(to_delete), newly_missing, still_missing, returned, retired["artists_retired"])
 
 
-def _summary(removed: int, marked_missing: int, still_missing: int, returned: int) -> dict:
+def _summary(
+    removed: int,
+    marked_missing: int,
+    still_missing: int,
+    returned: int,
+    artists_retired: int = 0,
+) -> dict:
     return {
         "removed": removed,
         "marked_missing": marked_missing,
         "still_missing": still_missing,
         "returned": returned,
         "grace_days": CLEANUP_GRACE_DAYS,
+        # Artists whose last track went with this run: their picture and
+        # similarity rows are retired, as a transfer retires them.
+        "artists_retired": artists_retired,
     }
 
 
