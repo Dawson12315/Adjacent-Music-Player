@@ -27,9 +27,12 @@ def diversify_tracks(
     track_count = max(int(playlist_profile.get("track_count", 0)), 1)
 
     focused_playlist = unique_family_count <= 2 or track_count <= 8
+    # Relaxed (a long one-genre playlist): the family cap of an ordinary
+    # playlist, so the off-genre picks the ranking let through have room.
+    relaxed = bool(playlist_profile.get("genre_restriction_relaxed", False))
     base_max_artist_repeat = 2 if focused_playlist else 1
     base_max_album_repeat = 1
-    base_max_family_repeat = 5 if focused_playlist else 3
+    base_max_family_repeat = 5 if focused_playlist and not relaxed else 3
 
     rng = random.Random(f"diversify:{playlist_id}:{refresh}")
 

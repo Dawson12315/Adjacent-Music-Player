@@ -47,6 +47,9 @@ def summarize_recommendation_reason(candidate_debug: dict) -> str:
         if has_genre:
             return f"Matches your playlist’s {family} vibe"
 
+    if "relaxed_genre_dominant_playlist" in candidate_debug.get("reasons", []):
+        return "Something a little different, for a playlist that knows its sound"
+
     if has_lastfm_track:
         if metadata_sparse:
             return "Recommended from Last.fm similar tracks because playlist genre data is limited"

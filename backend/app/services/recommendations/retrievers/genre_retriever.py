@@ -57,7 +57,13 @@ def retrieve_genre_candidates(
 
     focused_playlist = bool(playlist_profile.get("focused_playlist"))
     is_multi_cluster = bool(playlist_profile.get("is_multi_cluster"))
-    top_family_limit = 2 if focused_playlist else (4 if is_multi_cluster else 5)
+    # A long one-genre playlist keeps its minority families in play; the
+    # strict two-family window is for a short playlist still finding itself.
+    relaxed = bool(playlist_profile.get("genre_restriction_relaxed"))
+    if relaxed:
+        top_family_limit = 4
+    else:
+        top_family_limit = 2 if focused_playlist else (4 if is_multi_cluster else 5)
 
     top_families = {
         family
@@ -106,7 +112,7 @@ def retrieve_genre_candidates(
             family for family in shared_families if family in top_families
         ]
 
-        if focused_playlist and not shared_top_families:
+        if focused_playlist and not relaxed and not shared_top_families:
             continue
 
         score = 0.0

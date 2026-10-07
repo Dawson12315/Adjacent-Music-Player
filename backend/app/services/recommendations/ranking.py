@@ -81,6 +81,10 @@ def rank_candidates(
         playlist_profile.get("focused_playlist", unique_family_count <= 2)
     )
     is_multi_cluster = bool(playlist_profile.get("is_multi_cluster"))
+    # A settled one-genre playlist (see build_playlist_profile): the hard
+    # gate stands down and the off-genre penalties soften, so a track the
+    # other channels vouch for can land.
+    relaxed = bool(playlist_profile.get("genre_restriction_relaxed"))
 
     normalized_channels = normalize_channels(retrieved_candidates)
 
@@ -156,7 +160,7 @@ def rank_candidates(
         candidate_debug["taste_bonus"] = taste_bonus
         candidate_debug["skip_penalty"] = skip_penalty
 
-        if focused_playlist and not metadata_sparse and not has_shared_family:
+        if focused_playlist and not metadata_sparse and not has_shared_family and not relaxed:
             if strong_lastfm_artist_alignment or has_lastfm_track_signal:
                 candidate_debug.setdefault("reasons", []).append(
                     "focused_playlist_lastfm_alignment_override"
@@ -176,7 +180,15 @@ def rank_candidates(
                 continue
 
         if not has_shared_family:
-            if focused_playlist:
+            if focused_playlist and relaxed:
+                if user_affinity_score > 0:
+                    user_affinity_score *= 0.5
+                if content_fit_score > 0:
+                    content_fit_score *= 0.6
+                candidate_debug.setdefault("reasons", []).append(
+                    "relaxed_genre_dominant_playlist"
+                )
+            elif focused_playlist:
                 if user_affinity_score > 0:
                     user_affinity_score *= 0.05
 

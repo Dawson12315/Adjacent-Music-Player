@@ -44,17 +44,32 @@ def _serialize_playlist_profile(
         "metadata_sparse": playlist_profile["metadata_sparse"],
         "focused_playlist": playlist_profile["focused_playlist"],
         "dominant_family_share": playlist_profile["dominant_family_share"],
+        "dominant_track_share": playlist_profile.get("dominant_track_share", 0.0),
+        "genre_restriction_relaxed": playlist_profile.get("genre_restriction_relaxed", False),
         "is_multi_cluster": playlist_profile["is_multi_cluster"],
         "excluded_track_ids": exclude_track_ids,
         "tracks": playlist_profile["tracks"],
     }
 
 
-def build_playlist_profile(playlist_tracks: list[Track]) -> dict:
+# A playlist this long, this much of one genre, may hear a neighbour: see
+# `genre_restriction_relaxed` below.
+RELAX_GENRE_MIN_TRACKS = 20
+RELAX_GENRE_DOMINANT_SHARE = 0.80
+
+
+def build_playlist_profile(
+    playlist_tracks: list[Track],
+    allow_genre_relaxation: bool = False,
+) -> dict:
     genre_counts = Counter()
     family_counts = Counter()
     artist_counts = Counter()
     album_counts = Counter()
+    # Each track once, under the first curated family it belongs to — the
+    # share of *songs* in a genre, which `family_counts` (family mentions,
+    # several per multi-genre track) does not give.
+    tracks_per_family = Counter()
     playlist_debug_tracks = []
 
     for track in playlist_tracks:
@@ -84,6 +99,13 @@ def build_playlist_profile(playlist_tracks: list[Track]) -> dict:
             seen_families.add(family)
             unique_families.append(family)
             family_counts[family] += 1
+
+        track_family = next(
+            (family for family in unique_families if is_canonical_family(family)),
+            unique_families[0] if unique_families else None,
+        )
+        if track_family is not None:
+            tracks_per_family[track_family] += 1
 
         artist_key = _normalize_artist_key(track.artist)
         if artist_key:
@@ -136,17 +158,38 @@ def build_playlist_profile(playlist_tracks: list[Track]) -> dict:
         and dominant_family_share < 0.50
     )
 
+    # A playlist that has found its genre may hear a neighbour. Twenty songs
+    # with one genre on four in five of them is a settled taste, not an
+    # accident, and the strict gates downstream — built to stop a two-genre
+    # playlist drifting — only ever offered it more of the same. The share
+    # is of songs, per the request, not of family mentions. Only when the
+    # caller allows it: a one-track "similar" seed or a for-you list is not
+    # a playlist that has settled on anything.
+    dominant_track_share = (
+        max(tracks_per_family.values()) / track_count
+        if tracks_per_family and track_count
+        else 0.0
+    )
+    genre_restriction_relaxed = bool(
+        allow_genre_relaxation
+        and track_count >= RELAX_GENRE_MIN_TRACKS
+        and dominant_track_share >= RELAX_GENRE_DOMINANT_SHARE
+    )
+
     return {
         "track_ids": [track.id for track in playlist_tracks],
         "track_count": track_count,
         "genre_counts": genre_counts,
         "family_counts": family_counts,
+        "tracks_per_family": tracks_per_family,
         "artist_counts": artist_counts,
         "album_counts": album_counts,
         "primary_families": primary_families,
         "metadata_sparse": metadata_sparse,
         "focused_playlist": focused_playlist,
         "dominant_family_share": dominant_family_share,
+        "dominant_track_share": dominant_track_share,
+        "genre_restriction_relaxed": genre_restriction_relaxed,
         "is_multi_cluster": is_multi_cluster,
         "tracks": playlist_debug_tracks,
     }
@@ -366,6 +409,7 @@ def get_playlist_recommendations_from_track_ids(
     exclude_track_ids: list[int] | None = None,
     user_id: int | None = None,
     include_recent_additions: bool = False,
+    allow_genre_relaxation: bool = False,
 ):
     if not seed_track_ids:
         return []
@@ -385,7 +429,9 @@ def get_playlist_recommendations_from_track_ids(
     if not playlist_tracks:
         return []
 
-    playlist_profile = build_playlist_profile(playlist_tracks)
+    playlist_profile = build_playlist_profile(
+        playlist_tracks, allow_genre_relaxation=allow_genre_relaxation
+    )
 
     # Built once per request; bounded personalization applied during ranking.
     user_taste = build_user_taste_profile(db, user_id)
@@ -619,4 +665,7 @@ def get_playlist_recommendations_for_playlist(
         limit=limit,
         exclude_track_ids=held_out,
         user_id=user_id,
+        # Only a real playlist earns the relaxation: it is the one list
+        # someone has curated to twenty songs of one genre on purpose.
+        allow_genre_relaxation=True,
     )
