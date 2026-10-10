@@ -19,6 +19,7 @@ from app.routes.artists import router as artists_router
 from app.routes.artist_genres import router as artist_genres_router
 from app.routes.auth import router as auth_router
 from app.routes.genres import router as genres_router
+from app.routes.handoff import router as handoff_router
 from app.routes.health import router as health_router
 from app.routes.home import router as home_router
 from app.routes.listening import router as listening_router
@@ -337,6 +338,7 @@ app.include_router(artist_genres_router, prefix="/api")
 app.include_router(albums_router, prefix="/api")
 app.include_router(playlists_router, prefix="/api")
 app.include_router(playback_router, prefix="/api")
+app.include_router(handoff_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(maintenance_router, prefix="/api")
 app.include_router(artist_edit_router, prefix="/api")

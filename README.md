@@ -695,11 +695,13 @@ dynamic connection use a DDNS provider.
 | Forward Port | `8080` |
 | Cache Assets | off |
 | Block Common Exploits | on |
-| Websockets Support | off |
+| Websockets Support | on |
 
 The forward target is the **container name** and the port **inside** the container
 — `8080`, not the `5173` you published on the host. NPM is on the network with it,
 so it never touches the published port at all.
+
+Leave **Websockets Support** on: device handoff — moving playback between your phone, the browser and the car — keeps a WebSocket to the backend at `/api/playback/ws`. With it off, handoff still works but falls back to polling, so a change takes a few seconds to show. Caddy and Traefik proxy WebSockets with no extra setting.
 
 **Custom locations tab** — add three, all pointing at the backend:
 

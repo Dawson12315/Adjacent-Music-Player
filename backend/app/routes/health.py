@@ -29,7 +29,7 @@ def session_days() -> int:
 
 # Bumped whenever a client-facing route or field is added. Clients compare it
 # with the version they were built against.
-API_VERSION = 7
+API_VERSION = 8
 
 # The oldest mobile build this API still serves whole.
 MIN_CLIENT_VERSION = "1.0.31"
@@ -59,6 +59,11 @@ CAPABILITIES = [
     # (`users.timezone`, PATCH /auth/me/preferences, `tz` on the stats
     # routes), and the top-artist and top-album rows carry artwork.
     "user-timezone",
+    # One device plays at a time; a symbol on the mini player moves the music
+    # between phone, web and car. The socket is /playback/ws, with HTTP twins
+    # for clients that cannot hold one. A client that does not see this never
+    # shows the symbol.
+    "device-handoff",
 ]
 
 _FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
