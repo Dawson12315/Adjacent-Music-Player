@@ -1042,6 +1042,39 @@ def verify_stream_token(token: str, track_id: int, db: Session) -> bool:
     return bool(user and user.is_active)
 
 
+def _stream_device_id(request: Request) -> str | None:
+    """Which device is asking: the header, or the query twin a media player
+    that cannot set headers (an <audio> element, an HLS request) carries."""
+    return request.headers.get("x-adjacent-device") or request.query_params.get("device")
+
+
+def _stream_is_exempt(request: Request) -> bool:
+    """Downloads save for offline and are never gated."""
+    return (request.headers.get("x-adjacent-purpose") or "").lower() == "download"
+
+
+def _stream_token_user_id(token: str) -> int | None:
+    try:
+        payload = jwt.decode(token, settings.auth_secret_key, algorithms=[settings.auth_algorithm])
+        return int(payload.get("sub"))
+    except (jwt.PyJWTError, TypeError, ValueError):
+        return None
+
+
+def _enforce_stream_lease(db: Session, user_id: int | None, request: Request) -> None:
+    """Refuse a stream for a device that does not hold the lease while another
+    device is playing. Fail open: any doubt, and the music plays."""
+    if user_id is None or _stream_is_exempt(request):
+        return
+    from app.services.handoff import stream_allowed
+
+    if not stream_allowed(db, user_id, _stream_device_id(request)):
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "Another device is playing.", "code": "device_not_active"},
+        )
+
+
 def get_album_artwork_path(
     db: Session, album_name: str | None, artist: str | None = None
 ) -> str | None:
@@ -1209,6 +1242,7 @@ def list_tracks(
 @router.get("/tracks/{track_id}/stream", tags=["tracks"])
 def stream_track(
     track_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1216,6 +1250,10 @@ def stream_track(
 
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
+
+    # Only the device holding the lease may be served while another plays; a
+    # request with no device header is an old client and passes untouched.
+    _enforce_stream_lease(db, current_user.id, request)
 
     file_path = Path(track.file_path)
 
@@ -1312,6 +1350,8 @@ def mobile_stream_track(
     if not token or not verify_stream_token(token, track_id, db):
         raise HTTPException(status_code=401, detail="Invalid or expired stream token")
 
+    _enforce_stream_lease(db, _stream_token_user_id(token), request)
+
     profile = MOBILE_STREAM_PROFILES.get(quality)
 
     if not profile:
@@ -1373,6 +1413,8 @@ def get_hls_master_playlist(
 
     if not token or not verify_stream_token(token, track_id, db):
         raise HTTPException(status_code=401, detail="Invalid or expired stream token")
+
+    _enforce_stream_lease(db, _stream_token_user_id(token), request)
 
     track = db.query(Track).filter(Track.id == track_id).first()
 
@@ -1450,6 +1492,8 @@ def get_hls_quality_playlist(
 
     if not token or not verify_stream_token(token, track_id, db):
         raise HTTPException(status_code=401, detail="Invalid or expired stream token")
+
+    _enforce_stream_lease(db, _stream_token_user_id(token), request)
 
     profile = MOBILE_STREAM_PROFILES.get(quality)
 

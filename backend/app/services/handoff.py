@@ -32,6 +32,13 @@ from app.services.playback import get_or_create_playback_session
 # cannot be handed the music: nothing would be there to receive it.
 AWAY_AFTER_S = 60
 
+# How recently the holder must have reported itself playing for a stream from
+# another device to be refused. Short on purpose: a holder whose socket dropped
+# stops reporting, and within this window every device may stream again, so a
+# stale lease never silences the account. The gate only ever says no while
+# another device is demonstrably, currently playing.
+STREAM_LEASE_WINDOW_S = 20
+
 # The most queue the server keeps per user: enough for any resume, and
 # bounded however large the library is.
 MAX_QUEUE_ITEMS = 5000
@@ -387,3 +394,43 @@ def release(db: Session, user_id: int, device: PlaybackDevice, now: datetime | N
     db.commit()
     db.refresh(session)
     return session
+
+
+# --- the stream lease (hard enforcement) ------------------------------------
+
+
+def stream_allowed(db: Session, user_id: int, device_id: str | None, now: datetime | None = None) -> bool:
+    """Whether this device may be served a stream right now.
+
+    Fail open in every ambiguous case — the gate must never be the reason the
+    music will not play for the device that is actually meant to be playing it.
+    It says no only when another device holds the lease and reported itself
+    playing within the last few seconds, and this is not that device.
+    """
+    if not device_id:
+        return True  # an old client, or a download/artwork request: not gated
+
+    now = now or datetime.utcnow()
+    session = (
+        db.query(PlaybackSession)
+        .filter(PlaybackSession.user_id == user_id)
+        .first()
+    )
+    if session is None or session.active_device_id is None:
+        return True  # nobody holds the lease
+
+    holder = db.get(PlaybackDevice, session.active_device_id)
+    if holder is None:
+        return True  # the lease points at nothing
+
+    if holder.device_id == device_id:
+        return True  # this device *is* the holder
+
+    if not session.is_playing:
+        return True  # the holder is paused; a second device may start
+
+    if session.reported_at is None:
+        return True  # the holder never said where it is
+
+    # The holder is another device, playing, and heard from recently: refuse.
+    return now - session.reported_at > timedelta(seconds=STREAM_LEASE_WINDOW_S)

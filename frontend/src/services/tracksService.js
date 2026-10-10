@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "../config";
+import { getDeviceId } from "./deviceIdentity";
 import { apiClient } from "./apiClient";
 import { normalizeTrack, normalizeTracks } from "./normalize";
 
@@ -95,7 +96,12 @@ export async function getGenreTracks(genreName, { limit = 100, offset = 0, signa
 
 /** The URL the audio element points at. Auth rides on the session cookie. */
 export function streamUrl(trackId) {
-  return `${API_BASE_URL}/api/tracks/${trackId}/stream`;
+  // The device id lets the server's one-device gate apply to this browser's
+  // playback. It rides in the query because the <audio> element cannot set a
+  // header. Playback only; the web has no offline download path.
+  const deviceId = getDeviceId();
+  const device = deviceId ? `?device=${encodeURIComponent(deviceId)}` : "";
+  return `${API_BASE_URL}/api/tracks/${trackId}/stream${device}`;
 }
 
 /**
