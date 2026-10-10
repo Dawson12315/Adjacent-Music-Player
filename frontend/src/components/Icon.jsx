@@ -203,6 +203,16 @@ const icons = {
       <circle {...STROKE} cx="15.75" cy="15.25" r="2.25" />
     </>
   ),
+  /* Device handoff: the record from the app mark with two arcs leaving it —
+     "this music is going somewhere". The mobile set has the twin, path for path. */
+  handoff: (
+    <>
+      <circle {...STROKE} cx="10" cy="14" r="6.5" />
+      <circle {...SOLID} cx="10" cy="14" r="1.2" />
+      <path {...STROKE} d="M13.25 5.07A9.5 9.5 0 0 1 18.93 10.75" />
+      <path {...STROKE} d="M14.28 2.25A12.5 12.5 0 0 1 21.75 9.72" />
+    </>
+  ),
 };
 
 export function Icon({ name, size = 20, className, title }) {
