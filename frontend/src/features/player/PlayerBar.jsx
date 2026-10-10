@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Artwork } from "../../components/Artwork";
@@ -7,6 +8,8 @@ import { useLibrary } from "../../contexts/LibraryContext";
 import { usePlayer } from "../../contexts/PlayerContext";
 import { buildAlbumPath, buildArtistPath } from "../../hooks/useNavigation";
 import { resolveAlbumArtwork } from "../../utils/artwork";
+import { useDismissable } from "../../hooks/useDismissable";
+import { HandoffPopover } from "./HandoffPopover";
 
 export function PlayerBar() {
   const { albumArtworkMap } = useLibrary();
@@ -29,7 +32,22 @@ export function PlayerBar() {
     changeVolume,
     toggleQueue,
     toggleLike,
+    handoff,
+    handoffPlayingElsewhere,
   } = usePlayer();
+
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  useDismissable(handoffOpen, () => setHandoffOpen(false));
+
+  // When the music is on another device, this bar drives it: the controls send
+  // commands, and what the play button shows follows the remote's report.
+  const remotePlaying = Boolean(handoff?.remote?.playing);
+  const displayPlaying = handoffPlayingElsewhere ? remotePlaying : isPlaying;
+  const onTogglePlay = handoffPlayingElsewhere
+    ? () => handoff.sendCommand(remotePlaying ? "pause" : "play")
+    : togglePlay;
+  const onNext = handoffPlayingElsewhere ? () => handoff.sendCommand("next") : next;
+  const onPrevious = handoffPlayingElsewhere ? () => handoff.sendCommand("previous") : previous;
 
   const artwork = currentTrack ? resolveAlbumArtwork(currentTrack.album, albumArtworkMap, currentTrack.artist) : null;
 
@@ -52,8 +70,10 @@ export function PlayerBar() {
                 )}
                 <span className="player-bar__title">{currentTrack.title}</span>
               </div>
-              <span className="player-bar__meta">
-                {currentTrack.artist ? (
+              <span className={`player-bar__meta ${handoffPlayingElsewhere ? "player-bar__meta--remote" : ""}`}>
+                {handoffPlayingElsewhere ? (
+                  `Playing on ${handoff.activeName}`
+                ) : currentTrack.artist ? (
                   <Link
                     className="player-bar__meta-link"
                     to={buildArtistPath(currentTrack.artist)}
@@ -113,28 +133,28 @@ export function PlayerBar() {
             className="player-bar__icon-button"
             type="button"
             aria-label="Previous track"
-            onClick={previous}
-            disabled={!currentTrack}
+            onClick={onPrevious}
+            disabled={!currentTrack && !handoffPlayingElsewhere}
           >
             <Icon name="previous" size={20} />
           </button>
 
           <button
             className="player-bar__play-button"
-            onClick={togglePlay}
+            onClick={onTogglePlay}
             type="button"
-            aria-label={isPlaying ? "Pause" : "Play"}
-            disabled={!currentTrack}
+            aria-label={displayPlaying ? "Pause" : "Play"}
+            disabled={!currentTrack && !handoffPlayingElsewhere}
           >
-            <Icon name={isPlaying ? "pause" : "play"} size={18} />
+            <Icon name={displayPlaying ? "pause" : "play"} size={18} />
           </button>
 
           <button
             className="player-bar__icon-button"
             type="button"
             aria-label="Next track"
-            onClick={next}
-            disabled={!currentTrack}
+            onClick={onNext}
+            disabled={!currentTrack && !handoffPlayingElsewhere}
           >
             <Icon name="next" size={20} />
           </button>
@@ -156,6 +176,37 @@ export function PlayerBar() {
       </div>
 
       <div className="player-bar__right">
+        {handoff?.available ? (
+          <div
+            className="player-bar__handoff"
+            data-dismissable-root={handoffOpen ? "" : undefined}
+          >
+            <button
+              className={`player-bar__icon-button ${
+                handoffPlayingElsewhere ? "player-bar__icon-button--remote" : ""
+              }`}
+              type="button"
+              aria-label={
+                handoffPlayingElsewhere ? `Playing on ${handoff.activeName}. Change device.` : "Play on another device"
+              }
+              aria-expanded={handoffOpen}
+              onClick={() => setHandoffOpen((open) => !open)}
+            >
+              <Icon name="handoff" size={18} />
+            </button>
+            {handoffOpen ? (
+              <HandoffPopover
+                devices={handoff.devices}
+                onChoose={(deviceId) => {
+                  setHandoffOpen(false);
+                  if (handoff.me && deviceId === handoff.me.deviceId) handoff.claim();
+                  else handoff.transferTo(deviceId);
+                }}
+              />
+            ) : null}
+          </div>
+        ) : null}
+
         <button
           className={`player-bar__icon-button ${
             isQueueOpen ? "player-bar__icon-button--active" : ""

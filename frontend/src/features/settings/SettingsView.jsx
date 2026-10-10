@@ -3,6 +3,7 @@ import { useState } from "react";
 import { AccountPanel } from "./AccountPanel";
 import { LastfmPanel } from "./LastfmPanel";
 import { ServerPanel } from "./ServerPanel";
+import { ThisBrowserPanel } from "./ThisBrowserPanel";
 import { useAppSettings } from "./useAppSettings";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLibrary } from "../../contexts/LibraryContext";
@@ -122,6 +123,8 @@ export function SettingsView() {
       <AccountPanel />
 
       <ServerPanel />
+
+      <ThisBrowserPanel />
 
       {isAdmin && (
       <>

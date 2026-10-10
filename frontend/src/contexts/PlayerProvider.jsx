@@ -9,6 +9,7 @@ import { useLastfmScrobbler } from "../hooks/useLastfmScrobbler";
 import { useListeningEvents } from "../hooks/useListeningEvents";
 import { useMediaSession } from "../hooks/useMediaSession";
 import { usePlaybackPersistence } from "../hooks/usePlaybackPersistence";
+import { useHandoff } from "../hooks/useHandoff";
 import { getPlaybackState } from "../services/playbackService";
 import { getTracksByIds } from "../services/tracksService";
 import * as playlistsService from "../services/playlistsService";
@@ -358,6 +359,127 @@ export function PlayerProvider({ children }) {
 
   const upcomingQueue = useMemo(() => queue.slice(queueIndex + 1), [queue, queueIndex]);
 
+  /* ---------- device handoff ---------- */
+
+  const handoffStateSnapshot = useCallback(
+    () => ({
+      trackId: currentTrackId,
+      queue: queueTrackIds,
+      index: queueIndex,
+      position: getPosition(),
+      playing: isPlaying,
+      shuffle: isShuffle,
+      loop: isLoop,
+      source: getSource(),
+    }),
+    [currentTrackId, queueTrackIds, queueIndex, getPosition, isPlaying, isShuffle, isLoop, getSource],
+  );
+
+  const handoffPauseForRemote = useCallback(() => setIsPlaying(false), []);
+
+  // This browser was handed the music: load the queue, seek, play or hold.
+  const handoffTakeOver = useCallback(
+    async (serverState) => {
+      if (!serverState) return;
+      try {
+        const ids = Array.isArray(serverState.queue_track_ids) ? serverState.queue_track_ids : [];
+        const tracks = ids.length ? await getTracksByIds(ids) : [];
+        const idx =
+          Number.isFinite(serverState.queue_index) && serverState.queue_index >= 0 ? serverState.queue_index : 0;
+        const startTrack =
+          tracks[idx] ||
+          (serverState.current_track_id ? (await getTracksByIds([serverState.current_track_id]))[0] : null) ||
+          tracks[0] ||
+          null;
+        if (!startTrack) return;
+
+        sourceRef.current = { source_type: serverState.source_type ?? null, source_id: serverState.source_id ?? null };
+        dispatch({
+          type: "RESTORE",
+          queue: tracks,
+          queueIndex: idx,
+          currentTrack: startTrack,
+          isShuffle: Boolean(serverState.is_shuffle),
+          isLoop: Boolean(serverState.is_loop),
+        });
+        const position = Number(serverState.current_time_seconds) || 0;
+        if (position > 0) requestSeek(position, startTrack.id);
+        // The browser may refuse autoplay without a gesture; the play button
+        // then reads "Tap to play here" and the lease stays here, paused.
+        setIsPlaying(Boolean(serverState.is_playing));
+      } catch (error) {
+        console.error("Failed to take over playback", error);
+      }
+    },
+    [dispatch, requestSeek],
+  );
+
+  // A remote asked this (the holding) browser to do something.
+  const handoffRunCommand = useCallback(
+    (action, args = {}) => {
+      switch (action) {
+        case "play":
+          if (currentTrack) setIsPlaying(true);
+          break;
+        case "pause":
+          setIsPlaying(false);
+          break;
+        case "next":
+          next();
+          break;
+        case "previous":
+          previous();
+          break;
+        case "seek":
+          if (Number.isFinite(Number(args?.position))) seek(Number(args.position));
+          break;
+        case "shuffle":
+          if ((args?.mode === "on") !== isShuffle) toggleShuffle();
+          break;
+        case "repeat":
+          if ((args?.mode && args.mode !== "off") !== isLoop) toggleLoop();
+          break;
+        case "volume":
+          if (Number.isFinite(Number(args?.volume))) changeVolume(Number(args.volume));
+          break;
+        default:
+          break;
+      }
+    },
+    [currentTrack, next, previous, seek, isShuffle, toggleShuffle, isLoop, toggleLoop, changeVolume],
+  );
+
+  const handoff = useHandoff({
+    currentUser,
+    getStateSnapshot: handoffStateSnapshot,
+    pauseForRemote: handoffPauseForRemote,
+    takeOver: handoffTakeOver,
+    runCommand: handoffRunCommand,
+  });
+
+  const handoffPlayingElsewhere =
+    handoff.available && !handoff.isActiveHere && Boolean(handoff.activeDeviceId);
+
+  // Destructured so the effects below depend on the stable callbacks, not the
+  // handoff object, which is a fresh reference each render.
+  const { claim: handoffClaim, reportPosition: handoffReport, isActiveHere: handoffActiveHere } = handoff;
+
+  // Claim the lease whenever this browser starts playing, so the others step
+  // back. A false->true of the local isPlaying is this browser becoming the
+  // one playing; a remote's playing flag is handoff.remote, never this.
+  const wasPlayingForHandoffRef = useRef(false);
+  useEffect(() => {
+    if (isPlaying && !wasPlayingForHandoffRef.current) handoffClaim();
+    wasPlayingForHandoffRef.current = isPlaying;
+  }, [isPlaying, handoffClaim]);
+
+  // Report position to the other devices every few seconds while holding.
+  useEffect(() => {
+    if (!handoffActiveHere || !isPlaying) return undefined;
+    const id = setInterval(() => handoffReport(), 5000);
+    return () => clearInterval(id);
+  }, [handoffActiveHere, isPlaying, handoffReport]);
+
   const value = useMemo(
     () => ({
       currentTrack,
@@ -390,6 +512,8 @@ export function PlayerProvider({ children }) {
       toggleLike,
       clearPlayback,
       replaceTrack,
+      handoff,
+      handoffPlayingElsewhere,
     }),
     [
       currentTrack,
@@ -422,6 +546,8 @@ export function PlayerProvider({ children }) {
       toggleLike,
       clearPlayback,
       replaceTrack,
+      handoff,
+      handoffPlayingElsewhere,
     ],
   );
 

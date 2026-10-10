@@ -416,3 +416,65 @@
 .queue-panel__list > div {
   overflow-x: hidden !important;
 }
+
+/* ---------- device handoff ---------- */
+
+.player-bar__handoff {
+  position: relative;
+  display: inline-flex;
+}
+
+.player-bar__icon-button--remote,
+.player-bar__icon-button--remote:hover {
+  color: var(--blue-300);
+}
+
+.player-bar__meta--remote {
+  color: var(--blue-300);
+}
+
+.handoff-menu {
+  min-width: 240px;
+}
+
+.handoff-menu__empty {
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.handoff-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.handoff-menu__item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.handoff-menu__item--active,
+.handoff-menu__item--active .handoff-menu__name {
+  color: var(--blue-300);
+}
+
+.handoff-menu__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.handoff-menu__name {
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.handoff-menu__status {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}

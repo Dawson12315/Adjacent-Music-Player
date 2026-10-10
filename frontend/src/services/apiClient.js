@@ -124,6 +124,7 @@ export async function request(path, options = {}) {
     signal,
     noStore = false,
     suppressUnauthorized = false,
+    headers: extraHeaders,
   } = options;
 
   const isFormData = body instanceof FormData;
@@ -137,6 +138,10 @@ export async function request(path, options = {}) {
     headers["Cache-Control"] = "no-cache";
     headers.Pragma = "no-cache";
   }
+
+  // Caller-supplied headers (the device-handoff X-Adjacent-Device), merged
+  // last so an explicit header wins.
+  if (extraHeaders) Object.assign(headers, extraHeaders);
 
   let response;
 
