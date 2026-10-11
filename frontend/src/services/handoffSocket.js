@@ -14,6 +14,8 @@
  */
 
 export const RECONNECT_BACKOFF_MS = [1000, 2000, 5000, 10000];
+/** The server's close code when a newer socket for the same device took over. */
+export const REPLACED_CLOSE_CODE = 4000;
 /** Consecutive failed handshakes before we give up and tell the provider to poll. */
 export const FALLBACK_AFTER_FAILURES = 2;
 
@@ -87,9 +89,18 @@ export function createDeviceSocket({
       // onclose follows; the failure is counted there so it is counted once.
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (closedByUs) {
         report("closed");
+        return;
+      }
+      // The server closes the older of two sockets for the same device with
+      // 4000 when a newer one says hello — a second tab of this browser.
+      // Reconnecting would close *that* one in turn, and the two tabs would
+      // take turns forever. Stand down; actions fall back to the HTTP twins.
+      if (event?.code === REPLACED_CLOSE_CODE) {
+        socket = null;
+        report("replaced");
         return;
       }
       onFailure();

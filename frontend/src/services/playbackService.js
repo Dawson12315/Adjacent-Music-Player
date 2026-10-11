@@ -23,6 +23,11 @@ export async function getPlaybackState(options) {
   };
 }
 
+/**
+ * `deviceId`, when known, names this browser to the server so the write goes
+ * through the device lease like every other: refused (409) while another
+ * device is playing, rather than silently overwriting what it reported.
+ */
 export function savePlaybackState({
   currentTrackId,
   queueIndex,
@@ -31,15 +36,20 @@ export function savePlaybackState({
   isShuffle,
   isLoop,
   queueTrackIds,
+  deviceId = null,
 }) {
-  return apiClient.put("/api/playback", {
-    current_track_id: currentTrackId ?? null,
-    queue_index: queueIndex,
-    // The column is an integer; sending a float is rejected.
-    current_time_seconds: Math.max(0, Math.floor(currentTimeSeconds || 0)),
-    is_playing: isPlaying,
-    is_shuffle: isShuffle,
-    is_loop: isLoop,
-    queue_track_ids: queueTrackIds,
-  });
+  return apiClient.put(
+    "/api/playback",
+    {
+      current_track_id: currentTrackId ?? null,
+      queue_index: queueIndex,
+      // The column is an integer; sending a float is rejected.
+      current_time_seconds: Math.max(0, Math.floor(currentTimeSeconds || 0)),
+      is_playing: isPlaying,
+      is_shuffle: isShuffle,
+      is_loop: isLoop,
+      queue_track_ids: queueTrackIds,
+    },
+    deviceId ? { headers: { "X-Adjacent-Device": deviceId } } : undefined,
+  );
 }

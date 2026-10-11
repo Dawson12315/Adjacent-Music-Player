@@ -158,11 +158,8 @@ export function PlayerProvider({ children }) {
     [currentTrackId, queueIndex, isPlaying, isShuffle, isLoop, queueTrackIds],
   );
 
-  usePlaybackPersistence({
-    enabled: Boolean(currentUser) && hasRestored,
-    snapshot,
-    getCurrentTime: getPosition,
-  });
+  // The persistence hook itself is mounted after the handoff section below:
+  // it is gated on the lease, and names this browser to the server.
 
   /* ---------- liked state for the current track ---------- */
 
@@ -187,35 +184,51 @@ export function PlayerProvider({ children }) {
 
   /* ---------- transport ---------- */
 
+  // The handoff hook mounts below the transport, but every play goes through
+  // its claim first: the lease moves to this browser before the audio element
+  // asks for the stream, which the server refuses to a non-holder while
+  // another device is playing. Awaited only when it is taking the music from
+  // someone (one HTTP round trip); otherwise it is a frame on the wire.
+  const handoffClaimRef = useRef(null);
+  const claimBeforePlay = useCallback((overrides) => handoffClaimRef.current?.(overrides), []);
+
   const playTrack = useCallback(
-    (track, sourceTracks = [], source = DEFAULT_SOURCE) => {
+    async (track, sourceTracks = [], source = DEFAULT_SOURCE) => {
       if (currentTrack && currentTrack.id !== track.id && !audioRef.current?.ended) {
         events.skipped(currentTrack);
       }
 
+      await claimBeforePlay({ trackId: track.id, position: 0, playing: true });
       sourceRef.current = source;
       dispatch({ type: "PLAY_TRACK", track, sourceTracks });
       setIsPlaying(true);
     },
-    [currentTrack, events, audioRef],
+    [currentTrack, events, audioRef, claimBeforePlay],
   );
 
-  const playTracks = useCallback((tracksToPlay, source = DEFAULT_SOURCE) => {
-    if (tracksToPlay.length === 0) return;
+  const playTracks = useCallback(
+    async (tracksToPlay, source = DEFAULT_SOURCE) => {
+      if (tracksToPlay.length === 0) return;
 
-    sourceRef.current = source;
-    dispatch({ type: "PLAY_TRACKS", tracks: tracksToPlay });
-    setIsPlaying(true);
-  }, []);
+      await claimBeforePlay({ trackId: tracksToPlay[0]?.id ?? null, position: 0, playing: true });
+      sourceRef.current = source;
+      dispatch({ type: "PLAY_TRACKS", tracks: tracksToPlay });
+      setIsPlaying(true);
+    },
+    [claimBeforePlay],
+  );
 
-  const togglePlay = useCallback(() => {
+  const togglePlay = useCallback(async () => {
     if (!currentTrack) return;
+    if (!isPlaying) await claimBeforePlay({ playing: true });
     setIsPlaying((previous) => !previous);
-  }, [currentTrack]);
+  }, [currentTrack, isPlaying, claimBeforePlay]);
 
-  const play = useCallback(() => {
-    if (currentTrack) setIsPlaying(true);
-  }, [currentTrack]);
+  const play = useCallback(async () => {
+    if (!currentTrack) return;
+    await claimBeforePlay({ playing: true });
+    setIsPlaying(true);
+  }, [currentTrack, claimBeforePlay]);
 
   const pause = useCallback(() => setIsPlaying(false), []);
 
@@ -460,25 +473,42 @@ export function PlayerProvider({ children }) {
   const handoffPlayingElsewhere =
     handoff.available && !handoff.isActiveHere && Boolean(handoff.activeDeviceId);
 
-  // Destructured so the effects below depend on the stable callbacks, not the
-  // handoff object, which is a fresh reference each render.
   const { claim: handoffClaim, reportPosition: handoffReport, isActiveHere: handoffActiveHere } = handoff;
+  handoffClaimRef.current = handoffClaim;
 
-  // Claim the lease whenever this browser starts playing, so the others step
-  // back. A false->true of the local isPlaying is this browser becoming the
-  // one playing; a remote's playing flag is handoff.remote, never this.
+  // The transport claims on the way in (above). This is the second line: once
+  // the browser really is playing, the full state goes up again with the
+  // queue as built. A false->true of the local isPlaying is this browser
+  // becoming the one playing; a remote's playing flag is handoff.remote.
   const wasPlayingForHandoffRef = useRef(false);
   useEffect(() => {
     if (isPlaying && !wasPlayingForHandoffRef.current) handoffClaim();
     wasPlayingForHandoffRef.current = isPlaying;
   }, [isPlaying, handoffClaim]);
 
-  // Report position to the other devices every few seconds while holding.
+  // Report position to the other devices every few seconds while holding,
+  // and at once when the music pauses, so a remote is not shown playing for
+  // up to five seconds after.
   useEffect(() => {
-    if (!handoffActiveHere || !isPlaying) return undefined;
+    if (!handoffActiveHere) return undefined;
+    if (!isPlaying) {
+      handoffReport({ playing: false });
+      return undefined;
+    }
     const id = setInterval(() => handoffReport(), 5000);
     return () => clearInterval(id);
   }, [handoffActiveHere, isPlaying, handoffReport]);
+
+  // The resume point on the server. Only while this browser holds the lease
+  // or nobody does: a remote tab following another device must not overwrite
+  // what that device reports. The device id lets the server say so (409)
+  // rather than take the write.
+  usePlaybackPersistence({
+    enabled: Boolean(currentUser) && hasRestored && !handoffPlayingElsewhere,
+    snapshot,
+    getCurrentTime: getPosition,
+    deviceId: handoff.me?.deviceId ?? null,
+  });
 
   const value = useMemo(
     () => ({

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createDeviceSocket, FALLBACK_AFTER_FAILURES } from "./handoffSocket";
+import { createDeviceSocket, FALLBACK_AFTER_FAILURES, REPLACED_CLOSE_CODE } from "./handoffSocket";
 
 class FakeSocket {
   constructor(url) {
@@ -20,8 +20,8 @@ class FakeSocket {
   fireMessage(obj) {
     this.onmessage?.({ data: JSON.stringify(obj) });
   }
-  fireClose() {
-    this.onclose?.();
+  fireClose(code) {
+    this.onclose?.(code == null ? undefined : { code });
   }
 }
 FakeSocket.instances = [];
@@ -97,5 +97,20 @@ describe("the handoff socket", () => {
     socket.close(true);
     expect(ws.sent.some((f) => f.type === "bye")).toBe(true);
     expect(ws.closed).toBe(true);
+  });
+
+  it("stands down, without reconnecting, when a newer socket replaced it", () => {
+    const statuses = [];
+    createDeviceSocket({
+      url: "ws://x",
+      hello,
+      onStatus: (s) => statuses.push(s),
+      WebSocketImpl: FakeSocket,
+      setTimeoutImpl: (fn) => fn(),
+    });
+    FakeSocket.instances[0].fireOpen();
+    FakeSocket.instances[0].fireClose(REPLACED_CLOSE_CODE);
+    expect(FakeSocket.instances.length).toBe(1);
+    expect(statuses[statuses.length - 1]).toBe("replaced");
   });
 });

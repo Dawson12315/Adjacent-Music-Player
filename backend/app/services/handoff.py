@@ -322,6 +322,13 @@ def claim(
         session.active_since = now
     device.last_seen_at = now
     if state is not None:
+        # A claim is a new epoch. A fresh client's version counter starts at
+        # zero while the stored one may be in the hundreds, and apply_state
+        # would discard the write as stale — and with it the lease change,
+        # which then rolled back uncommitted. Carry the stored version forward.
+        incoming = state.get("version")
+        current = session.state_version or 0
+        state = {**state, "version": max(int(incoming or 0), current)}
         apply_state(db, session, state, now)
     else:
         db.commit()
@@ -335,12 +342,14 @@ def report(
     """The holder saying where it is. Anyone else is told who holds it."""
     now = now or datetime.utcnow()
     session = get_or_create_playback_session(db, user_id)
+    took_spare = False
     if session.active_device_id is None:
         # Nobody holds it: a report is as good as a claim. A device that
         # was playing when the server restarted keeps the music without
-        # having to notice.
+        # having to notice. The caller announces it as a lease change.
         session.active_device_id = device.id
         session.active_since = now
+        took_spare = True
     elif session.active_device_id != device.id:
         raise HandoffError("device_not_active", "Another device is playing.")
     device.last_seen_at = now
@@ -348,6 +357,9 @@ def report(
         apply_state(db, session, state, now)
     else:
         apply_position(db, session, state, now)
+    if took_spare:
+        db.commit()
+    session.took_spare_lease = took_spare
     return session
 
 

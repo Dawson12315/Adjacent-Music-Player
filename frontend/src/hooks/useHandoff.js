@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { API_BASE_URL } from "../config";
 import { describeDevice } from "../services/deviceIdentity";
@@ -57,6 +57,14 @@ export function useHandoff(deps) {
   useEffect(() => {
     isActiveHereRef.current = lease.isActiveHere;
   }, [lease.isActiveHere]);
+  // Who held the lease at the last reading, for the claim path to decide
+  // whether it is taking the music from someone.
+  const holderRef = useRef(null);
+  // When this browser last claimed. A lease reading older than the claim —
+  // a poll already in flight, a frame from before the claim landed — must
+  // not pause what the claim just started.
+  const claimedAtRef = useRef(0);
+  const CLAIM_SETTLE_MS = 3000;
 
   // Learn the server's capabilities once signed in.
   useEffect(() => {
@@ -82,15 +90,32 @@ export function useHandoff(deps) {
   }, [available]);
 
   const applyLease = useCallback((reading) => {
-    setLease({
-      activeDeviceId: reading.activeDeviceId,
-      activeDeviceName: reading.activeDeviceName ?? null,
-      isActiveHere: reading.isActiveHere,
-      stale: Boolean(reading.stale),
-    });
+    const activeDeviceId = reading.activeDeviceId ?? null;
+    const stale = Boolean(reading.stale);
     if (reading.state?.version != null) versionRef.current = Math.max(versionRef.current, reading.state.version);
 
+    // A reading that says someone else holds it, arriving within moments of
+    // our own claim, was true before the claim. Our claim is the newer fact.
+    const justClaimed = isActiveHereRef.current && Date.now() - claimedAtRef.current < CLAIM_SETTLE_MS;
+    if (justClaimed && !reading.isActiveHere) return;
+
+    holderRef.current = activeDeviceId;
+    setLease({
+      activeDeviceId,
+      activeDeviceName: reading.activeDeviceName ?? null,
+      isActiveHere: reading.isActiveHere,
+      stale,
+    });
+
     if (reading.isActiveHere) {
+      setRemote(null);
+      return;
+    }
+    // Nobody holds the lease, or the holder has gone quiet: nothing to follow
+    // and no one to make room for. This browser keeps doing what it was
+    // doing. Pausing here is what stopped the music every time the server
+    // said "nobody" after a reconnect.
+    if (!activeDeviceId || stale) {
       setRemote(null);
       return;
     }
@@ -128,6 +153,7 @@ export function useHandoff(deps) {
           applyLease(reading);
           break;
         case "state":
+          if (reading.state?.version != null) versionRef.current = Math.max(versionRef.current, reading.state.version);
           if (!isActiveHereRef.current && reading.state) {
             setRemote((prev) => ({
               ...(prev || {}),
@@ -235,25 +261,50 @@ export function useHandoff(deps) {
     if (!sent) httpCall().catch(() => {});
   }, []);
 
-  const claim = useCallback(() => {
-    if (!available || !me) return;
-    const snap = latest.current.getStateSnapshot?.();
-    if (!snap) return;
-    const state = stateFrame({ ...snap, version: nextVersion() });
-    isActiveHereRef.current = true;
-    setLease((prev) => ({ ...prev, activeDeviceId: me.deviceId, activeDeviceName: me.name, isActiveHere: true, stale: false }));
-    setRemote(null);
-    sendOrPost(claimFrame(state), () => http.claim(me.deviceId, state));
-  }, [available, me, nextVersion, sendOrPost]);
+  /**
+   * This browser is playing now — called from the intent to play, before the
+   * audio element asks for the stream. Resolves at once when this browser
+   * already holds the lease or nobody does; when another device is playing
+   * it waits for the HTTP claim to land, so the stream gate sees the lease
+   * moved. `overrides` patch the snapshot for what is about to be true.
+   */
+  const claim = useCallback(
+    async (overrides = {}) => {
+      if (!available || !me) return;
+      const snap = latest.current.getStateSnapshot?.();
+      if (!snap) return;
+      const takingOver = !isActiveHereRef.current && holderRef.current && holderRef.current !== me.deviceId;
+      const state = stateFrame({ ...snap, ...overrides, version: nextVersion() });
+      isActiveHereRef.current = true;
+      holderRef.current = me.deviceId;
+      claimedAtRef.current = Date.now();
+      setLease((prev) => ({ ...prev, activeDeviceId: me.deviceId, activeDeviceName: me.name, isActiveHere: true, stale: false }));
+      setRemote(null);
+      if (takingOver) {
+        try {
+          await http.claim(me.deviceId, state);
+        } catch {
+          socketRef.current?.send(claimFrame(state));
+        }
+        return;
+      }
+      sendOrPost(claimFrame(state), () => http.claim(me.deviceId, state));
+    },
+    [available, me, nextVersion, sendOrPost],
+  );
 
-  const reportPosition = useCallback(() => {
-    if (!available || !me || !isActiveHereRef.current) return;
-    const snap = latest.current.getStateSnapshot?.();
-    if (!snap) return;
-    const frame = reportFrame({ ...snap, version: nextVersion() });
-    const { type: _type, ...position } = frame;
-    sendOrPost(frame, () => http.report(me.deviceId, position));
-  }, [available, me, nextVersion, sendOrPost]);
+  /** The holder's report: on a timer while playing, and at once on a change. */
+  const reportPosition = useCallback(
+    (overrides = {}) => {
+      if (!available || !me || !isActiveHereRef.current) return;
+      const snap = latest.current.getStateSnapshot?.();
+      if (!snap) return;
+      const frame = reportFrame({ ...snap, ...overrides, version: nextVersion() });
+      const { type: _type, ...position } = frame;
+      sendOrPost(frame, () => http.report(me.deviceId, position));
+    },
+    [available, me, nextVersion, sendOrPost],
+  );
 
   const transferTo = useCallback(
     (toDeviceId) => {
@@ -273,21 +324,26 @@ export function useHandoff(deps) {
     [available, me, sendOrPost],
   );
 
-  return {
-    available,
-    me,
-    devices,
-    activeDeviceId: lease.activeDeviceId,
-    activeName: lease.activeDeviceName,
-    isActiveHere: lease.isActiveHere,
-    stale: lease.stale,
-    remote,
-    transport,
-    claim,
-    reportPosition,
-    transferTo,
-    sendCommand,
-  };
+  // One object per change, so the provider's value and the player bar do not
+  // re-render on every render of the hook's host.
+  return useMemo(
+    () => ({
+      available,
+      me,
+      devices,
+      activeDeviceId: lease.activeDeviceId,
+      activeName: lease.activeDeviceName,
+      isActiveHere: lease.isActiveHere,
+      stale: lease.stale,
+      remote,
+      transport,
+      claim,
+      reportPosition,
+      transferTo,
+      sendCommand,
+    }),
+    [available, me, devices, lease, remote, transport, claim, reportPosition, transferTo, sendCommand],
+  );
 }
 
 export default useHandoff;

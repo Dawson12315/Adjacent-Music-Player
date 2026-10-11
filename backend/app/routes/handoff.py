@@ -147,6 +147,11 @@ async def playback_socket(websocket: WebSocket) -> None:
     user_id = user.id
     device_id: str | None = None
     ping_task: asyncio.Task | None = None
+    # Only an explicit bye gives the lease up. A dropped socket — a network
+    # blink, a proxy idle close, the app reopening its own connection — kept
+    # releasing it, and the reconnect then told the device nobody was playing,
+    # which it took as its cue to pause the music it was playing.
+    said_bye = False
 
     try:
         # The first frame must be a hello, soon.
@@ -179,7 +184,9 @@ async def playback_socket(websocket: WebSocket) -> None:
 
         while True:
             frame = await websocket.receive_json()
-            await _dispatch(websocket, user_id, device_id, frame)
+            if await _dispatch(websocket, user_id, device_id, frame) == "bye":
+                said_bye = True
+                break
     except Exception:  # noqa: BLE001 — a disconnect arrives as an exception
         pass
     finally:
@@ -193,7 +200,14 @@ async def playback_socket(websocket: WebSocket) -> None:
         if device_id is not None:
             async with hub.lock(user_id):
                 hub.detach(user_id, device_id, websocket)
-                released = await run_in_threadpool(_release, user_id, device_id)
+                # A device that already reconnected on a newer socket has not
+                # left; its old handler must not take its lease away.
+                reconnected = hub.is_connected(user_id, device_id)
+                released = (
+                    await run_in_threadpool(_release, user_id, device_id)
+                    if said_bye and not reconnected
+                    else False
+                )
             if released:
                 await _after_claim(user_id, device_id)  # lease went spare: others learn of it
 
@@ -223,9 +237,12 @@ async def _dispatch(websocket: WebSocket, user_id: int, device_id: str, frame: d
             full = bool(frame.get("full"))
             report = {k: v for k, v in frame.items() if k not in ("type", "full")}
             async with hub.lock(user_id):
-                accepted = await run_in_threadpool(_report, user_id, device_id, report, full)
-            if accepted:
-                await _after_report(user_id, device_id, full)
+                took_spare = await run_in_threadpool(_report, user_id, device_id, report, full)
+            # A report that found the lease spare took it: say so, or remotes
+            # keep showing nothing playing.
+            if took_spare:
+                await _after_claim(user_id, device_id)
+            await _after_report(user_id, device_id, full)
             return
         if kind == "transfer":
             body = TransferBody(**{k: v for k, v in frame.items() if k != "type"})
@@ -240,7 +257,7 @@ async def _dispatch(websocket: WebSocket, user_id: int, device_id: str, frame: d
             return
         if kind == "bye":
             await websocket.close(code=1000)
-            return
+            return "bye"
     except HandoffError as error:
         await websocket.send_json({"type": "error", "code": error.code, "message": error.message})
     except Exception:  # noqa: BLE001
@@ -278,11 +295,12 @@ def _claim(user_id: int, device_id: str, state: dict | None) -> None:
 
 
 def _report(user_id: int, device_id: str, report: dict, full: bool) -> bool:
+    """Apply the report; True if it took a spare lease on the way."""
     db = SessionLocal()
     try:
         device = handoff.require_device(db, user_id, device_id)
-        handoff.report(db, user_id, device, report, full=full)
-        return True
+        session = handoff.report(db, user_id, device, report, full=full)
+        return bool(getattr(session, "took_spare_lease", False))
     finally:
         db.close()
 
@@ -385,7 +403,9 @@ async def http_state(
     device_id = _device_header(x_adjacent_device)
     try:
         async with hub.lock(current_user.id):
-            await run_in_threadpool(_report, current_user.id, device_id, report.model_dump(), False)
+            took_spare = await run_in_threadpool(_report, current_user.id, device_id, report.model_dump(), False)
+        if took_spare:
+            await _after_claim(current_user.id, device_id)
         await _after_report(current_user.id, device_id, False)
     except HandoffError as error:
         _raise(error)

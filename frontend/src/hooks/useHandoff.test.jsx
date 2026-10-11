@@ -93,7 +93,10 @@ describe("useHandoff (web)", () => {
 
   it("claims by sending a claim frame", async () => {
     const { view } = await mountReady();
-    act(() => view.result.current.claim());
+    // claim is async now (it waits for the HTTP claim when taking over).
+    await act(async () => {
+      await view.result.current.claim();
+    });
     expect(socketHandle.sent.some((f) => f.type === "claim")).toBe(true);
     expect(view.result.current.isActiveHere).toBe(true);
   });
@@ -102,5 +105,61 @@ describe("useHandoff (web)", () => {
     const { d } = await mountReady();
     act(() => socketHandle.onFrame({ type: "take_over", state: { queue_track_ids: [7], queue_index: 0 } }));
     expect(d.takeOver).toHaveBeenCalledWith({ queue_track_ids: [7], queue_index: 0 });
+  });
+
+  it("does not pause when the lease comes back spare after a reconnect", async () => {
+    const { view, d } = await mountReady();
+    await act(async () => {
+      await view.result.current.claim();
+    });
+    act(() => {
+      socketHandle.onFrame({ type: "devices", devices: [], lease: { active_device_id: null, stale: false, state: null } });
+    });
+    expect(d.pauseForRemote).not.toHaveBeenCalled();
+    expect(view.result.current.remote).toBeNull();
+  });
+
+  it("does not pause for a holder that has gone quiet", async () => {
+    const { d } = await mountReady();
+    act(() => {
+      socketHandle.onFrame({ type: "lease", active_device_id: "other", active_device_name: "Old Phone", stale: true, state: null });
+    });
+    expect(d.pauseForRemote).not.toHaveBeenCalled();
+  });
+
+  it("ignores a lease reading older than its own claim", async () => {
+    const { view, d } = await mountReady();
+    await act(async () => {
+      await view.result.current.claim();
+    });
+    act(() => {
+      socketHandle.onFrame({ type: "lease", active_device_id: "other", active_device_name: "Phone", state: { is_playing: true } });
+    });
+    expect(d.pauseForRemote).not.toHaveBeenCalled();
+    expect(view.result.current.isActiveHere).toBe(true);
+  });
+
+  it("waits for the HTTP claim when taking the music from another device", async () => {
+    const http = await import("../services/handoffHttp");
+    let resolveClaim;
+    http.claim.mockImplementation(() => new Promise((resolve) => { resolveClaim = resolve; }));
+    const { view } = await mountReady();
+    act(() => {
+      socketHandle.onFrame({ type: "lease", active_device_id: "other", active_device_name: "Phone", state: { is_playing: true } });
+    });
+
+    let settled = false;
+    let claimPromise;
+    act(() => {
+      claimPromise = view.result.current.claim({ trackId: 9, position: 0, playing: true }).then(() => { settled = true; });
+    });
+    expect(settled).toBe(false);
+    expect(http.claim).toHaveBeenCalledWith("me", expect.objectContaining({ current_track_id: 9 }));
+    await act(async () => {
+      resolveClaim({ ok: true });
+      await claimPromise;
+    });
+    expect(settled).toBe(true);
+    expect(view.result.current.isActiveHere).toBe(true);
   });
 });

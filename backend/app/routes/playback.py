@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -8,6 +8,7 @@ from app.models.track import Track
 from app.models.user import User
 from app.schemas.playback import PlaybackStateResponse, PlaybackStateUpdate
 from app.services.playback import get_or_create_playback_session
+from app.services import handoff
 
 router = APIRouter()
 
@@ -45,13 +46,43 @@ def get_playback_state(
     }
 
 
+def _state_response(session) -> dict:
+    return {
+        "current_track_id": session.current_track_id,
+        "queue_index": session.queue_index,
+        "current_time_seconds": session.current_time_seconds,
+        "is_playing": session.is_playing,
+        "is_shuffle": session.is_shuffle,
+        "is_loop": session.is_loop,
+        "queue_track_ids": [item.track_id for item in session.queue_items],
+        "source_type": session.source_type,
+        "source_id": session.source_id,
+        "version": session.state_version,
+    }
+
+
 @router.put("/playback", response_model=PlaybackStateResponse, tags=["playback"])
 def update_playback_state(
     payload: PlaybackStateUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    x_adjacent_device: str | None = Header(default=None),
 ):
     session = get_or_create_playback_session(db, current_user.id)
+
+    # This route predates device handoff and still has callers that know
+    # nothing of the lease. It must not let a device that is *not* playing
+    # overwrite the one that is. The same rule the stream gate uses: the
+    # holder writes, a spare or stale lease lets anyone write, and a device
+    # that is not the holder while the holder is playing is turned away — a
+    # 409 when it named itself, the holder's state unchanged when it did not.
+    if not handoff.stream_allowed(db, current_user.id, x_adjacent_device or "legacy-client"):
+        if x_adjacent_device:
+            raise HTTPException(
+                status_code=409,
+                detail={"message": "Another device is playing.", "code": "device_not_active"},
+            )
+        return _state_response(session)
 
     # "Play all" on a large library sent the whole library: tens of thousands
     # of rows deleted and re-inserted on every debounced save, on the single

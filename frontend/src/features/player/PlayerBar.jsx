@@ -199,8 +199,10 @@ export function PlayerBar() {
                 devices={handoff.devices}
                 onChoose={(deviceId) => {
                   setHandoffOpen(false);
-                  if (handoff.me && deviceId === handoff.me.deviceId) handoff.claim();
-                  else handoff.transferTo(deviceId);
+                  // "This browser" is a transfer to ourselves: the holder's queue
+                  // and position come here. A bare claim kept whatever this tab
+                  // had loaded and only silenced the other device.
+                  handoff.transferTo(deviceId);
                 }}
               />
             ) : null}

@@ -220,7 +220,143 @@ def test_the_old_playback_put_without_a_device_header_still_works(client, db_ses
     assert put.json()["current_track_id"] == tid
 
 
+def test_the_old_playback_put_is_turned_away_while_another_device_plays(client, db_session_factory):
+    """The legacy PUT was the one write that ignored the lease: a paused device
+    could overwrite what the playing one had just reported."""
+    from app.models.user import User
+    from app.services import handoff
+
+    _admin(client)
+    tid = _make_track(db_session_factory, "/h/legacy-gate.flac")
+    other = _make_track(db_session_factory, "/h/legacy-gate-2.flac")
+
+    db = db_session_factory()
+    try:
+        admin_id = db.query(User).filter_by(username="admin").one().id
+        holder = handoff.register(db, admin_id, {"device_id": "l-holder", "name": "Holder", "kind": "phone"})
+        handoff.claim(db, admin_id, holder, _state(tid, [tid], version=5))
+        handoff.register(db, admin_id, {"device_id": "l-other", "name": "Other", "kind": "web"})
+    finally:
+        db.close()
+
+    body = {
+        "current_track_id": other,
+        "queue_index": 0,
+        "current_time_seconds": 3,
+        "is_playing": False,
+        "is_shuffle": False,
+        "is_loop": False,
+        "queue_track_ids": [other],
+    }
+    # A device that is not the holder is refused.
+    refused = client.put("/api/playback", json=body, headers={"X-Adjacent-Device": "l-other"})
+    assert refused.status_code == 409
+    assert refused.json()["detail"]["code"] == "device_not_active"
+
+    # A client with no device gets the holder's state back, unchanged.
+    anonymous = client.put("/api/playback", json=body)
+    assert anonymous.status_code == 200
+    assert anonymous.json()["current_track_id"] == tid
+
+    # The holder itself writes.
+    own = client.put("/api/playback", json={**body, "current_track_id": tid, "queue_track_ids": [tid]}, headers={"X-Adjacent-Device": "l-holder"})
+    assert own.status_code == 200
+
+
+def test_a_claim_with_an_older_version_still_moves_the_lease(svc, db_session_factory):
+    """A fresh client's counter starts at zero while the stored one is in the
+    hundreds. The claim used to be dropped as stale — and with it the lease."""
+    from app.services import handoff
+
+    db = db_session_factory()
+    try:
+        tid = _make_track(db_session_factory, "/h/old-version.flac")
+        a = handoff.register(db, svc, {"device_id": "ov-a", "name": "A", "kind": "phone"})
+        b = handoff.register(db, svc, {"device_id": "ov-b", "name": "B", "kind": "web"})
+        handoff.claim(db, svc, a, _state(tid, [tid], version=120))
+        session = handoff.claim(db, svc, b, _state(tid, [tid], version=1))
+        assert session.active_device_id == b.id
+        # The counter carries forward rather than going backwards.
+        assert session.state_version >= 120
+    finally:
+        db.close()
+
+
+def test_a_report_that_finds_the_lease_spare_takes_it_and_says_so(svc, db_session_factory):
+    from app.services import handoff
+
+    db = db_session_factory()
+    try:
+        tid = _make_track(db_session_factory, "/h/spare.flac")
+        a = handoff.register(db, svc, {"device_id": "sp-a", "name": "A", "kind": "phone"})
+        session = handoff.report(db, svc, a, {"current_track_id": tid, "current_time_seconds": 4, "is_playing": True}, full=False)
+        assert session.active_device_id == a.id
+        assert session.took_spare_lease is True
+        again = handoff.report(db, svc, a, {"current_time_seconds": 9, "is_playing": True}, full=False)
+        assert again.took_spare_lease is False
+    finally:
+        db.close()
+
+
 # --- the socket --------------------------------------------------------------
+
+
+def test_a_dropped_socket_keeps_the_lease_and_a_bye_gives_it_up(client, db_session_factory):
+    """The network blinking must not take the music away from the device that
+    is playing it; only an explicit goodbye releases the lease."""
+    _admin(client)
+    tid = _make_track(db_session_factory, "/h/drop.flac")
+
+    with client.websocket_connect("/api/playback/ws") as a:
+        a.send_json(HELLO_A)
+        assert a.receive_json()["type"] == "devices"
+        a.send_json({"type": "claim", "state": _state(tid, [tid])})
+        # Wait for the claim to land before the socket goes away.
+        held = client.get("/api/playback/devices", headers={"X-Adjacent-Device": "dev-a"}).json()
+        assert held["lease"]["active_device_id"] == "dev-a"
+    # The context closed the socket without a bye: a drop.
+
+    still = client.get("/api/playback/devices", headers={"X-Adjacent-Device": "dev-b"}).json()
+    assert still["lease"]["active_device_id"] == "dev-a"
+
+    with client.websocket_connect("/api/playback/ws") as a:
+        a.send_json(HELLO_A)
+        assert a.receive_json()["type"] == "devices"
+        a.send_json({"type": "bye"})
+        # The server closes after a bye; wait for it.
+        with pytest.raises(Exception):
+            for _ in range(4):
+                a.receive_json()
+
+    gone = client.get("/api/playback/devices", headers={"X-Adjacent-Device": "dev-b"}).json()
+    assert gone["lease"]["active_device_id"] is None
+
+
+def test_a_reconnect_while_the_old_socket_lingers_keeps_the_lease(client, db_session_factory):
+    """The same device on a newer socket has not left: the old handler's exit
+    must not release what the new one holds."""
+    _admin(client)
+    tid = _make_track(db_session_factory, "/h/relink.flac")
+
+    with client.websocket_connect("/api/playback/ws") as old:
+        old.send_json(HELLO_A)
+        assert old.receive_json()["type"] == "devices"
+        old.send_json({"type": "claim", "state": _state(tid, [tid])})
+        assert client.get("/api/playback/devices", headers={"X-Adjacent-Device": "dev-a"}).json()["lease"]["active_device_id"] == "dev-a"
+
+        with client.websocket_connect("/api/playback/ws") as new:
+            new.send_json(HELLO_A)
+            assert new.receive_json()["type"] == "devices"
+            # The old socket is told to go (code 4000) and says a bye of its own
+            # on the way out; neither may cost the device its lease.
+            old.send_json({"type": "bye"})
+            with pytest.raises(Exception):
+                for _ in range(4):
+                    old.receive_json()
+            kept = client.get("/api/playback/devices", headers={"X-Adjacent-Device": "dev-b"}).json()
+            assert kept["lease"]["active_device_id"] == "dev-a"
+
+
 
 
 def test_two_sockets_see_each_others_claims(client, db_session_factory):

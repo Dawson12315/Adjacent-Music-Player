@@ -16,25 +16,29 @@ const PROGRESS_INTERVAL_MS = 10000;
  * Structural changes are debounced; progress is written on a slow interval while playing
  * and flushed on pause, on unmount, and when the page is hidden.
  */
-export function usePlaybackPersistence({ enabled, snapshot, getCurrentTime }) {
+export function usePlaybackPersistence({ enabled, snapshot, getCurrentTime, deviceId = null }) {
   const snapshotRef = useRef(snapshot);
   const getCurrentTimeRef = useRef(getCurrentTime);
+  const deviceIdRef = useRef(deviceId);
   const timeoutRef = useRef(null);
 
   useEffect(() => {
     snapshotRef.current = snapshot;
     getCurrentTimeRef.current = getCurrentTime;
-  }, [snapshot, getCurrentTime]);
+    deviceIdRef.current = deviceId;
+  }, [snapshot, getCurrentTime, deviceId]);
 
   const save = useCallback(async () => {
     try {
       await savePlaybackState({
         ...snapshotRef.current,
         currentTimeSeconds: getCurrentTimeRef.current(),
+        deviceId: deviceIdRef.current,
       });
     } catch (error) {
-      // Losing a resume point is not worth interrupting playback for.
-      console.error("Failed to save playback state", error);
+      // A 409 is the server keeping the playing device's state over this
+      // one's, which is the rule working; anything else is worth a line.
+      if (error?.status !== 409) console.error("Failed to save playback state", error);
     }
   }, []);
 

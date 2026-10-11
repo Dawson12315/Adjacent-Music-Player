@@ -185,6 +185,7 @@ def delete_user(
     (playlist → entries, session → queue) do the child cleanup.
     """
     from app.models.listening_event import ListeningEvent
+    from app.models.playback_device import PlaybackDevice
     from app.models.playback_session import PlaybackSession
     from app.models.playlist import Playlist
     from app.models.track_user_stats import TrackUserStats
@@ -225,6 +226,12 @@ def delete_user(
     )
     if playback_session:
         db.delete(playback_session)
+
+    # Handoff devices carry a plain FK to the user and nothing else cleans them
+    # up; on Postgres the user delete fails on it otherwise.
+    db.query(PlaybackDevice).filter(PlaybackDevice.user_id == user.id).delete(
+        synchronize_session=False
+    )
 
     # No relationship is mapped between User and these rows, so the unit of
     # work won't order the deletes on its own — flush the dependents before
