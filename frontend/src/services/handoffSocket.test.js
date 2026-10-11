@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createDeviceSocket, FALLBACK_AFTER_FAILURES, REPLACED_CLOSE_CODE } from "./handoffSocket";
+import { createDeviceSocket, FALLBACK_AFTER_FAILURES, FALLBACK_RETRY_MS, RECONNECT_BACKOFF_MS, REPLACED_CLOSE_CODE } from "./handoffSocket";
 
 class FakeSocket {
   constructor(url) {
@@ -112,5 +112,55 @@ describe("the handoff socket", () => {
     FakeSocket.instances[0].fireClose(REPLACED_CLOSE_CODE);
     expect(FakeSocket.instances.length).toBe(1);
     expect(statuses[statuses.length - 1]).toBe("replaced");
+  });
+
+  it("backs off after repeated drops instead of reconnecting every second", () => {
+    const delays = [];
+    const timers = [];
+    createDeviceSocket({
+      url: "ws://x",
+      hello,
+      WebSocketImpl: FakeSocket,
+      setTimeoutImpl: (fn, ms) => {
+        delays.push(ms);
+        timers.push(fn);
+        return timers.length;
+      },
+    });
+    // Opened once, then dropped three times in a row.
+    FakeSocket.instances[0].fireOpen();
+    FakeSocket.instances[0].fireClose();
+    timers.shift()();
+    FakeSocket.instances[1].fireClose();
+    timers.shift()();
+    FakeSocket.instances[2].fireClose();
+    expect(delays).toEqual([RECONNECT_BACKOFF_MS[0], RECONNECT_BACKOFF_MS[1], RECONNECT_BACKOFF_MS[2]]);
+  });
+
+  it("tries the socket again after a spell of polling", () => {
+    const delays = [];
+    const timers = [];
+    const statuses = [];
+    createDeviceSocket({
+      url: "ws://x",
+      hello,
+      onStatus: (s) => statuses.push(s),
+      WebSocketImpl: FakeSocket,
+      setTimeoutImpl: (fn, ms) => {
+        delays.push(ms);
+        timers.push(fn);
+        return timers.length;
+      },
+    });
+    FakeSocket.instances[0].fireClose();
+    timers.shift()();
+    FakeSocket.instances[1].fireClose();
+    expect(statuses).toContain("fallback");
+    expect(delays[delays.length - 1]).toBe(FALLBACK_RETRY_MS);
+    // The retry opens a fresh socket; a server that now accepts it ends the polling.
+    timers.shift()();
+    expect(FakeSocket.instances.length).toBe(3);
+    FakeSocket.instances[2].fireOpen();
+    expect(statuses[statuses.length - 1]).toBe("open");
   });
 });

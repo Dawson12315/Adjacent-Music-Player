@@ -12,6 +12,7 @@ import { usePlaybackPersistence } from "../hooks/usePlaybackPersistence";
 import { useHandoff } from "../hooks/useHandoff";
 import { getPlaybackState } from "../services/playbackService";
 import { getTracksByIds } from "../services/tracksService";
+import { interpolatedPosition } from "../services/handoffProtocol";
 import * as playlistsService from "../services/playlistsService";
 import { initialPlayerState, playerReducer } from "../features/player/playerReducer";
 
@@ -36,6 +37,9 @@ export function PlayerProvider({ children }) {
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
   const [hasRestored, setHasRestored] = useState(false);
+  // True after the browser refused to start the audio without a gesture —
+  // after a hand-over to this tab, typically. The bar then asks for the tap.
+  const [awaitingGesture, setAwaitingGesture] = useState(false);
 
   const { currentTrack, queue, queueIndex, isShuffle, isLoop } = state;
   const currentTrackId = currentTrack?.id ?? null;
@@ -48,13 +52,21 @@ export function PlayerProvider({ children }) {
     (error) => {
       setIsPlaying(false);
 
-      // Expected when a restored session asks to resume without a user gesture.
-      if (error.kind !== "autoplay-blocked") {
-        notify(error.message);
+      // Expected when a hand-over asks to resume without a user gesture: the
+      // music is this tab's to play, it only needs the tap. Say so instead of
+      // leaving a paused bar that looks like nothing happened.
+      if (error.kind === "autoplay-blocked") {
+        setAwaitingGesture(true);
+        return;
       }
+      notify(error.message);
     },
     [notify],
   );
+
+  useEffect(() => {
+    if (isPlaying) setAwaitingGesture(false);
+  }, [isPlaying]);
 
   const audio = useAudioElement({
     track: currentTrack,
@@ -125,7 +137,12 @@ export function PlayerProvider({ children }) {
           requestSeek(saved.currentTimeSeconds, restoredTrack.id);
         }
 
-        setIsPlaying(saved.isPlaying);
+        // Restored paused, whatever the session says. The saved "playing" is
+        // another device's, or a previous tab's that a reload interrupted;
+        // copying it here claimed the lease from the device actually playing
+        // and then could not start, the browser refusing autoplay without a
+        // gesture — phone silent, browser paused. Playing is an intent, and
+        // the next tap supplies it.
       } catch (error) {
         console.error("Failed to restore playback state", error);
       } finally {
@@ -191,6 +208,9 @@ export function PlayerProvider({ children }) {
   // someone (one HTTP round trip); otherwise it is a frame on the wire.
   const handoffClaimRef = useRef(null);
   const claimBeforePlay = useCallback((overrides) => handoffClaimRef.current?.(overrides), []);
+  // A take-over sets isPlaying without an intent of this tab's: the lease is
+  // already here. The playing-edge claim below must not fire for it.
+  const suppressEdgeClaimRef = useRef(false);
 
   const playTrack = useCallback(
     async (track, sourceTracks = [], source = DEFAULT_SOURCE) => {
@@ -417,8 +437,10 @@ export function PlayerProvider({ children }) {
         });
         const position = Number(serverState.current_time_seconds) || 0;
         if (position > 0) requestSeek(position, startTrack.id);
-        // The browser may refuse autoplay without a gesture; the play button
-        // then reads "Tap to play here" and the lease stays here, paused.
+        // The browser may refuse autoplay without a gesture; the bar then
+        // asks for the tap and the lease stays here, paused, with the pause
+        // reported so the others are not refused a stream in the meantime.
+        if (serverState.is_playing) suppressEdgeClaimRef.current = true;
         setIsPlaying(Boolean(serverState.is_playing));
       } catch (error) {
         console.error("Failed to take over playback", error);
@@ -462,12 +484,15 @@ export function PlayerProvider({ children }) {
     [currentTrack, next, previous, seek, isShuffle, toggleShuffle, isLoop, toggleLoop, changeVolume],
   );
 
+  const handoffOnError = useCallback((error) => notify(error.message), [notify]);
+
   const handoff = useHandoff({
     currentUser,
     getStateSnapshot: handoffStateSnapshot,
     pauseForRemote: handoffPauseForRemote,
     takeOver: handoffTakeOver,
     runCommand: handoffRunCommand,
+    onError: handoffOnError,
   });
 
   const handoffPlayingElsewhere =
@@ -482,9 +507,57 @@ export function PlayerProvider({ children }) {
   // becoming the one playing; a remote's playing flag is handoff.remote.
   const wasPlayingForHandoffRef = useRef(false);
   useEffect(() => {
-    if (isPlaying && !wasPlayingForHandoffRef.current) handoffClaim();
+    if (isPlaying && !wasPlayingForHandoffRef.current) {
+      if (suppressEdgeClaimRef.current) suppressEdgeClaimRef.current = false;
+      else handoffClaim();
+    }
     wasPlayingForHandoffRef.current = isPlaying;
   }, [isPlaying, handoffClaim]);
+
+  /* ---------- following the holder ---------- */
+
+  // The track the other device is on, so the bar shows what is actually
+  // playing rather than whatever this tab last had loaded.
+  const remoteTrackId = handoffPlayingElsewhere ? (handoff.remote?.trackId ?? null) : null;
+  const [remoteTrack, setRemoteTrack] = useState(null);
+  useEffect(() => {
+    if (remoteTrackId == null) {
+      setRemoteTrack(null);
+      return undefined;
+    }
+    if (remoteTrackId === currentTrackId) {
+      setRemoteTrack(currentTrack);
+      return undefined;
+    }
+    let cancelled = false;
+    getTracksByIds([remoteTrackId])
+      .then((tracks) => {
+        if (!cancelled) setRemoteTrack(tracks[0] || null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [remoteTrackId, currentTrackId, currentTrack]);
+
+  // A once-a-second clock while the remote plays, so its progress bar moves
+  // between reports. Nothing else re-renders on it: only the progress context.
+  const remotePlaying = Boolean(handoffPlayingElsewhere && handoff.remote?.playing);
+  const [remoteNowMs, setRemoteNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!remotePlaying) return undefined;
+    setRemoteNowMs(Date.now());
+    const id = setInterval(() => setRemoteNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [remotePlaying]);
+
+  const { sendCommand: handoffSendCommand } = handoff;
+  const remoteSeek = useCallback(
+    (seconds) => {
+      if (Number.isFinite(seconds)) handoffSendCommand("seek", { position: Math.max(0, Math.floor(seconds)) });
+    },
+    [handoffSendCommand],
+  );
 
   // Report position to the other devices every few seconds while holding,
   // and at once when the music pauses, so a remote is not shown playing for
@@ -544,6 +617,8 @@ export function PlayerProvider({ children }) {
       replaceTrack,
       handoff,
       handoffPlayingElsewhere,
+      remoteTrack,
+      awaitingGesture,
     }),
     [
       currentTrack,
@@ -578,13 +653,25 @@ export function PlayerProvider({ children }) {
       replaceTrack,
       handoff,
       handoffPlayingElsewhere,
+      remoteTrack,
+      awaitingGesture,
     ],
   );
 
-  const progressValue = useMemo(
-    () => ({ currentTime, duration, seek }),
-    [currentTime, duration, seek],
-  );
+  // While another device plays, the progress row is that device's: position
+  // interpolated from its last report, the length of its track, and a seek
+  // that goes to it as a command.
+  const remote = handoff.remote;
+  const progressValue = useMemo(() => {
+    if (handoffPlayingElsewhere && remote) {
+      return {
+        currentTime: interpolatedPosition(remote, remoteNowMs),
+        duration: Number(remoteTrack?.duration_seconds) || 0,
+        seek: remoteSeek,
+      };
+    }
+    return { currentTime, duration, seek };
+  }, [handoffPlayingElsewhere, remote, remoteNowMs, remoteTrack, remoteSeek, currentTime, duration, seek]);
 
   return (
     <PlayerContext.Provider value={value}>

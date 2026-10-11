@@ -91,6 +91,14 @@ export function readServerFrame(frame, myDeviceId) {
       return { kind: "take_over", state: frame.state || null };
     case "command":
       return { kind: "command", action: frame.action, args: frame.args || {} };
+    case "error":
+      // The server refused something we sent: a transfer to a device that
+      // went away, a command with nobody playing. Worth a line to the user.
+      return {
+        kind: "error",
+        code: frame.code || "unknown",
+        message: frame.message || "The server could not do that.",
+      };
     default:
       return null;
   }

@@ -76,4 +76,12 @@ describe("the socket url", () => {
     expect(handoffSocketUrl("http://localhost:8000")).toBe("ws://localhost:8000/api/playback/ws");
     expect(handoffSocketUrl("https://music.example.com/")).toBe("wss://music.example.com/api/playback/ws");
   });
+
+  it("reads an error frame", () => {
+    expect(readServerFrame({ type: "error", code: "nobody_active", message: "Nothing is playing to control." }, "me")).toEqual({
+      kind: "error",
+      code: "nobody_active",
+      message: "Nothing is playing to control.",
+    });
+  });
 });

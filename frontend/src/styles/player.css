@@ -433,6 +433,25 @@
   color: var(--blue-300);
 }
 
+/* After a hand-over the browser refused to start on its own: the play
+   button is the one thing to press, and it says so. */
+.player-bar__play-button--attention {
+  box-shadow: 0 0 0 0 var(--blue-300);
+  animation: player-bar-attention 1.6s ease-out infinite;
+}
+
+@keyframes player-bar-attention {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--blue-300) 70%, transparent); }
+  100% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--blue-300) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-bar__play-button--attention {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--blue-300);
+  }
+}
+
 .handoff-menu {
   min-width: 240px;
 }

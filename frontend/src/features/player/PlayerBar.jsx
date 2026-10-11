@@ -34,33 +34,51 @@ export function PlayerBar() {
     toggleLike,
     handoff,
     handoffPlayingElsewhere,
+    remoteTrack,
+    awaitingGesture,
   } = usePlayer();
 
   const [handoffOpen, setHandoffOpen] = useState(false);
   useDismissable(handoffOpen, () => setHandoffOpen(false));
 
-  // When the music is on another device, this bar drives it: the controls send
-  // commands, and what the play button shows follows the remote's report.
-  const remotePlaying = Boolean(handoff?.remote?.playing);
+  // When the music is on another device, this bar drives it: every control
+  // sends a command, and what the buttons show follows the remote's report.
+  // The seek bar does the same through the progress context.
+  const remote = handoff?.remote;
+  const remotePlaying = Boolean(remote?.playing);
   const displayPlaying = handoffPlayingElsewhere ? remotePlaying : isPlaying;
+  const displayShuffle = handoffPlayingElsewhere ? Boolean(remote?.shuffle) : isShuffle;
+  const displayLoop = handoffPlayingElsewhere ? Boolean(remote?.loop) : isLoop;
   const onTogglePlay = handoffPlayingElsewhere
     ? () => handoff.sendCommand(remotePlaying ? "pause" : "play")
     : togglePlay;
   const onNext = handoffPlayingElsewhere ? () => handoff.sendCommand("next") : next;
   const onPrevious = handoffPlayingElsewhere ? () => handoff.sendCommand("previous") : previous;
+  const onToggleShuffle = handoffPlayingElsewhere
+    ? () => handoff.sendCommand("shuffle", { mode: remote?.shuffle ? "off" : "on" })
+    : toggleShuffle;
+  const onToggleLoop = handoffPlayingElsewhere
+    ? () => handoff.sendCommand("repeat", { mode: remote?.loop ? "off" : "queue" })
+    : toggleLoop;
+  const onVolume = handoffPlayingElsewhere
+    ? (value) => handoff.sendCommand("volume", { volume: value })
+    : changeVolume;
 
-  const artwork = currentTrack ? resolveAlbumArtwork(currentTrack.album, albumArtworkMap, currentTrack.artist) : null;
+  // The track shown is the one playing: the holder's while remote.
+  const shownTrack = handoffPlayingElsewhere ? remoteTrack || currentTrack : currentTrack;
+  const artwork = shownTrack ? resolveAlbumArtwork(shownTrack.album, albumArtworkMap, shownTrack.artist) : null;
+  const playLabel = awaitingGesture ? "Tap to play here" : displayPlaying ? "Pause" : "Play";
 
   return (
     <footer className="player-bar">
       <div className="player-bar__left">
-        {currentTrack ? (
+        {shownTrack ? (
           <>
             <Artwork artwork={artwork} className="player-bar__art" size={52} />
 
             <div className="player-bar__track-info">
               <div className="player-bar__title-row">
-                {isPlaying && (
+                {displayPlaying && (
                   <span className="eq" aria-hidden="true">
                     <span />
                     <span />
@@ -68,28 +86,34 @@ export function PlayerBar() {
                     <span />
                   </span>
                 )}
-                <span className="player-bar__title">{currentTrack.title}</span>
+                <span className="player-bar__title">{shownTrack.title}</span>
               </div>
-              <span className={`player-bar__meta ${handoffPlayingElsewhere ? "player-bar__meta--remote" : ""}`}>
+              <span
+                className={`player-bar__meta ${
+                  handoffPlayingElsewhere || awaitingGesture ? "player-bar__meta--remote" : ""
+                }`}
+              >
                 {handoffPlayingElsewhere ? (
                   `Playing on ${handoff.activeName}`
-                ) : currentTrack.artist ? (
+                ) : awaitingGesture ? (
+                  "Handed to this browser · tap play to continue"
+                ) : shownTrack.artist ? (
                   <Link
                     className="player-bar__meta-link"
-                    to={buildArtistPath(currentTrack.artist)}
+                    to={buildArtistPath(shownTrack.artist)}
                   >
-                    {currentTrack.artist}
+                    {shownTrack.artist}
                   </Link>
                 ) : (
                   "Unknown Artist"
                 )}
                 {" · "}
-                {currentTrack.album ? (
+                {shownTrack.album ? (
                   <Link
                     className="player-bar__meta-link"
-                    to={buildAlbumPath(currentTrack.album)}
+                    to={buildAlbumPath(shownTrack.album)}
                   >
-                    {currentTrack.album}
+                    {shownTrack.album}
                   </Link>
                 ) : (
                   "Unknown Album"
@@ -119,12 +143,12 @@ export function PlayerBar() {
 
           <button
             className={`player-bar__icon-button ${
-              isShuffle ? "player-bar__icon-button--active" : ""
+              displayShuffle ? "player-bar__icon-button--active" : ""
             }`}
             type="button"
             aria-label="Shuffle"
-            aria-pressed={isShuffle}
-            onClick={toggleShuffle}
+            aria-pressed={displayShuffle}
+            onClick={onToggleShuffle}
           >
             <Icon name="shuffle" size={18} />
           </button>
@@ -140,10 +164,11 @@ export function PlayerBar() {
           </button>
 
           <button
-            className="player-bar__play-button"
+            className={`player-bar__play-button ${awaitingGesture ? "player-bar__play-button--attention" : ""}`}
             onClick={onTogglePlay}
             type="button"
-            aria-label={displayPlaying ? "Pause" : "Play"}
+            aria-label={playLabel}
+            title={awaitingGesture ? playLabel : undefined}
             disabled={!currentTrack && !handoffPlayingElsewhere}
           >
             <Icon name={displayPlaying ? "pause" : "play"} size={18} />
@@ -161,12 +186,12 @@ export function PlayerBar() {
 
           <button
             className={`player-bar__icon-button ${
-              isLoop ? "player-bar__icon-button--active" : ""
+              displayLoop ? "player-bar__icon-button--active" : ""
             }`}
             type="button"
             aria-label="Repeat"
-            aria-pressed={isLoop}
-            onClick={toggleLoop}
+            aria-pressed={displayLoop}
+            onClick={onToggleLoop}
           >
             <Icon name="repeat" size={18} />
           </button>
@@ -237,7 +262,7 @@ export function PlayerBar() {
           max="1"
           step="0.01"
           value={isMuted ? 0 : volume}
-          onChange={(event) => changeVolume(Number(event.target.value))}
+          onChange={(event) => onVolume(Number(event.target.value))}
           aria-label="Volume"
         />
       </div>

@@ -34,6 +34,7 @@ export const HANDOFF_CAPABILITY = "device-handoff";
  *   pauseForRemote()   -> pause the audio; we are remote now
  *   takeOver(state)    -> load a handed-over queue and play/seek
  *   runCommand(action, args) -> perform a remote's request while holding
+ *   onError({code, message}) -> the server refused something we asked for
  */
 export function useHandoff(deps) {
   const latest = useRef(deps);
@@ -160,21 +161,38 @@ export function useHandoff(deps) {
               trackId: reading.state.current_track_id ?? prev?.trackId ?? null,
               position: Number(reading.state.current_time_seconds) || 0,
               playing: Boolean(reading.state.is_playing),
+              // A tick carries the flags too, so a shuffle or repeat toggled
+              // on the holder shows here without waiting for a lease frame.
+              shuffle: reading.state.is_shuffle != null ? Boolean(reading.state.is_shuffle) : prev?.shuffle,
+              loop: reading.state.is_loop != null ? Boolean(reading.state.is_loop) : prev?.loop,
               reportedAtMs: Date.now(),
             }));
           }
           break;
         case "take_over":
+          // The server moved the lease to us before sending this. Mark it so
+          // the reports go out as the holder's; the lease frame that follows
+          // (newer servers send us one too) agrees.
+          if (me) {
+            isActiveHereRef.current = true;
+            holderRef.current = me.deviceId;
+            claimedAtRef.current = Date.now();
+            setLease({ activeDeviceId: me.deviceId, activeDeviceName: me.name, isActiveHere: true, stale: false });
+            setRemote(null);
+          }
           latest.current.takeOver?.(reading.state);
           break;
         case "command":
           if (isActiveHereRef.current) latest.current.runCommand?.(reading.action, reading.args);
           break;
+        case "error":
+          latest.current.onError?.({ code: reading.code, message: reading.message });
+          break;
         default:
           break;
       }
     },
-    [applyLease, me?.deviceId],
+    [applyLease, me],
   );
 
   const onFrameRef = useRef(onFrame);
@@ -258,7 +276,18 @@ export function useHandoff(deps) {
 
   const sendOrPost = useCallback((frame, httpCall) => {
     const sent = socketRef.current?.send(frame);
-    if (!sent) httpCall().catch(() => {});
+    if (!sent) {
+      httpCall().catch((error) => {
+        // The HTTP twin's refusal is the same news the socket would have
+        // framed as an error; a network failure is not worth a line.
+        if (error?.status >= 400) {
+          latest.current.onError?.({
+            code: error?.detail?.code || "request_failed",
+            message: error?.detail?.message || error?.message || "The server could not do that.",
+          });
+        }
+      });
+    }
   }, []);
 
   /**

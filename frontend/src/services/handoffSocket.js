@@ -14,6 +14,12 @@
  */
 
 export const RECONNECT_BACKOFF_MS = [1000, 2000, 5000, 10000];
+/**
+ * How long a browser polls before trying the socket again. A proxy that was
+ * fixed, or a network that stopped dropping upgrades, should not mean polling
+ * until the next page load.
+ */
+export const FALLBACK_RETRY_MS = 5 * 60 * 1000;
 /** The server's close code when a newer socket for the same device took over. */
 export const REPLACED_CLOSE_CODE = 4000;
 /** Consecutive failed handshakes before we give up and tell the provider to poll. */
@@ -31,8 +37,13 @@ export function createDeviceSocket({
   let socket = null;
   let closedByUs = false;
   let failures = 0;
+  // Drops since the last successful open: the backoff index. `failures` only
+  // counts handshakes that never opened, so without this a socket that had
+  // opened once reconnected every second forever after a drop.
+  let drops = 0;
   let everOpened = false;
   let reconnectTimer = null;
+  let fallbackTimer = null;
   let status = "idle";
 
   function report(next) {
@@ -59,6 +70,7 @@ export function createDeviceSocket({
     socket.onopen = () => {
       everOpened = true;
       failures = 0;
+      drops = 0;
       report("open");
       try {
         socket.send(JSON.stringify(hello()));
@@ -116,19 +128,30 @@ export function createDeviceSocket({
       failures += 1;
       if (failures >= FALLBACK_AFTER_FAILURES) {
         report("fallback");
+        scheduleFallbackRetry();
         return;
       }
     }
+    drops += 1;
     scheduleReconnect();
   }
 
   function scheduleReconnect() {
     report("connecting");
-    const index = Math.min(failures, RECONNECT_BACKOFF_MS.length - 1);
+    const index = Math.min(Math.max(failures, drops) - 1, RECONNECT_BACKOFF_MS.length - 1);
     reconnectTimer = setTimeoutImpl(() => {
       reconnectTimer = null;
       open();
-    }, RECONNECT_BACKOFF_MS[index]);
+    }, RECONNECT_BACKOFF_MS[Math.max(index, 0)]);
+  }
+
+  /** Polling is a fallback, not a destination: try the socket again later. */
+  function scheduleFallbackRetry() {
+    fallbackTimer = setTimeoutImpl(() => {
+      fallbackTimer = null;
+      failures = 0;
+      open();
+    }, FALLBACK_RETRY_MS);
   }
 
   function send(frame) {
@@ -148,6 +171,10 @@ export function createDeviceSocket({
     if (reconnectTimer) {
       clearTimeoutImpl(reconnectTimer);
       reconnectTimer = null;
+    }
+    if (fallbackTimer) {
+      clearTimeoutImpl(fallbackTimer);
+      fallbackTimer = null;
     }
     if (socket) {
       if (sayBye) {

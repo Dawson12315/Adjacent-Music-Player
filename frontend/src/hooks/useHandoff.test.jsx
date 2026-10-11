@@ -162,4 +162,34 @@ describe("useHandoff (web)", () => {
     expect(settled).toBe(true);
     expect(view.result.current.isActiveHere).toBe(true);
   });
+
+  it("marks itself the holder on a take_over, before the player loads it", async () => {
+    const { view, d } = await mountReady();
+    act(() => {
+      socketHandle.onFrame({ type: "take_over", state: { queue_track_ids: [7], queue_index: 0, is_playing: true } });
+    });
+    expect(d.takeOver).toHaveBeenCalled();
+    expect(view.result.current.isActiveHere).toBe(true);
+    expect(view.result.current.remote).toBeNull();
+  });
+
+  it("surfaces a server error frame", async () => {
+    const onError = vi.fn();
+    await mountReady({ onError });
+    act(() => {
+      socketHandle.onFrame({ type: "error", code: "device_away", message: "Dawson's iPhone is not reachable right now." });
+    });
+    expect(onError).toHaveBeenCalledWith({ code: "device_away", message: "Dawson's iPhone is not reachable right now." });
+  });
+
+  it("follows the holder's shuffle and repeat from its ticks", async () => {
+    const { view } = await mountReady();
+    act(() => {
+      socketHandle.onFrame({ type: "lease", active_device_id: "phone", active_device_name: "Phone", state: { is_playing: true, is_shuffle: false, is_loop: false } });
+    });
+    act(() => {
+      socketHandle.onFrame({ type: "state", current_time_seconds: 40, is_playing: true, is_shuffle: true, is_loop: true });
+    });
+    expect(view.result.current.remote).toMatchObject({ position: 40, shuffle: true, loop: true });
+  });
 });

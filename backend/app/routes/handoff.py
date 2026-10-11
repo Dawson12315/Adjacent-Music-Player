@@ -101,7 +101,10 @@ async def _after_transfer(user_id: int, target_device_id: str, from_device_id: s
     connected = hub.connected_device_ids(user_id)
     lease = await run_in_threadpool(_lease_dict, user_id, connected, True)
     await hub.send(user_id, target_device_id, {"type": "take_over", "state": lease["state"]})
-    await hub.broadcast(user_id, {"type": "lease", **lease}, exclude=target_device_id)
+    # The target included: it learns it is the holder from the lease frame as
+    # well as from the take_over, so its reports go out as the holder's even
+    # on a client that reads only one of the two.
+    await hub.broadcast(user_id, {"type": "lease", **lease})
 
 
 def _lease_dict(user_id: int, connected: set[str], with_state: bool) -> dict:
