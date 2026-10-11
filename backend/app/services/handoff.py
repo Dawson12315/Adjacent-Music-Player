@@ -20,6 +20,7 @@ can be tested without a socket in sight.
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.playback_device import PlaybackDevice
@@ -97,15 +98,32 @@ def register(db: Session, user_id: int, info: dict, now: datetime | None = None)
         device = PlaybackDevice(user_id=user_id, device_id=info["device_id"], created_at=now)
         db.add(device)
 
+    _describe(device, info, now)
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two hellos from the same new device at once — the socket's and the
+        # HTTP one, or a tab opened twice — both found nothing and both
+        # inserted. The unique key keeps one; this one takes it over.
+        db.rollback()
+        device = (
+            db.query(PlaybackDevice)
+            .filter(PlaybackDevice.user_id == user_id, PlaybackDevice.device_id == info["device_id"])
+            .one()
+        )
+        _describe(device, info, now)
+        db.commit()
+    db.refresh(device)
+    return device
+
+
+def _describe(device: PlaybackDevice, info: dict, now: datetime) -> None:
     device.name = info.get("name") or device.name or "Unnamed device"
     device.kind = info.get("kind") or device.kind or "other"
     device.platform = info.get("platform")
     device.app_version = info.get("app_version")
     device.context = info.get("context")
     device.last_seen_at = now
-    db.commit()
-    db.refresh(device)
-    return device
 
 
 def find_device(db: Session, user_id: int, device_id: str) -> PlaybackDevice | None:

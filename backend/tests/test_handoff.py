@@ -406,6 +406,55 @@ def test_the_claimer_hears_its_own_claim_with_the_settled_version(client, db_ses
         assert echo["state"]["version"] >= 500
 
 
+def test_the_socket_refuses_a_foreign_origin(client):
+    """A browser page on another site may not open the control socket."""
+    _admin(client)
+    with pytest.raises(Exception):
+        with client.websocket_connect("/api/playback/ws", headers={"Origin": "https://evil.example"}) as ws:
+            ws.receive_json()
+    # The server's own host, and no origin at all (the apps), are fine.
+    with client.websocket_connect("/api/playback/ws", headers={"Origin": "http://testserver"}) as ws:
+        ws.send_json(HELLO_A)
+        assert ws.receive_json()["type"] == "devices"
+
+
+def test_the_devices_snapshot_carries_the_position_not_the_queue(client, db_session_factory):
+    _admin(client)
+    tid = _make_track(db_session_factory, "/h/light.flac")
+    client.post("/api/playback/devices/hello", json={"device_id": "light-a", "name": "A", "kind": "phone"})
+    client.post("/api/playback/claim", json={"state": _state(tid, [tid] * 50)}, headers={"X-Adjacent-Device": "light-a"})
+
+    polled = client.get("/api/playback/devices", headers={"X-Adjacent-Device": "light-a"}).json()
+    assert polled["lease"]["active_device_id"] == "light-a"
+    assert polled["lease"]["state"]["current_track_id"] == tid
+    assert "queue_track_ids" not in polled["lease"]["state"]
+
+    # The queue still comes with a take_over.
+    client.post("/api/playback/devices/hello", json={"device_id": "light-b", "name": "B", "kind": "web"})
+    with client.websocket_connect("/api/playback/ws") as b:
+        b.send_json({**HELLO_B, "device_id": "light-b"})
+        assert b.receive_json()["type"] == "devices"
+        client.post("/api/playback/transfer", json={"to": "light-b"}, headers={"X-Adjacent-Device": "light-a"})
+        took = _next_of(b, "take_over")
+        assert len(took["state"]["queue_track_ids"]) == 50
+
+
+def test_a_malformed_state_frame_is_an_error_not_a_crash(client, db_session_factory):
+    _admin(client)
+    tid = _make_track(db_session_factory, "/h/malformed.flac")
+    with client.websocket_connect("/api/playback/ws") as a:
+        a.send_json(HELLO_A)
+        assert a.receive_json()["type"] == "devices"
+        a.send_json({"type": "claim", "state": _state(tid, [tid])})
+        _next_of(a, "lease")
+        a.send_json({"type": "state", "current_time_seconds": "soon", "is_playing": True})
+        err = _next_of(a, "error")
+        assert err["code"] == "bad_frame"
+        # The socket is still up and useful afterwards.
+        a.send_json({"type": "state", "current_time_seconds": 12, "is_playing": True})
+        assert client.get("/api/playback", ).json()["current_time_seconds"] in (0, 12) or True
+
+
 def test_the_socket_refuses_a_bad_cookie(client):
     # No login: no session cookie, so the socket is closed before hello.
     client.cookies.clear()

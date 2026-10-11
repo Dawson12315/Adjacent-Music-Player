@@ -254,3 +254,41 @@ def test_a_forced_password_change_answers_with_its_code(signed_in, db_session_fa
     # The account can still see itself, which is how it reaches the screen.
     assert allowed.status_code == 200
     assert allowed.json()["must_change_password"] is True
+
+
+def test_a_deactivated_account_is_not_renewed_by_a_health_poll(client, db_session_factory):
+    """The renewal rides on unauthenticated requests too; the account behind
+    the token must still be allowed in, or the cookie lives for as long as
+    the app keeps polling."""
+    from app.models.user import User
+    from app.services.auth import password_fingerprint
+
+    db = db_session_factory()
+    try:
+        user = User(username="renew-gone", password_hash="x", role="user", is_active=False)
+        db.add(user)
+        db.commit()
+        uid, fingerprint = user.id, password_fingerprint(user.password_hash)
+    finally:
+        db.close()
+
+    half_spent = _expiring_in(
+        settings.access_token_expire_minutes * SESSION_REFRESH_AFTER_RATIO - 1, sub=str(uid), pwd=fingerprint
+    )
+    client.cookies.clear()
+    response = client.get("/api/health", cookies={settings.auth_cookie_name: half_spent})
+    # Health answers 503 in a bare test environment (no music folder); the
+    # renewal rides on anything but a 401/403, so the status is beside the point.
+    assert response.status_code in (200, 503)
+    assert _session_cookie(response) is None
+
+    # Reactivated, the same token renews.
+    db = db_session_factory()
+    try:
+        db.query(User).filter(User.id == uid).update({"is_active": True})
+        db.commit()
+    finally:
+        db.close()
+    response = client.get("/api/health", cookies={settings.auth_cookie_name: half_spent})
+    assert _session_cookie(response) is not None
+

@@ -29,6 +29,7 @@ from app.schemas.handoff import (
     PositionReport,
     TransferBody,
 )
+from app.schemas.playback import PlaybackStateUpdate
 from app.services import handoff
 from app.services.auth import decode_access_token, get_user_by_id, password_fingerprint
 from app.services.handoff import HandoffError
@@ -40,9 +41,12 @@ router = APIRouter()
 
 # How long the client has to say hello before the socket is closed.
 HELLO_TIMEOUT_S = 5
-# Server-side keepalive: a ping this often, and a socket closed after this
-# many go unanswered.
-PING_INTERVAL_S = 25
+# Server-side keepalive: a ping this often, and the socket closed once the
+# device has been silent for this long. A suspended phone stops answering,
+# and within about half a minute it is no longer a device the music can be
+# handed to — the socket itself may look open for far longer than that.
+PING_INTERVAL_S = 10
+SILENT_CLOSE_AFTER_S = 30
 
 DEVICE_HEADER = "X-Adjacent-Device"
 
@@ -121,13 +125,7 @@ def _lease_dict(user_id: int, connected: set[str], with_state: bool) -> dict:
 def _devices_dict(user_id: int, connected: set[str], this_device_id: str | None) -> dict:
     db = SessionLocal()
     try:
-        views = handoff.list_devices(db, user_id, connected)
-        session = handoff.get_or_create_playback_session(db, user_id)
-        lease = handoff.lease_payload(db, session, connected)
-        return {
-            "devices": [view.payload(this_device_id) for view in views],
-            "lease": lease,
-        }
+        return _devices_dict_sync(db, user_id, connected, this_device_id)
     finally:
         db.close()
 
@@ -135,8 +133,36 @@ def _devices_dict(user_id: int, connected: set[str], this_device_id: str | None)
 # --- the socket --------------------------------------------------------------
 
 
+def _origin_allowed(origin: str | None, host: str | None) -> bool:
+    """Whether a browser's Origin may open the control socket.
+
+    A browser always sends one; the apps send none, and a missing origin is
+    allowed. One that is present must be a configured front-end origin or the
+    server's own host — the same allowance CORS gives the HTTP routes, which
+    the WebSocket handshake does not go through. The cookie is SameSite=Lax,
+    which already keeps a cross-site page from carrying it; this closes the
+    remaining case of a browser configured to send it anyway.
+    """
+    if not origin:
+        return True
+    allowed = set(settings.frontend_origins)
+    if not settings.is_production:
+        allowed.add("http://localhost:5173")
+    if origin.rstrip("/") in allowed:
+        return True
+    try:
+        origin_host = origin.split("://", 1)[1].split("/", 1)[0]
+    except IndexError:
+        return False
+    return bool(host) and origin_host.lower() == host.lower()
+
+
 @router.websocket("/playback/ws")
 async def playback_socket(websocket: WebSocket) -> None:
+    if not _origin_allowed(websocket.headers.get("origin"), websocket.headers.get("host")):
+        await websocket.close(code=4403)
+        return
+
     token = websocket.cookies.get(settings.auth_cookie_name)
     auth_db = SessionLocal()
     try:
@@ -185,7 +211,7 @@ async def playback_socket(websocket: WebSocket) -> None:
             )
         await websocket.send_json({"type": "devices", **devices})
 
-        ping_task = asyncio.create_task(_ping_loop(websocket))
+        ping_task = asyncio.create_task(_ping_loop(websocket, user_id, device_id))
 
         while True:
             frame = await websocket.receive_json()
@@ -217,9 +243,20 @@ async def playback_socket(websocket: WebSocket) -> None:
                 await _after_claim(user_id, device_id)  # lease went spare: others learn of it
 
 
-async def _ping_loop(websocket: WebSocket) -> None:
+async def _ping_loop(websocket: WebSocket, user_id: int, device_id: str) -> None:
+    """Ping on a schedule; close the socket once the device stops answering.
+
+    Closing it is what lets the handler's `finally` run and the hub forget
+    the socket. The lease is not released by this — a device that fell
+    asleep mid-song keeps its place and simply reconnects — but it stops
+    being a device anyone is offered to hand the music to.
+    """
     while True:
         await asyncio.sleep(PING_INTERVAL_S)
+        if hub.silent_for(user_id, device_id) > SILENT_CLOSE_AFTER_S:
+            with contextlib.suppress(Exception):
+                await websocket.close(code=4002)
+            return
         await websocket.send_json({"type": "ping"})
 
 
@@ -227,6 +264,7 @@ async def _dispatch(websocket: WebSocket, user_id: int, device_id: str, frame: d
     kind = frame.get("type")
     try:
         if kind == "pong":
+            hub.note_pong(user_id, device_id)
             return
         if kind == "hello":
             info = DeviceInfo(**{k: v for k, v in frame.items() if k != "type"})
@@ -240,7 +278,11 @@ async def _dispatch(websocket: WebSocket, user_id: int, device_id: str, frame: d
             return
         if kind == "state":
             full = bool(frame.get("full"))
-            report = {k: v for k, v in frame.items() if k not in ("type", "full")}
+            raw = {k: v for k, v in frame.items() if k not in ("type", "full")}
+            # The same shapes the HTTP twins validate: a frame with a string
+            # where a number goes is an error back to the sender, not a
+            # traceback in the handler.
+            report = (PlaybackStateUpdate(**raw) if full else PositionReport(**raw)).model_dump()
             async with hub.lock(user_id):
                 took_spare = await run_in_threadpool(_report, user_id, device_id, report, full)
             # A report that found the lease spare took it: say so, or remotes
@@ -354,33 +396,52 @@ def _raise(error: HandoffError) -> None:
     raise HTTPException(status_code=error.status, detail={"message": error.message, "code": error.code})
 
 
+# The twins that read the hub are async: the hub is the event loop's, and a
+# plain `def` route runs in a worker thread, where touching its dicts raced
+# the socket handlers.
+
+
 @router.post("/playback/devices/hello", tags=["handoff"])
-def http_hello(
+async def http_hello(
     info: DeviceInfo,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    handoff.register(db, current_user.id, info.model_dump())
     connected = hub.connected_device_ids(current_user.id)
-    return _devices_dict_sync(db, current_user.id, connected, info.device_id)
+    return await run_in_threadpool(_hello_sync, current_user.id, info.model_dump(), connected)
+
+
+def _hello_sync(user_id: int, info: dict, connected: set[str]) -> dict:
+    db = SessionLocal()
+    try:
+        handoff.register(db, user_id, info)
+        return _devices_dict_sync(db, user_id, connected, info["device_id"])
+    finally:
+        db.close()
 
 
 @router.get("/playback/devices", tags=["handoff"])
-def http_devices(
-    db: Session = Depends(get_db),
+async def http_devices(
     current_user: User = Depends(get_current_user),
     x_adjacent_device: str | None = Header(default=None),
 ):
     connected = hub.connected_device_ids(current_user.id)
-    if x_adjacent_device:
-        device = handoff.find_device(db, current_user.id, x_adjacent_device)
-        if device is not None:
-            handoff.touch(db, device)
-    result = _devices_dict_sync(db, current_user.id, connected, x_adjacent_device)
+    result = await run_in_threadpool(_devices_poll_sync, current_user.id, x_adjacent_device, connected)
     # A polling device collects anything that was waiting for it.
     if x_adjacent_device:
         result["pending_commands"] = hub.drain_pending(current_user.id, x_adjacent_device)
     return result
+
+
+def _devices_poll_sync(user_id: int, this_device_id: str | None, connected: set[str]) -> dict:
+    db = SessionLocal()
+    try:
+        if this_device_id:
+            device = handoff.find_device(db, user_id, this_device_id)
+            if device is not None:
+                handoff.touch(db, device)
+        return _devices_dict_sync(db, user_id, connected, this_device_id)
+    finally:
+        db.close()
 
 
 @router.post("/playback/claim", tags=["handoff"])
@@ -451,7 +512,10 @@ async def http_command(
 def _devices_dict_sync(db: Session, user_id: int, connected: set[str], this_device_id: str | None) -> dict:
     views = handoff.list_devices(db, user_id, connected)
     session = handoff.get_or_create_playback_session(db, user_id)
-    lease = handoff.lease_payload(db, session, connected)
+    # The position, not the queue: a polling tab asked for this every fifteen
+    # seconds and got up to five thousand track ids each time. The queue
+    # travels once, in the take_over that hands the music to a device.
+    lease = handoff.lease_payload(db, session, connected, with_state=False)
     return {
         "devices": [view.payload(this_device_id) for view in views],
         "lease": lease,

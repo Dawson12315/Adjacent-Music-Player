@@ -15,6 +15,7 @@ that sets the session cookie itself — sign-in, a password change and sign-out
 each decide their own.
 """
 
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import cookie_parser
 from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -22,6 +23,8 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from app.config import settings
 from app.services.auth import (
     decode_access_token,
+    get_user_by_id,
+    password_fingerprint,
     reissue_access_token,
     session_token_needs_refresh,
     set_session_cookie,
@@ -51,6 +54,33 @@ def sets_session_cookie(headers: list[tuple[bytes, bytes]]) -> bool:
     )
 
 
+def account_still_good(payload: dict) -> bool:
+    """Whether the account behind a token may have its session renewed.
+
+    The renewal rides on any request, including ones that never authenticate
+    — the health poll every client makes. Without this look a deactivated
+    account, or one whose password had changed, kept its cookie alive for as
+    long as the app stayed open. One query, once per half-life per device.
+    """
+    from app.db import SessionLocal
+
+    try:
+        user_id = int(payload.get("sub"))
+    except (TypeError, ValueError):
+        return False
+    db = SessionLocal()
+    try:
+        user = get_user_by_id(db, user_id)
+        if user is None or not user.is_active:
+            return False
+        fingerprint = payload.get("pwd")
+        return not fingerprint or fingerprint == password_fingerprint(user.password_hash)
+    except Exception:  # noqa: BLE001 — a database hiccup is not a reason to renew
+        return False
+    finally:
+        db.close()
+
+
 def session_cookie_header(token: str) -> bytes:
     """The Set-Cookie line for a token, with the attributes sign-in uses."""
     carrier = Response()
@@ -72,6 +102,10 @@ class SessionRefreshMiddleware:
         payload = decode_access_token(token) if token else None
 
         if not session_token_needs_refresh(payload):
+            await self.app(scope, receive, send)
+            return
+
+        if not await run_in_threadpool(account_still_good, payload):
             await self.app(scope, receive, send)
             return
 
