@@ -419,9 +419,13 @@ export function PlayerProvider({ children }) {
         const tracks = ids.length ? await getTracksByIds(ids) : [];
         const idx =
           Number.isFinite(serverState.queue_index) && serverState.queue_index >= 0 ? serverState.queue_index : 0;
+        // By id first: the resolved list drops duplicates, so the index can
+        // point past the track the other device was on.
+        const currentId = serverState.current_track_id ?? null;
         const startTrack =
+          (currentId != null ? tracks.find((item) => item?.id === currentId) : null) ||
           tracks[idx] ||
-          (serverState.current_track_id ? (await getTracksByIds([serverState.current_track_id]))[0] : null) ||
+          (currentId != null ? (await getTracksByIds([currentId]))[0] : null) ||
           tracks[0] ||
           null;
         if (!startTrack) return;
@@ -495,8 +499,10 @@ export function PlayerProvider({ children }) {
     onError: handoffOnError,
   });
 
+  // A holder that has gone quiet is not a device to drive; the controls work
+  // this browser, which is the only thing they could usefully do.
   const handoffPlayingElsewhere =
-    handoff.available && !handoff.isActiveHere && Boolean(handoff.activeDeviceId);
+    handoff.available && !handoff.isActiveHere && Boolean(handoff.activeDeviceId) && !handoff.stale;
 
   const { claim: handoffClaim, reportPosition: handoffReport, isActiveHere: handoffActiveHere } = handoff;
   handoffClaimRef.current = handoffClaim;

@@ -381,6 +381,31 @@ def test_two_sockets_see_each_others_claims(client, db_session_factory):
         assert cmd["action"] == "pause"
 
 
+def test_the_claimer_hears_its_own_claim_with_the_settled_version(client, db_session_factory):
+    """A client that claimed with version 1 against a session at 500 must learn
+    the server kept 500, or its next report reads as stale."""
+    from app.models.user import User
+    from app.services import handoff
+
+    _admin(client)
+    tid = _make_track(db_session_factory, "/h/echo.flac")
+    db = db_session_factory()
+    try:
+        admin_id = db.query(User).filter_by(username="admin").one().id
+        other = handoff.register(db, admin_id, {"device_id": "echo-other", "name": "Other", "kind": "web"})
+        handoff.claim(db, admin_id, other, _state(tid, [tid], version=500))
+    finally:
+        db.close()
+
+    with client.websocket_connect("/api/playback/ws") as a:
+        a.send_json(HELLO_A)
+        assert a.receive_json()["type"] == "devices"
+        a.send_json({"type": "claim", "state": _state(tid, [tid], version=1)})
+        echo = _next_of(a, "lease")
+        assert echo["active_device_id"] == "dev-a"
+        assert echo["state"]["version"] >= 500
+
+
 def test_the_socket_refuses_a_bad_cookie(client):
     # No login: no session cookie, so the socket is closed before hello.
     client.cookies.clear()

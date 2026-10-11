@@ -192,4 +192,23 @@ describe("useHandoff (web)", () => {
     });
     expect(view.result.current.remote).toMatchObject({ position: 40, shuffle: true, loop: true });
   });
+
+  it("obeys a later claim by another device even right after its own", async () => {
+    const { view, d } = await mountReady();
+    act(() => {
+      socketHandle.onFrame({ type: "lease", active_device_id: null, state: { version: 500 } });
+    });
+    await act(async () => {
+      await view.result.current.claim();
+    });
+    act(() => {
+      socketHandle.onFrame({ type: "lease", active_device_id: "phone", active_device_name: "Phone", state: { is_playing: true, version: 400 } });
+    });
+    expect(d.pauseForRemote).not.toHaveBeenCalled();
+    act(() => {
+      socketHandle.onFrame({ type: "lease", active_device_id: "phone", active_device_name: "Phone", state: { is_playing: true, version: 502 } });
+    });
+    expect(d.pauseForRemote).toHaveBeenCalled();
+    expect(view.result.current.isActiveHere).toBe(false);
+  });
 });

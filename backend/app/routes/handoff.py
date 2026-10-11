@@ -83,10 +83,12 @@ def _user_from_token(db: Session, token: str | None) -> User | None:
 
 
 async def _after_claim(user_id: int, this_device_id: str) -> None:
-    """Tell everyone else they just lost the lease, so they pause."""
+    """Tell everyone the lease moved: the rest so they pause, the claimer so
+    it hears the version the server settled on. A fresh client's counter
+    starts low, and without the echo its next report could read as stale."""
     connected = hub.connected_device_ids(user_id)
     lease = await run_in_threadpool(_lease_dict, user_id, connected, False)
-    await hub.broadcast(user_id, {"type": "lease", **lease}, exclude=this_device_id)
+    await hub.broadcast(user_id, {"type": "lease", **lease})
 
 
 async def _after_report(user_id: int, this_device_id: str, full: bool) -> None:

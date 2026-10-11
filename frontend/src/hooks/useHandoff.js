@@ -65,6 +65,7 @@ export function useHandoff(deps) {
   // a poll already in flight, a frame from before the claim landed — must
   // not pause what the claim just started.
   const claimedAtRef = useRef(0);
+  const claimVersionRef = useRef(0);
   const CLAIM_SETTLE_MS = 3000;
 
   // Learn the server's capabilities once signed in.
@@ -95,10 +96,18 @@ export function useHandoff(deps) {
     const stale = Boolean(reading.stale);
     if (reading.state?.version != null) versionRef.current = Math.max(versionRef.current, reading.state.version);
 
-    // A reading that says someone else holds it, arriving within moments of
-    // our own claim, was true before the claim. Our claim is the newer fact.
-    const justClaimed = isActiveHereRef.current && Date.now() - claimedAtRef.current < CLAIM_SETTLE_MS;
-    if (justClaimed && !reading.isActiveHere) return;
+    // A reading that says someone else holds it but predates our own claim
+    // was true before the claim. Our claim is the newer fact; keep it. Age is
+    // judged by version where the reading carries one — so another device's
+    // *later* claim is still obeyed — and by time otherwise.
+    if (isActiveHereRef.current && !reading.isActiveHere) {
+      const readingVersion = reading.state?.version;
+      const older =
+        readingVersion != null
+          ? Number(readingVersion) < claimVersionRef.current
+          : Date.now() - claimedAtRef.current < CLAIM_SETTLE_MS;
+      if (older) return;
+    }
 
     holderRef.current = activeDeviceId;
     setLease({
@@ -303,10 +312,12 @@ export function useHandoff(deps) {
       const snap = latest.current.getStateSnapshot?.();
       if (!snap) return;
       const takingOver = !isActiveHereRef.current && holderRef.current && holderRef.current !== me.deviceId;
-      const state = stateFrame({ ...snap, ...overrides, version: nextVersion() });
+      const version = nextVersion();
+      const state = stateFrame({ ...snap, ...overrides, version });
       isActiveHereRef.current = true;
       holderRef.current = me.deviceId;
       claimedAtRef.current = Date.now();
+      claimVersionRef.current = version;
       setLease((prev) => ({ ...prev, activeDeviceId: me.deviceId, activeDeviceName: me.name, isActiveHere: true, stale: false }));
       setRemote(null);
       if (takingOver) {
