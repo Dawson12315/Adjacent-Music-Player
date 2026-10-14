@@ -30,9 +30,13 @@ export function usePlaybackPersistence({ enabled, snapshot, getCurrentTime, devi
 
   const save = useCallback(async () => {
     try {
+      const position = getCurrentTimeRef.current();
+      // A null position means "not yet known" (a restored seek still
+      // pending): the write would only replace a real position with zero.
+      if (position == null) return;
       await savePlaybackState({
         ...snapshotRef.current,
-        currentTimeSeconds: getCurrentTimeRef.current(),
+        currentTimeSeconds: position,
         deviceId: deviceIdRef.current,
       });
     } catch (error) {

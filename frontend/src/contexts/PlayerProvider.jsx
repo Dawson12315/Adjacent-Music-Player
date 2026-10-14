@@ -68,15 +68,20 @@ export function PlayerProvider({ children }) {
     if (isPlaying) setAwaitingGesture(false);
   }, [isPlaying]);
 
+  // The handoff hook mounts further down; its "is the lease known yet" is
+  // read through a ref-backed state so the element can be told to wait.
+  const [holdSource, setHoldSource] = useState(true);
+
   const audio = useAudioElement({
     track: currentTrack,
     isPlaying,
     volume,
     isMuted,
     onPlaybackError: handlePlaybackError,
+    holdSource,
   });
 
-  const { audioRef, currentTime, duration, seek, requestSeek } = audio;
+  const { audioRef, currentTime, duration, seek, requestSeek, hasPendingSeek } = audio;
 
   const getPosition = useCallback(() => audioRef.current?.currentTime ?? 0, [audioRef]);
   const getDuration = useCallback(() => audioRef.current?.duration || null, [audioRef]);
@@ -325,14 +330,19 @@ export function PlayerProvider({ children }) {
 
   /* ---------- audio element wiring ---------- */
 
-  const handleEnded = useCallback(async () => {
+  const handleEnded = useCallback(() => {
+    // Recorded, not awaited: the gap between tracks was the length of this
+    // request, and a server holding its write lock stalled the queue.
     if (currentTrack) {
-      await events.completed(currentTrack);
+      Promise.resolve(events.completed(currentTrack)).catch(() => {});
     }
 
     if (isLoop) {
       events.resetForTrack(currentTrack);
       seek(0);
+      // The element paused itself at the end; isPlaying never changed, so
+      // the play effect will not run. Start it again here.
+      audioRef.current?.play?.()?.catch?.(() => {});
       setIsPlaying(true);
       return;
     }
@@ -345,7 +355,16 @@ export function PlayerProvider({ children }) {
 
     dispatch({ type: "NEXT" });
     setIsPlaying(true);
-  }, [currentTrack, events, isLoop, queueIndex, queue.length, seek]);
+  }, [currentTrack, events, isLoop, queueIndex, queue.length, seek, audioRef]);
+
+  // The element fires `pause` before `ended` at the end of a track. Taking
+  // that pause as the user's flipped isPlaying false and back, which sent a
+  // full claim (the whole queue) to every device on every advance and showed
+  // the remotes a flash of "paused" between tracks.
+  const handlePauseEvent = useCallback(() => {
+    if (audioRef.current?.ended) return;
+    setIsPlaying(false);
+  }, [audioRef]);
 
   const handlePlayEvent = useCallback(() => {
     setIsPlaying(true);
@@ -359,7 +378,7 @@ export function PlayerProvider({ children }) {
     () => ({
       ref: audioRef,
       onPlay: handlePlayEvent,
-      onPause: () => setIsPlaying(false),
+      onPause: handlePauseEvent,
       onEnded: handleEnded,
       onTimeUpdate: audio.handleTimeUpdate,
       onLoadedMetadata: audio.handleLoadedMetadata,
@@ -368,6 +387,7 @@ export function PlayerProvider({ children }) {
     [
       audioRef,
       handlePlayEvent,
+      handlePauseEvent,
       handleEnded,
       audio.handleTimeUpdate,
       audio.handleLoadedMetadata,
@@ -504,8 +524,15 @@ export function PlayerProvider({ children }) {
   const handoffPlayingElsewhere =
     handoff.available && !handoff.isActiveHere && Boolean(handoff.activeDeviceId) && !handoff.stale;
 
-  const { claim: handoffClaim, reportPosition: handoffReport, isActiveHere: handoffActiveHere } = handoff;
+  const { claim: handoffClaim, reportPosition: handoffReport, isActiveHere: handoffActiveHere, leaseKnown } = handoff;
   handoffClaimRef.current = handoffClaim;
+
+  // The audio element may load a stream once the lease is known (or the
+  // hook gave up waiting), and never while another device is playing: the
+  // server refuses that stream, and the element then sits in an error state.
+  useEffect(() => {
+    setHoldSource(!leaseKnown || handoffPlayingElsewhere);
+  }, [leaseKnown, handoffPlayingElsewhere]);
 
   // The transport claims on the way in (above). This is the second line: once
   // the browser really is playing, the full state goes up again with the
@@ -582,10 +609,17 @@ export function PlayerProvider({ children }) {
   // or nobody does: a remote tab following another device must not overwrite
   // what that device reports. The device id lets the server say so (409)
   // rather than take the write.
+  // The position is not worth writing while a restored one is still waiting
+  // for the track's metadata: it read as 0 and overwrote the server's.
+  const getPersistedPosition = useCallback(
+    () => (hasPendingSeek() ? null : getPosition()),
+    [hasPendingSeek, getPosition],
+  );
+
   usePlaybackPersistence({
     enabled: Boolean(currentUser) && hasRestored && !handoffPlayingElsewhere,
     snapshot,
-    getCurrentTime: getPosition,
+    getCurrentTime: getPersistedPosition,
     deviceId: handoff.me?.deviceId ?? null,
   });
 

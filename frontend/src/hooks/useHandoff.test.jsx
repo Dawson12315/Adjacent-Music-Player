@@ -211,4 +211,19 @@ describe("useHandoff (web)", () => {
     expect(d.pauseForRemote).toHaveBeenCalled();
     expect(view.result.current.isActiveHere).toBe(false);
   });
+
+  it("knows the lease once the first reading arrives, and polls when its socket was replaced", async () => {
+    const http = await import("../services/handoffHttp");
+    http.getDevices.mockResolvedValue({ devices: [], lease: { active_device_id: null }, pending_commands: [] });
+    const { view } = await mountReady();
+    expect(view.result.current.leaseKnown).toBe(false);
+    act(() => {
+      socketHandle.onFrame({ type: "devices", devices: [], lease: { active_device_id: null, state: null } });
+    });
+    expect(view.result.current.leaseKnown).toBe(true);
+    act(() => {
+      socketHandle.onStatus("replaced");
+    });
+    await waitFor(() => expect(http.getDevices).toHaveBeenCalled());
+  });
 });

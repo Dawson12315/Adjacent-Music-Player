@@ -29,7 +29,7 @@ const EMPTY_PROGRESS = { trackId: null, currentTime: 0, duration: 0 };
  * Progress is stored together with the track it belongs to, so a track change resets the
  * reported position by derivation rather than by setting state from an effect.
  */
-export function useAudioElement({ track, isPlaying, volume, isMuted, onPlaybackError }) {
+export function useAudioElement({ track, isPlaying, volume, isMuted, onPlaybackError, holdSource = false }) {
   const audioRef = useRef(null);
   const [progress, setProgress] = useState(EMPTY_PROGRESS);
 
@@ -53,6 +53,9 @@ export function useAudioElement({ track, isPlaying, volume, isMuted, onPlaybackE
     pendingSeekRef.current = { trackId: forTrackId, time: seconds };
   }, []);
 
+  /** Whether a restored position is still waiting for the track's metadata. */
+  const hasPendingSeek = useCallback(() => pendingSeekRef.current != null, []);
+
   const seek = useCallback(
     (seconds) => {
       const audio = audioRef.current;
@@ -67,18 +70,21 @@ export function useAudioElement({ track, isPlaying, volume, isMuted, onPlaybackE
     [trackId],
   );
 
-  // Point the element at the selected track.
+  // Point the element at the selected track. Held while the player does not
+  // yet know whether another device is playing: the stream is refused to a
+  // non-holder (409), and an element that has failed to load once sits in
+  // an error state the play path then has to recover from.
   useEffect(() => {
     const audio = audioRef.current;
 
-    if (!audio || !trackId) {
+    if (!audio || !trackId || holdSource) {
       return;
     }
 
     playGenerationRef.current += 1;
     audio.src = streamUrl(trackId);
     audio.load();
-  }, [trackId]);
+  }, [trackId, holdSource]);
 
   // Mirror the desired play state onto the element.
   useEffect(() => {
@@ -91,6 +97,14 @@ export function useAudioElement({ track, isPlaying, volume, isMuted, onPlaybackE
     if (!isPlaying) {
       audio.pause();
       return;
+    }
+
+    // An element whose last load failed (a stream refused while another
+    // device was playing) rejects play() for good without a fresh load.
+    if (audio.error) {
+      playGenerationRef.current += 1;
+      audio.src = streamUrl(trackId);
+      audio.load();
     }
 
     const generation = playGenerationRef.current;
@@ -174,6 +188,7 @@ export function useAudioElement({ track, isPlaying, volume, isMuted, onPlaybackE
     duration,
     seek,
     requestSeek,
+    hasPendingSeek,
     handleTimeUpdate,
     handleLoadedMetadata,
     handleError,

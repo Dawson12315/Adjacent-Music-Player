@@ -33,6 +33,9 @@ export function normalizeTrack(raw, { metadataComplete = false } = {}) {
     artwork_path: raw.artwork_path ?? null,
     album_artwork_path: raw.album_artwork_path ?? null,
     artist_artwork_path: raw.artist_artwork_path ?? null,
+    // The progress row for a track playing on another device has nothing
+    // else to take a length from; dropped here, it stayed at 0:00.
+    duration_seconds: raw.duration_seconds ?? null,
     raw_title: raw.raw_title ?? null,
     raw_artist: raw.raw_artist ?? null,
     raw_album: raw.raw_album ?? null,

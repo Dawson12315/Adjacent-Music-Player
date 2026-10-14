@@ -20,6 +20,8 @@ import {
 const POLL_INTERVAL_MS = 15000;
 /** The capability a server must advertise for any of this to turn on. */
 export const HANDOFF_CAPABILITY = "device-handoff";
+/** How long the player waits for the first lease reading before loading a stream anyway. */
+export const LEASE_WAIT_MS = 4000;
 
 /**
  * The browser as one of the account's devices.
@@ -50,6 +52,18 @@ export function useHandoff(deps) {
   const [lease, setLease] = useState({ activeDeviceId: null, activeDeviceName: null, isActiveHere: false, stale: false });
   const [remote, setRemote] = useState(null);
   const [transport, setTransport] = useState("idle");
+  // Whether the first lease reading has arrived. Until then the player must
+  // not ask for a stream, which the server refuses to a non-holder while
+  // another device plays. Never held for long: a socket that cannot connect
+  // and a server that never answers both release it after a few seconds.
+  const [firstReading, setFirstReading] = useState(false);
+  const [waitedOut, setWaitedOut] = useState(false);
+  useEffect(() => {
+    if (!available) return undefined;
+    const timer = setTimeout(() => setWaitedOut(true), LEASE_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [available]);
+  const leaseKnown = !available || firstReading || waitedOut;
 
   const socketRef = useRef(null);
   const pollTimer = useRef(null);
@@ -110,6 +124,7 @@ export function useHandoff(deps) {
     }
 
     holderRef.current = activeDeviceId;
+    setFirstReading(true);
     setLease({
       activeDeviceId,
       activeDeviceName: reading.activeDeviceName ?? null,
@@ -149,6 +164,7 @@ export function useHandoff(deps) {
       switch (reading.kind) {
         case "devices":
           setDevices(reading.devices);
+          setFirstReading(true);
           if (reading.lease) {
             applyLease({
               activeDeviceId: reading.lease.active_device_id ?? null,
@@ -258,8 +274,11 @@ export function useHandoff(deps) {
       onFrame: (frame) => onFrameRef.current(frame),
       onStatus: (status) => {
         setTransport(status);
-        if (status === "fallback") {
-          http.sayHello(me).catch(() => {});
+        // No socket, for either reason — a proxy that drops the upgrade, or
+        // a second tab of this browser that took the socket over — means
+        // polling, or this tab hears nothing and can play over the others.
+        if (status === "fallback" || status === "replaced") {
+          Promise.resolve(http.sayHello(me)).catch(() => {});
           startPolling();
         } else if (status === "open") {
           stopPolling();
@@ -375,6 +394,7 @@ export function useHandoff(deps) {
       activeName: lease.activeDeviceName,
       isActiveHere: lease.isActiveHere,
       stale: lease.stale,
+      leaseKnown,
       remote,
       transport,
       claim,
@@ -382,7 +402,7 @@ export function useHandoff(deps) {
       transferTo,
       sendCommand,
     }),
-    [available, me, devices, lease, remote, transport, claim, reportPosition, transferTo, sendCommand],
+    [available, me, devices, lease, leaseKnown, remote, transport, claim, reportPosition, transferTo, sendCommand],
   );
 }
 

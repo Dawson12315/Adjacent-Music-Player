@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Artwork } from "../../components/Artwork";
@@ -60,8 +60,14 @@ export function PlayerBar() {
   const onToggleLoop = handoffPlayingElsewhere
     ? () => handoff.sendCommand("repeat", { mode: remote?.loop ? "off" : "queue" })
     : toggleLoop;
+  // A drag on the slider fires continuously; the holder needs the last
+  // value a few times a second, not every tick.
+  const volumeTimer = useRef(null);
   const onVolume = handoffPlayingElsewhere
-    ? (value) => handoff.sendCommand("volume", { volume: value })
+    ? (value) => {
+        clearTimeout(volumeTimer.current);
+        volumeTimer.current = setTimeout(() => handoff.sendCommand("volume", { volume: value }), 150);
+      }
     : changeVolume;
 
   // The track shown is the one playing: the holder's while remote.

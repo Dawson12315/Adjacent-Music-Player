@@ -1,5 +1,7 @@
 import { useCallback, useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
+
+import { ErrorBoundary } from "./ErrorBoundary";
 
 import { Icon } from "./Icon";
 import { PageHeader } from "./PageHeader";
@@ -17,6 +19,7 @@ import { useNavigation } from "../hooks/useNavigation";
 const SEARCHABLE_VIEWS = new Set(["tracks", "artists", "albums", "genres", "playlist"]);
 
 export function AppLayout() {
+  const location = useLocation();
   const { editingTrack } = useLibrary();
   const { isQueueOpen } = usePlayer();
   const { notice } = useNotifications();
@@ -65,7 +68,9 @@ export function AppLayout() {
             )}
 
             <section className="main-content__body">
-              <Outlet />
+              <ErrorBoundary resetKey={location.pathname}>
+                <Outlet />
+              </ErrorBoundary>
             </section>
           </div>
 

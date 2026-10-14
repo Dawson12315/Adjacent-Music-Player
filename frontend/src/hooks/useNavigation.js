@@ -37,9 +37,18 @@ export function buildPlaylistPath(playlistId) {
  * the route that declares `:name`, so it would never see it. Parsing here means every
  * component reads the same navigation state regardless of where it sits in the tree.
  */
+/** A malformed escape (a pasted "100%") used to throw out of every render. */
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function parseLocation(pathname) {
   const [section, rawName] = pathname.split("/").filter(Boolean);
-  const name = rawName ? decodeURIComponent(rawName) : null;
+  const name = rawName ? safeDecode(rawName) : null;
 
   switch (section) {
     case undefined:
