@@ -221,9 +221,12 @@ def login(
     response: Response,
     db: Session = Depends(get_db),
 ):
+    # Both tiers are checked after the password, not before: behind a proxy
+    # that is not trusted to say who the client is, every client shares one
+    # address, and ten wrong guesses by anyone used to lock everyone out —
+    # the account's owner, typing the right password, included. A limiter
+    # that only ever slows *wrong* guesses still stops a brute force cold.
     limiter_key = rate_limit_key(request, payload.username)
-    raise_if_rate_limited(login_limiter, limiter_key)
-
     name_key = username_key(payload.username)
 
     user = get_user_by_username(db, payload.username.strip())
@@ -239,12 +242,13 @@ def login(
         login_limiter.record_failure(limiter_key)
         username_login_limiter.record_failure(name_key)
 
-        # Second tier: survives an attacker rotating source addresses, and
-        # covers the case where a misconfigured proxy makes every client share
-        # one key. Checked after the password rather than before, so it only
-        # ever slows *wrong* guesses: the account's owner, typing the right
-        # password, is never the one locked out by somebody else's attempts.
-        retry_after = username_login_limiter.retry_after_seconds(name_key)
+        # First tier, per client address; second tier, per username, which
+        # survives an attacker rotating addresses. Either one past its limit
+        # answers 429 with how long to wait.
+        retry_after = max(
+            login_limiter.retry_after_seconds(limiter_key),
+            username_login_limiter.retry_after_seconds(name_key),
+        )
 
         if retry_after:
             logger.warning(

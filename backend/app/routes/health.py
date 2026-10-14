@@ -96,6 +96,16 @@ def _database_answers() -> bool:
         db.close()
 
 
+@router.get("/health/live", tags=["health"])
+def liveness():
+    """The process is up. For the container's healthcheck, which must not
+    depend on the music folder: an empty or late-mounted library kept the web
+    container from ever starting, since it waited on the backend being
+    "healthy" and the only screen that could say why never came up. The
+    full picture — library, database, ffmpeg — stays on /health for the apps."""
+    return {"status": "ok"}
+
+
 @router.get("/health", tags=["health"])
 def health_check(response: Response):
     checks = {

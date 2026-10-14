@@ -455,6 +455,56 @@ def test_a_malformed_state_frame_is_an_error_not_a_crash(client, db_session_fact
         assert client.get("/api/playback", ).json()["current_time_seconds"] in (0, 12) or True
 
 
+def test_a_first_session_insert_that_loses_a_race_takes_the_winner(svc, db_session_factory):
+    """Two first requests for a brand-new account both find no session row."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services.playback import get_or_create_playback_session
+
+    db = db_session_factory()
+    try:
+        first = get_or_create_playback_session(db, svc)
+        assert first.user_id == svc
+    finally:
+        db.close()
+
+    # A second session that already read "no row" and inserts: the unique
+    # key refuses it, and the helper hands back the row that won.
+    db = db_session_factory()
+    try:
+        from app.models.playback_session import PlaybackSession
+
+        original = db.query
+        calls = {"n": 0}
+
+        class _NoRowFirst:
+            """The first SELECT answers nothing, as a loser of the race saw."""
+
+            def __init__(self, query):
+                self._query = query
+
+            def filter(self, *args, **kwargs):
+                return _NoRowFirst(self._query.filter(*args, **kwargs))
+
+            def first(self):
+                calls["n"] += 1
+                return None if calls["n"] <= 2 else self._query.first()
+
+            def one(self):
+                return self._query.one()
+
+        def patched(*args, **kwargs):
+            query = original(*args, **kwargs)
+            return _NoRowFirst(query) if args and args[0] is PlaybackSession else query
+
+        db.query = patched
+        session = get_or_create_playback_session(db, svc)
+        assert session.id == first.id
+        assert session.user_id == svc
+    finally:
+        db.close()
+
+
 def test_the_socket_refuses_a_bad_cookie(client):
     # No login: no session cookie, so the socket is closed before hello.
     client.cookies.clear()

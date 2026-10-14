@@ -137,7 +137,7 @@ services:
       # http:// LAN address, so true here means you can never sign in.
       - AUTH_COOKIE_SECURE=false
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health/live"]
       interval: 30s
       timeout: 5s
       start_period: 20s
@@ -248,7 +248,7 @@ services:
       - AUTH_SECRET_KEY=PASTE_YOUR_GENERATED_SECRET
       - AUTH_COOKIE_SECURE=false
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health/live"]
       interval: 30s
       timeout: 5s
       start_period: 20s
@@ -337,7 +337,7 @@ services:
       - AUTH_SECRET_KEY=PASTE_YOUR_GENERATED_SECRET
       - AUTH_COOKIE_SECURE=false
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health/live"]
       interval: 30s
       timeout: 5s
       start_period: 20s

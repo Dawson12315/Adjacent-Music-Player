@@ -1,3 +1,4 @@
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.playback_session import PlaybackSession
@@ -36,7 +37,19 @@ def get_or_create_playback_session(db: Session, user_id: int) -> PlaybackSession
     )
 
     db.add(session)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # A brand-new account's first requests arrive together — the session
+        # read, the device hello, the socket's hello, the devices poll — and
+        # each found no row and inserted one. The unique user_id keeps one;
+        # this caller takes that one.
+        db.rollback()
+        return (
+            db.query(PlaybackSession)
+            .filter(PlaybackSession.user_id == user_id)
+            .one()
+        )
     db.refresh(session)
 
     return session

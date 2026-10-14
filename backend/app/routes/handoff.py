@@ -239,8 +239,8 @@ async def playback_socket(websocket: WebSocket) -> None:
                     if said_bye and not reconnected
                     else False
                 )
-            if released:
-                await _after_claim(user_id, device_id)  # lease went spare: others learn of it
+                if released:
+                    await _after_claim(user_id, device_id)  # lease went spare: others learn of it
 
 
 async def _ping_loop(websocket: WebSocket, user_id: int, device_id: str) -> None:
@@ -274,7 +274,10 @@ async def _dispatch(websocket: WebSocket, user_id: int, device_id: str, frame: d
             state = ClaimBody(**{k: v for k, v in frame.items() if k != "type"}).state.model_dump()
             async with hub.lock(user_id):
                 await run_in_threadpool(_claim, user_id, device_id, state)
-            await _after_claim(user_id, device_id)
+                # Inside the lock: two claims a moment apart used to read and
+                # broadcast their lease payloads in either order, and every
+                # device then showed the loser as the holder.
+                await _after_claim(user_id, device_id)
             return
         if kind == "state":
             full = bool(frame.get("full"))
@@ -285,18 +288,18 @@ async def _dispatch(websocket: WebSocket, user_id: int, device_id: str, frame: d
             report = (PlaybackStateUpdate(**raw) if full else PositionReport(**raw)).model_dump()
             async with hub.lock(user_id):
                 took_spare = await run_in_threadpool(_report, user_id, device_id, report, full)
-            # A report that found the lease spare took it: say so, or remotes
-            # keep showing nothing playing.
-            if took_spare:
-                await _after_claim(user_id, device_id)
-            await _after_report(user_id, device_id, full)
+                # A report that found the lease spare took it: say so, or remotes
+                # keep showing nothing playing.
+                if took_spare:
+                    await _after_claim(user_id, device_id)
+                await _after_report(user_id, device_id, full)
             return
         if kind == "transfer":
             body = TransferBody(**{k: v for k, v in frame.items() if k != "type"})
             state = body.state.model_dump() if body.state else None
             async with hub.lock(user_id):
                 await run_in_threadpool(_transfer, user_id, device_id, body.to, state)
-            await _after_transfer(user_id, body.to, device_id)
+                await _after_transfer(user_id, body.to, device_id)
             return
         if kind == "command":
             body = CommandBody(**{k: v for k, v in frame.items() if k != "type"})
@@ -454,7 +457,7 @@ async def http_claim(
     try:
         async with hub.lock(current_user.id):
             await run_in_threadpool(_claim, current_user.id, device_id, body.state.model_dump())
-        await _after_claim(current_user.id, device_id)
+            await _after_claim(current_user.id, device_id)
     except HandoffError as error:
         _raise(error)
     return {"ok": True}
@@ -470,9 +473,9 @@ async def http_state(
     try:
         async with hub.lock(current_user.id):
             took_spare = await run_in_threadpool(_report, current_user.id, device_id, report.model_dump(), False)
-        if took_spare:
-            await _after_claim(current_user.id, device_id)
-        await _after_report(current_user.id, device_id, False)
+            if took_spare:
+                await _after_claim(current_user.id, device_id)
+            await _after_report(current_user.id, device_id, False)
     except HandoffError as error:
         _raise(error)
     return {"ok": True}
@@ -489,7 +492,7 @@ async def http_transfer(
     try:
         async with hub.lock(current_user.id):
             await run_in_threadpool(_transfer, current_user.id, device_id, body.to, state)
-        await _after_transfer(current_user.id, body.to, device_id)
+            await _after_transfer(current_user.id, body.to, device_id)
     except HandoffError as error:
         _raise(error)
     return {"ok": True}
