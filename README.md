@@ -592,6 +592,16 @@ like `nas.lan` either. The IP address works everywhere. iOS also refuses
 self-signed certificates, so for https use a certificate from a public
 authority, as the proxy section sets up.
 
+> **A LAN address on a phone needs `AUTH_COOKIE_SECURE=false`.** With the
+> setting on — which the TLS proxy section below asks for — the session cookie
+> is only ever sent over https, so a sign-in at `http://192.168.1.50:5173` or
+> `http://192.168.1.50:8000` succeeds and then every request after it is
+> refused. On Android that reads as the server being unreachable, and the app
+> says "This server only accepts secure connections" when it can tell. If the
+> server has a domain with a certificate, sign the phone in with that domain,
+> on the LAN too; keep the setting on. If it does not, the setting must be
+> `false` for any phone to sign in over a plain-http LAN address.
+
 > Setting up a brand-new install directly on the internet? Also set
 > `SETUP_TOKEN=$(openssl rand -hex 16)` on the backend. Without it, whoever
 > reaches an install that has no admin yet — a scanner, most likely — can
