@@ -61,8 +61,11 @@ Manager](#nginx-proxy-manager-in-a-container)**.
 | **watchOS** | 🚧 Planned | Transport control and now-playing on the wrist. |
 | **tvOS** | 🚧 Planned | Living-room browse-and-play on the big screen. |
 
-The mobile clients talk to the same server over the same API — sign in with your
-server URL and the account you already have.
+The mobile clients talk to the same server over the same API — sign in with the
+**same address you open in the browser** (for example `http://192.168.1.50:5173`)
+and the account you already have. The web container forwards `/api/` to the
+backend, so one address serves both; the backend's own port (`:8000`) works too.
+Use the IP address rather than a name on phones — see the deployment notes.
 
 ---
 
@@ -575,7 +578,10 @@ cookies stay first-party and CORS stops applying. The mobile app points at
 Tailscale, WireGuard — works with the plain-http server as it is: on the
 phone, sign in with the server's **IP address**, for example
 `http://100.101.102.103:8000` on Tailscale or `http://192.168.1.50:8000` over
-WireGuard. Use the address, not a name, on any phone — each platform refuses
+WireGuard. Either port works on a phone: the web container's (`:5173`, the
+address from the browser) or the backend's (`:8000`); https only where a
+certificate is actually there, which on a LAN it usually is not. Use the
+address, not a name, on any phone — each platform refuses
 a different kind of name. iOS refuses plain http to any named host that is not
 `.local`, so `http://nas.lan:8000` or a MagicDNS name fails on an iPhone while
 the same thing works in a browser. Android cannot look up `.local` names at

@@ -15,7 +15,17 @@ RUN npm run build
 FROM nginxinc/nginx-unprivileged:alpine
 
 COPY --from=build --chown=nginx:nginx /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Owned by the nginx user so the start script can substitute the API upstream.
+COPY --chown=nginx:nginx nginx.conf /etc/nginx/conf.d/default.conf
+
+# The configuration is checked at build time, with the placeholder filled in
+# as the start script would fill it: a typo there fails the image, not every
+# deployment at once.
+RUN sed "s|__API_UPSTREAM__|http://backend:8000|" /etc/nginx/conf.d/default.conf > /tmp/default.conf \
+  && cp /tmp/default.conf /etc/nginx/conf.d/default.conf \
+  && nginx -t \
+  && sed "s|http://backend:8000|__API_UPSTREAM__|" /etc/nginx/conf.d/default.conf > /tmp/default.conf \
+  && cp /tmp/default.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 8080
 
@@ -37,7 +47,18 @@ EXPOSE 8080
 # a cosmetic problem into a restart loop and an outage. Serving the untouched
 # page is safe: config.js then reports an empty base, and over HTTPS the app
 # resolves that to same-origin, which is the right answer behind a proxy anyway.
+# API_UPSTREAM is where this container forwards /api/ — the backend service
+# on the compose network by default. The same temp-file-and-cat dance as the
+# page below, for the same reason (the file is ours, the directory is not).
 CMD sh -c ' \
+  conf=/etc/nginx/conf.d/default.conf; \
+  tmp=$(mktemp) || tmp=/tmp/default.conf; \
+  if sed "s|__API_UPSTREAM__|${API_UPSTREAM:-http://backend:8000}|" "$conf" > "$tmp" && cat "$tmp" > "$conf"; then \
+    echo "adjacent: API_UPSTREAM=${API_UPSTREAM:-http://backend:8000}"; \
+  else \
+    echo "adjacent: WARNING could not set API_UPSTREAM; /api/ will not be forwarded" >&2; \
+  fi; \
+  rm -f "$tmp"; \
   target=/usr/share/nginx/html/index.html; \
   tmp=$(mktemp) || tmp=/tmp/index.html; \
   if sed "s|<script src=\"/config.js\"></script>|<script>window.APP_CONFIG={API_BASE_URL:\"${API_BASE_URL}\"};</script>|" "$target" > "$tmp" \
