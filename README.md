@@ -575,10 +575,15 @@ cookies stay first-party and CORS stops applying. The mobile app points at
 Tailscale, WireGuard — works with the plain-http server as it is: on the
 phone, sign in with the server's **IP address**, for example
 `http://100.101.102.103:8000` on Tailscale or `http://192.168.1.50:8000` over
-WireGuard. Use the address, not a name: iOS refuses plain http to any named
-host that is not `.local`, so `http://nas.lan:8000` or a MagicDNS name fails on
-an iPhone while the same thing works on Android and in a browser. iOS also
-refuses self-signed certificates, so for https use a certificate from a public
+WireGuard. Use the address, not a name, on any phone — each platform refuses
+a different kind of name. iOS refuses plain http to any named host that is not
+`.local`, so `http://nas.lan:8000` or a MagicDNS name fails on an iPhone while
+the same thing works in a browser. Android cannot look up `.local` names at
+all, so `http://nas.local:8000` — the very shape iOS prefers — fails on an
+Android phone with "Can't reach your server"; and an Android phone whose
+Private DNS is set to a public provider never asks the home router for names
+like `nas.lan` either. The IP address works everywhere. iOS also refuses
+self-signed certificates, so for https use a certificate from a public
 authority, as the proxy section sets up.
 
 > Setting up a brand-new install directly on the internet? Also set
