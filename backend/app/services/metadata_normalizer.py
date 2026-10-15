@@ -6,11 +6,15 @@ from app.services.genre_normalizer import normalize_genre
 from app.utils.genre_parsing import split_genre_names
 
 
+# A feature credit in a title, in the forms taggers actually write: "(feat.
+# X)", "(feat X)", "[ft. X]", "(featuring X)", and the bare "Title feat. X"
+# and "Title ft. X" with nothing around them. The bare form stops at a
+# bracket so "Song feat. X (Remix)" keeps its "(Remix)". The credit itself
+# is not lost: raw_title keeps it, and the enrichment reads it from there.
 FEATURE_PATTERNS = [
-    r"\s+\(feat\.[^)]+\)",
-    r"\s+\(ft\.[^)]+\)",
-    r"\s+\[feat\.[^\]]+\]",
-    r"\s+\[ft\.[^\]]+\]",
+    r"\s*\((?:feat\.?|ft\.?|featuring)\s+[^)]*\)",
+    r"\s*\[(?:feat\.?|ft\.?|featuring)\s+[^\]]*\]",
+    r"\s+(?:feat\.|ft\.|featuring)\s+[^()\[\]]+",
 ]
 
 EXTRA_TITLE_PATTERNS = [
@@ -189,9 +193,11 @@ def normalize_artist_name(value: Optional[str]) -> Optional[str]:
     cleaned = _collapse_spaces(cleaned)
 
     # Only an all-lower-case name is retyped; an all-caps one is usually an
-    # acronym (MGMT, ABBA, KISS) and "Mgmt" is not the band.
+    # acronym (MGMT, ABBA, KISS) and "Mgmt" is not the band. Each word gets
+    # a capital first letter and nothing else: str.title() also capitalises
+    # after digits and apostrophes ("d4vd" became "D4Vd", "o'neal" "O'Neal").
     if cleaned.islower():
-        cleaned = cleaned.title()
+        cleaned = " ".join(word[:1].upper() + word[1:] for word in cleaned.split(" "))
 
     cleaned = ARTIST_ALIASES.get(cleaned, cleaned)
     return cleaned
@@ -245,13 +251,14 @@ def normalize_title(value: Optional[str]) -> Optional[str]:
     cleaned = value.strip()
 
     for pattern in FEATURE_PATTERNS:
-        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(pattern, " ", cleaned, flags=re.IGNORECASE)
 
     for pattern in EXTRA_TITLE_PATTERNS:
-        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(pattern, " ", cleaned, flags=re.IGNORECASE)
 
     cleaned = _collapse_spaces(cleaned)
-    return cleaned
+    # A title that was nothing but a credit ("feat. X") keeps its name.
+    return cleaned or _collapse_spaces(value)
 
 
 def normalize_album(value: Optional[str]) -> Optional[str]:

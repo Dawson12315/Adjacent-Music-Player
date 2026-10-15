@@ -50,6 +50,42 @@ npm run lint
 npm run build
 ```
 
+## How a file becomes a track
+
+`backend/app/services/track_resolution.py` is the one place that decides a
+track's title, artist, album and credits, for new imports and re-reads alike.
+The order of trust, for every field: the tag, then the file's name, then its
+folders.
+
+- Tags are read through mutagen's easy interface, so MP3, FLAC, M4A, OGG, Opus
+  and WAV all answer to the same keys. Multi-valued artist and genre tags are
+  joined with `; ` and split again by the normaliser. A missing tag is `None`,
+  never the filename.
+- The name parser (`filename_metadata.py`) finds the track number by what it
+  is, wherever it sits: `Artist - Album - 07 - Title`, `Artist - 07 - Title`,
+  `07 - Title`, `07 Title`, `1-07 Title`. What is after the number is the
+  title, dashes included.
+- The folder parser gives `Artist/Album (Year)/[Disc 2]/file` its artist and
+  album when nothing else does. The library root and generic folder names
+  (`Music`, `Lossless`) name nothing.
+
+To see how one file would be imported:
+
+```bash
+cd backend && .venv/bin/python -m app.scripts.debug_metadata_resolution "/music/Artist/Album/07 - Title.flac"
+```
+
+Rows the old reader misread (an artist that is a bare number, no artist at
+all, an `.m4a` with no tags recorded) are re-read by the scanner on its next
+walk. To do the whole library at once instead:
+
+```bash
+cd backend && .venv/bin/python -m app.scripts.backfill_filename_metadata
+```
+
+It re-reads only those rows from their files; every other row is re-resolved
+from the tags it already stored. Genres are left alone.
+
 ## Track durations
 
 Durations are read from file tags during a scan. To fill them in for tracks that were

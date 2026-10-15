@@ -231,6 +231,18 @@ size — is in **[Operating notes](docs/deploy/operating-notes.md)**.
 - **The scan finds nothing.** The music mount points at the wrong place.
   Check the left-hand side of the `/music:ro` volume; on Unraid, share names
   are case-sensitive.
+- **Artists called "01", "07" or "Unknown Artist", usually from a
+  soundtrack.** Those files carry no artist tag and are named `07 - Title`.
+  The scanner now reads the album artist tag, then the file's name, then its
+  folders (`Composer/Album (Year)/Disc 2/07 - Title.flac`), and repairs rows
+  it imported that way on its next scan. If a file sits in a folder that
+  names nothing, tag it, or move it under `Artist/Album/`.
+- **An artist with a single track that shows another artist's name on it.**
+  The file credits a featured artist in its artist tag ("Kodak Black feat.
+  1900Rugrat"). Both are credited; the track row shows the first. Edit the
+  tag if the credit is wrong.
+- **`.m4a` files imported with no tags.** Fixed in October 2026; the next
+  scan re-reads them. Nothing to do.
 - **The backend restarts forever, or `/api/health` says `degraded`.** The
   health endpoint names the missing piece: the library mount, the database or
   ffmpeg. `docker logs adjacent-backend` has the detail.
