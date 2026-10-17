@@ -65,6 +65,43 @@ export function playerReducer(state, action) {
       };
     }
 
+    /**
+     * The list the queue was built from grew (a paged genre or library feed
+     * loading its next pages while playing). When `tracks` is a strict
+     * extension of that list, same ids in the same positions and then more,
+     * the new tail joins the queue. In order it is appended; shuffled, the
+     * unplayed remainder and the tail are shuffled as one, so a shuffle of
+     * a genre draws from the whole genre and not from its first page.
+     */
+    case "EXTEND_QUEUE": {
+      const { tracks } = action;
+      const known = state.originalQueue;
+
+      if (!known.length || !Array.isArray(tracks) || tracks.length <= known.length) {
+        return state;
+      }
+
+      const samePrefix = known.every((track, index) => track.id === tracks[index]?.id);
+
+      if (!samePrefix) {
+        return state;
+      }
+
+      if (!state.isShuffle) {
+        return { ...state, queue: tracks, originalQueue: tracks };
+      }
+
+      const played = state.queue.slice(0, state.queueIndex + 1);
+      const upcoming = state.queue.slice(state.queueIndex + 1);
+      const tail = tracks.slice(known.length);
+
+      return {
+        ...state,
+        queue: [...played, ...shuffleItems([...upcoming, ...tail])],
+        originalQueue: tracks,
+      };
+    }
+
     /** Play a whole list from the top, used by "play playlist". */
     case "PLAY_TRACKS": {
       const { tracks } = action;

@@ -209,3 +209,36 @@ describe("ADD_TO_QUEUE", () => {
     expect(state.originalQueue.at(-1).id).toBe(6);
   });
 });
+
+describe("EXTEND_QUEUE", () => {
+  const MORE = [...TRACKS, track(6), track(7), track(8)];
+
+  it("appends the new pages in order when the list the queue came from grew", () => {
+    const state = playerReducer(playingThird(), { type: "EXTEND_QUEUE", tracks: MORE });
+
+    expect(state.queue.map((item) => item.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(state.originalQueue.map((item) => item.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(state.queueIndex).toBe(2);
+    expect(state.currentTrack.id).toBe(3);
+  });
+
+  it("shuffles the unplayed remainder together with the tail, keeping what was played", () => {
+    const shuffled = playerReducer(stateWith({ isShuffle: true }), {
+      type: "PLAY_TRACK",
+      track: TRACKS[2],
+      sourceTracks: TRACKS,
+    });
+    const state = playerReducer(shuffled, { type: "EXTEND_QUEUE", tracks: MORE });
+
+    expect(state.queue.slice(0, 3).map((item) => item.id)).toEqual([1, 2, 3]);
+    expect(new Set(state.queue.slice(3).map((item) => item.id))).toEqual(new Set([4, 5, 6, 7, 8]));
+    expect(state.originalQueue.map((item) => item.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it("ignores a list the queue did not come from, or one that has not grown", () => {
+    const start = playingThird();
+    expect(playerReducer(start, { type: "EXTEND_QUEUE", tracks: TRACKS })).toBe(start);
+    expect(playerReducer(start, { type: "EXTEND_QUEUE", tracks: [track(9), ...MORE.slice(1)] })).toBe(start);
+    expect(playerReducer(initialPlayerState, { type: "EXTEND_QUEUE", tracks: MORE })).toBe(initialPlayerState);
+  });
+});

@@ -295,6 +295,9 @@ export function PlayerProvider({ children }) {
     [],
   );
   const toggleShuffle = useCallback(() => dispatch({ type: "TOGGLE_SHUFFLE" }), []);
+
+  /** The list the queue came from has more now; the reducer decides whether it applies. */
+  const extendQueue = useCallback((tracks) => dispatch({ type: "EXTEND_QUEUE", tracks }), []);
   const toggleLoop = useCallback(() => dispatch({ type: "TOGGLE_LOOP" }), []);
   const replaceTrack = useCallback((track) => dispatch({ type: "REPLACE_TRACK", track }), []);
 
@@ -646,6 +649,7 @@ export function PlayerProvider({ children }) {
       audioProps,
       playTrack,
       playTracks,
+      extendQueue,
       togglePlay,
       play,
       pause,
@@ -682,6 +686,7 @@ export function PlayerProvider({ children }) {
       audioProps,
       playTrack,
       playTracks,
+      extendQueue,
       togglePlay,
       play,
       pause,

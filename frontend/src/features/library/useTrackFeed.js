@@ -120,6 +120,44 @@ export function useTrackFeed() {
     // run per actual change of what is being asked for.
   }, [source]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /**
+   * Every remaining page, one after another, for a queue that should span
+   * the whole list. Playback starts on what is loaded; the player grows its
+   * queue as pages arrive. A page at a time at the server's size, so an
+   * older server answers too.
+   */
+  const loadAll = useCallback(async () => {
+    if (loadingRef.current || !hasMore) {
+      return;
+    }
+
+    loadingRef.current = true;
+    setIsLoadingMore(true);
+
+    try {
+      let more = true;
+      while (more) {
+        const page = await fetchPage(offsetRef.current);
+        const items = page.items || [];
+
+        setTracks((previous) => {
+          const seen = new Set(previous.map((track) => track.id));
+          const fresh = items.filter((track) => !seen.has(track.id));
+          return fresh.length ? [...previous, ...fresh] : previous;
+        });
+        setTotal(page.total);
+        offsetRef.current += items.length;
+        more = Boolean(page.hasMore) && items.length > 0;
+        setHasMore(more);
+      }
+    } catch (err) {
+      setError(err.message || "Could not load more tracks.");
+    } finally {
+      loadingRef.current = false;
+      setIsLoadingMore(false);
+    }
+  }, [fetchPage, hasMore]);
+
   const loadMore = useCallback(async () => {
     if (loadingRef.current || !hasMore) {
       return;
@@ -179,6 +217,7 @@ export function useTrackFeed() {
     hasMore,
     error,
     loadMore,
+    loadAll,
     replaceTrack,
   };
 }

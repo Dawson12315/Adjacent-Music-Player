@@ -12,7 +12,7 @@ import { useTrackFeed } from "./useTrackFeed";
 import { useTrackActions } from "./useTrackActions";
 
 export function TracksView() {
-  const { currentTrack, isPlaying, playTrack } = usePlayer();
+  const { currentTrack, isPlaying, playTrack, extendQueue } = usePlayer();
   const { selectedArtist, selectedAlbum, selectedGenre, searchQuery } = useNavigation();
 
   const feed = useTrackFeed();
@@ -52,9 +52,18 @@ export function TracksView() {
     (track) => {
       actions.closeMenu();
       playTrack(track, feed.tracks, listeningSource);
+      // A paged list: the rest comes in behind the music and joins the
+      // queue, so a shuffle of a genre draws from the whole genre.
+      if (feed.hasMore) feed.loadAll();
     },
-    [actions, playTrack, feed.tracks, listeningSource],
+    [actions, playTrack, feed, listeningSource],
   );
+
+  // The queue was a copy of the list at click time; when the list grows,
+  // the reducer decides whether the copy came from it and extends it.
+  useEffect(() => {
+    if (feed.tracks.length > 0) extendQueue(feed.tracks);
+  }, [feed.tracks, extendQueue]);
 
   if (feed.isLoading) {
     return <TrackListSkeleton />;
