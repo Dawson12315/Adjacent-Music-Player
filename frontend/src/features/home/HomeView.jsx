@@ -91,7 +91,7 @@ export function HomeView() {
             onClick={home.refreshForYou}
             disabled={home.isLoadingForYou}
           >
-            <Icon name="refresh" size={15} />
+            <Icon name="refresh" size={15} className={home.isLoadingForYou ? "icon--spin" : undefined} />
           </button>
         }
       />
@@ -195,9 +195,21 @@ export function HomeView() {
   );
 }
 
-/** A horizontal shelf of track cards. */
+/**
+ * A horizontal shelf of track cards.
+ *
+ * A rail that can refresh keeps its cards while the new ones are fetched:
+ * dimmed, not interactive, with the subtitle saying what is happening. The
+ * skeleton is for the first load only, and it is the same twelve-card
+ * scroller the cards use, so the row does not change size twice. A rail
+ * with nothing to show and no way to refresh renders nothing; one with a
+ * refresh button stays, and says so, rather than vanishing from the page.
+ */
 function Rail({ title, subtitle, icon, tracks, isLoading, artworkFor, onPlay, showCount, action }) {
-  if (!isLoading && tracks.length === 0) {
+  const firstLoad = isLoading && tracks.length === 0;
+  const refreshing = isLoading && tracks.length > 0;
+
+  if (!isLoading && tracks.length === 0 && !action) {
     return null;
   }
 
@@ -207,14 +219,23 @@ function Rail({ title, subtitle, icon, tracks, isLoading, artworkFor, onPlay, sh
         <h2 className="section-head__title">
           {icon && <Icon name={icon} size={16} />} {title}
         </h2>
-        {subtitle && <span className="section-head__link">{subtitle}</span>}
+        {(subtitle || refreshing) && (
+          <span className="section-head__link" aria-live="polite">
+            {refreshing ? "Picking new songs…" : subtitle}
+          </span>
+        )}
         {action}
       </div>
 
-      {isLoading ? (
-        <CardGridSkeleton count={6} className="rail__scroller" />
+      {firstLoad ? (
+        <CardGridSkeleton count={12} className="rail__scroller scroll-x" />
+      ) : tracks.length === 0 ? (
+        <p className="rail__empty">Nothing new to suggest yet. Keep listening and check back.</p>
       ) : (
-        <div className="rail__scroller scroll-x">
+        <div
+          className={`rail__scroller scroll-x${refreshing ? " rail__scroller--refreshing" : ""}`}
+          aria-busy={refreshing || undefined}
+        >
           {tracks.map((track) => (
             <button
               key={track.id}

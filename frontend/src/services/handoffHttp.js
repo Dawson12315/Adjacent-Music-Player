@@ -27,8 +27,8 @@ export function getDevices(deviceId) {
   return apiClient.get("/api/playback/devices", withDevice(deviceId));
 }
 
-export function claim(deviceId, state) {
-  return apiClient.post("/api/playback/claim", { state }, withDevice(deviceId));
+export function claim(deviceId, state, { signal } = {}) {
+  return apiClient.post("/api/playback/claim", { state }, { ...withDevice(deviceId), signal });
 }
 
 export function report(deviceId, position) {

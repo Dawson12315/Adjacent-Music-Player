@@ -86,11 +86,14 @@ export function useAudioElement({ track, isPlaying, volume, isMuted, onPlaybackE
     audio.load();
   }, [trackId, holdSource]);
 
-  // Mirror the desired play state onto the element.
+  // Mirror the desired play state onto the element. Held for the same
+  // reason the source is: while another device holds the lease the element
+  // still points at the previous track, and play() here kept that one going
+  // while the bar had already moved on to the next.
   useEffect(() => {
     const audio = audioRef.current;
 
-    if (!audio || !trackId) {
+    if (!audio || !trackId || holdSource) {
       return;
     }
 
@@ -125,7 +128,7 @@ export function useAudioElement({ track, isPlaying, volume, isMuted, onPlaybackE
         });
       });
     }
-  }, [isPlaying, trackId]);
+  }, [isPlaying, trackId, holdSource]);
 
   useEffect(() => {
     const audio = audioRef.current;

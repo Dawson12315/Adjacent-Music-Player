@@ -341,7 +341,11 @@ export function useHandoff(deps) {
       setRemote(null);
       if (takingOver) {
         try {
-          await http.claim(me.deviceId, state);
+          // Every row click awaits this; a slow server made clicks do nothing
+          // with no error. Past the deadline the socket frame carries it.
+          await http.claim(me.deviceId, state, {
+            signal: typeof AbortSignal?.timeout === "function" ? AbortSignal.timeout(4000) : undefined,
+          });
         } catch {
           socketRef.current?.send(claimFrame(state));
         }

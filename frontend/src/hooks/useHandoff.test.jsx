@@ -154,7 +154,7 @@ describe("useHandoff (web)", () => {
       claimPromise = view.result.current.claim({ trackId: 9, position: 0, playing: true }).then(() => { settled = true; });
     });
     expect(settled).toBe(false);
-    expect(http.claim).toHaveBeenCalledWith("me", expect.objectContaining({ current_track_id: 9 }));
+    expect(http.claim).toHaveBeenCalledWith("me", expect.objectContaining({ current_track_id: 9 }), expect.anything());
     await act(async () => {
       resolveClaim({ ok: true });
       await claimPromise;

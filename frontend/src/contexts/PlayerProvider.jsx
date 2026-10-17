@@ -258,12 +258,19 @@ export function PlayerProvider({ children }) {
   const pause = useCallback(() => setIsPlaying(false), []);
 
   const next = useCallback(() => {
+    // The reducer ignores Next at the end of the list; say so, or a Next that
+    // does nothing reads as a player that has stopped working.
+    if (queue.length > 0 && queueIndex >= queue.length - 1) {
+      notify("That was the last track in the list.");
+      return;
+    }
+
     if (currentTrack && !audioRef.current?.ended) {
       events.skipped(currentTrack);
     }
 
     dispatch({ type: "NEXT" });
-  }, [currentTrack, events, audioRef]);
+  }, [currentTrack, events, audioRef, queue.length, queueIndex, notify]);
 
   const previous = useCallback(() => {
     const position = audioRef.current?.currentTime ?? 0;

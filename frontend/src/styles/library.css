@@ -382,6 +382,35 @@
   grid-auto-columns: 200px;
 }
 
+/* The old cards stay while a refresh is fetched: dimmed, not clickable. */
+.rail__scroller--refreshing {
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.rail__empty {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  padding: var(--space-3) 0;
+}
+
+.icon--spin {
+  animation: icon-spin 900ms linear infinite;
+}
+
+@keyframes icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon--spin {
+    animation: none;
+  }
+}
+
 /* ================================================================== *
  * Filter pills and view toggle
  * ================================================================== */
