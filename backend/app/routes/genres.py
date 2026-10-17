@@ -67,9 +67,17 @@ def list_genre_tracks(
             func.coalesce(play_counts.c.play_count, 0).label("play_count"),
         )
         .options(*track_load_options(fields))
-        .join(TrackGenre, TrackGenre.track_id == Track.id)
         .outerjoin(play_counts, play_counts.c.track_id == Track.id)
-        .filter(func.lower(TrackGenre.genre) == func.lower(genre_name))
+        # A membership test rather than a join: a file tagged both "Rock" and
+        # "rock" has two genre rows that match, and the join put it on the
+        # page twice, and twice in the queue built from the page.
+        .filter(
+            Track.id.in_(
+                db.query(TrackGenre.track_id).filter(
+                    func.lower(TrackGenre.genre) == func.lower(genre_name)
+                )
+            )
+        )
     )
 
     total = base_query.count()
@@ -79,6 +87,8 @@ def list_genre_tracks(
         .order_by(
             func.coalesce(play_counts.c.play_count, 0).desc(),
             func.lower(Track.title),
+            # A total order, so two pages never overlap or skip a row.
+            Track.id,
         )
         .offset(offset)
         .limit(limit)

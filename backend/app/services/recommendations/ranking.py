@@ -1,4 +1,5 @@
 import random
+from datetime import datetime
 
 from app.services.recommendations.genre_utils import get_track_families
 from app.services.recommendations.reasoning import summarize_recommendation_reason
@@ -88,7 +89,10 @@ def rank_candidates(
 
     normalized_channels = normalize_channels(retrieved_candidates)
 
-    rng = random.Random(f"rank:{playlist_id}:{refresh}")
+    # The day is part of the seed: the client's counter restarts at 1 on every
+    # page load, and with a fixed seed the first reshuffle after a reload was
+    # the same list as the first reshuffle before it.
+    rng = random.Random(f"rank:{playlist_id}:{refresh}:{datetime.utcnow():%Y-%m-%d}")
 
     for track in candidate_tracks:
         candidate_families = get_track_families(track)

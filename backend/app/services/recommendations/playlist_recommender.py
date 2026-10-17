@@ -205,6 +205,8 @@ def _retrieve_and_rank_candidates(
     user_id: int | None = None,
     user_taste: dict | None = None,
     include_recent_additions: bool = False,
+    excluded_track_ids: list[int] | None = None,
+    exclude_liked_behavior: bool = False,
 ):
     retrieved_candidates = retrieve_candidates(
         db=db,
@@ -215,6 +217,8 @@ def _retrieve_and_rank_candidates(
         playlist_id=playlist_id,
         user_id=user_id,
         include_recent_additions=include_recent_additions,
+        excluded_track_ids=excluded_track_ids,
+        exclude_liked_behavior=exclude_liked_behavior,
     )
 
     candidate_track_ids = list(retrieved_candidates.keys())
@@ -410,7 +414,17 @@ def get_playlist_recommendations_from_track_ids(
     user_id: int | None = None,
     include_recent_additions: bool = False,
     allow_genre_relaxation: bool = False,
+    exclude_from_retrieval: bool = False,
+    exclude_liked_behavior: bool = False,
 ):
+    """Suggestions for a list of seed tracks.
+
+    `exclude_track_ids` are kept out of the answer. By default that happens
+    after ranking, which is right for a handful of held-out rows; the For
+    you rail passes hundreds (everything liked, everything shown lately)
+    and sets `exclude_from_retrieval` so the retrievers never fetch them,
+    or the pool would be spent on rows that are then thrown away.
+    """
     if not seed_track_ids:
         return []
 
@@ -447,6 +461,8 @@ def get_playlist_recommendations_from_track_ids(
             user_id=user_id,
             user_taste=user_taste,
             include_recent_additions=include_recent_additions,
+            excluded_track_ids=exclude_track_ids if exclude_from_retrieval else None,
+            exclude_liked_behavior=exclude_liked_behavior,
         )
     )
 
@@ -472,6 +488,8 @@ def get_playlist_recommendations_from_track_ids(
                     retrieval_limit=max(limit * 10, 100),
                     user_id=user_id,
                     user_taste=user_taste,
+                    excluded_track_ids=exclude_track_ids if exclude_from_retrieval else None,
+                    exclude_liked_behavior=exclude_liked_behavior,
                 )
             )
 

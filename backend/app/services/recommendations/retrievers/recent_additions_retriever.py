@@ -20,6 +20,7 @@ def retrieve_recent_addition_candidates(
     playlist_track_ids: list[int],
     playlist_profile: dict,
     limit: int = 60,
+    excluded_track_ids: list[int] | None = None,
 ):
     candidates: dict[int, RetrievedCandidate] = {}
 
@@ -27,7 +28,7 @@ def retrieve_recent_addition_candidates(
     if not family_counts:
         return candidates
 
-    excluded_ids = set(playlist_track_ids)
+    excluded_ids = set(playlist_track_ids) | set(excluded_track_ids or [])
 
     recent_tracks = (
         db.query(Track)

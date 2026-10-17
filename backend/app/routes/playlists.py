@@ -175,6 +175,8 @@ def get_liked_songs_track_ids(
         .order_by(PlaylistTrack.position.asc(), PlaylistTrack.id.asc())
         .all()
     )
+    # Ordered by position for the client; the recommender's unordered copy
+    # of the same set lives in services.playlists.liked_track_ids.
     return {"playlist_id": playlist.id, "track_ids": [row.track_id for row in rows]}
 
 

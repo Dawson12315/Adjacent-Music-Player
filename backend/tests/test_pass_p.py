@@ -191,6 +191,29 @@ def test_genre_rows_carry_duration_artists_and_every_genre(client, library_with_
     assert "play_count" in row
 
 
+def test_a_track_tagged_in_two_cases_is_one_genre_row(client, library_with_playlist, db_session_factory):
+    """"Folk" and "folk" are one genre to the page; the track must not appear
+    twice, and the total must count it once, or the page-two offset skips a
+    row and the queue built from the page plays it twice."""
+    from app.models.track_genre import TrackGenre
+
+    before = client.get("/api/genres/Folk/tracks", params={"limit": 50}).json()
+    first_id = before["items"][0]["id"]
+    db = db_session_factory()
+    try:
+        db.add(TrackGenre(track_id=first_id, genre="folk"))
+        db.commit()
+        after = client.get("/api/genres/Folk/tracks", params={"limit": 50}).json()
+        ids = [row["id"] for row in after["items"]]
+        assert len(ids) == len(set(ids))
+        assert after["total"] == before["total"]
+        assert ids.count(first_id) == 1
+    finally:
+        db.query(TrackGenre).filter_by(track_id=first_id, genre="folk").delete()
+        db.commit()
+        db.close()
+
+
 def test_stats_overview_uses_the_batched_builder(client, library_with_playlist):
     response = client.get("/api/stats/overview")
     assert response.status_code == 200, response.text

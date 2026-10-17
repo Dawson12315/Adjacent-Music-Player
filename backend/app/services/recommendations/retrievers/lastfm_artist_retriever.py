@@ -54,6 +54,7 @@ def retrieve_lastfm_artist_candidates(
     min_match_score: float = 0.40,
     max_tracks_per_artist: int = 2,
     user_id: int | None = None,
+    excluded_track_ids: list[int] | None = None,
 ):
     candidates: dict[int, RetrievedCandidate] = {}
 
@@ -91,7 +92,7 @@ def retrieve_lastfm_artist_candidates(
 
     local_artist_lookup = get_cached_local_artist_lookup(db)
     artist_to_track_ids = get_cached_artist_track_map(db)
-    excluded_ids = set(playlist_track_ids)
+    excluded_ids = set(playlist_track_ids) | set(excluded_track_ids or [])
     rng = random.Random(f"lastfm_artist:{playlist_id}:{refresh}")
 
     # Which of a similar artist's tracks to surface: the ones the user

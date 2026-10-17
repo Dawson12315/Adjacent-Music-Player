@@ -13,6 +13,12 @@ from sqlalchemy.orm import Session
 from app.models.recommendation_dismissal import RecommendationDismissal
 
 DISMISSAL_DAYS = 4
+# The home rail's hold is shorter than a playlist's, and its scope is the
+# rail itself: playlist ids start at 1, so 0 is free and needs no schema
+# change. (A nullable scope would not restamp on SQLite, where NULLs are
+# distinct inside a unique constraint.)
+FOR_YOU_DISMISSAL_DAYS = 3
+FOR_YOU_SCOPE = 0
 # A recycle can carry at most one screen of rows; anything larger is a bug
 # or a script, and is trimmed rather than stored.
 MAX_DISMISSED_PER_RECYCLE = 100
@@ -38,10 +44,11 @@ def dismiss_tracks(
     playlist_id: int,
     track_ids: list[int],
     now: datetime | None = None,
+    days: int = DISMISSAL_DAYS,
 ) -> int:
-    """Hold these out of this playlist's suggestions; a repeat restamps."""
+    """Hold these out of this scope's suggestions; a repeat restamps."""
     now = now or datetime.utcnow()
-    expires_at = now + timedelta(days=DISMISSAL_DAYS)
+    expires_at = now + timedelta(days=days)
     wanted = list(dict.fromkeys(int(track_id) for track_id in track_ids if track_id))[:MAX_DISMISSED_PER_RECYCLE]
     if not wanted:
         return 0

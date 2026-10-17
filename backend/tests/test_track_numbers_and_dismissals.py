@@ -210,6 +210,13 @@ def test_recycling_holds_the_shown_rows_out_of_that_playlist_only(client, db_ses
         dismiss_tracks(db, user_id, first, shown[:1], now=later)
         assert dismissed_track_ids(db, user_id, first, now=later) == shown[:1]
 
+        # The prune is global; the home rail now records every list it serves
+        # (test_surfaces asks it once), so only this playlist's holds are
+        # counted here.
+        from app.models.recommendation_dismissal import RecommendationDismissal
+
+        db.query(RecommendationDismissal).filter(RecommendationDismissal.playlist_id != first).delete(synchronize_session=False)
+        db.commit()
         assert prune_expired_dismissals(db, now=later) == len(shown) - 1
         assert prune_expired_dismissals(db, now=later + timedelta(days=DISMISSAL_DAYS, seconds=1)) == 1
     finally:

@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.models.playlist import Playlist
+from app.models.playlist_track import PlaylistTrack
 
 
 def liked_songs_system_key(user_id: int) -> str:
@@ -59,3 +60,18 @@ def ensure_liked_songs_playlist(db: Session, user_id: int) -> Playlist:
     db.refresh(liked_songs)
 
     return liked_songs
+
+def liked_track_ids(db: Session, user_id: int) -> list[int]:
+    """Every track in the user's Liked Songs.
+
+    The For you rail never suggests one: a song the listener already keeps
+    is not a discovery. Liked tracks still shape the taste profile and the
+    seeds; they are only kept out of the answer.
+    """
+    playlist = ensure_liked_songs_playlist(db, user_id)
+    rows = (
+        db.query(PlaylistTrack.track_id)
+        .filter(PlaylistTrack.playlist_id == playlist.id)
+        .all()
+    )
+    return [row.track_id for row in rows]

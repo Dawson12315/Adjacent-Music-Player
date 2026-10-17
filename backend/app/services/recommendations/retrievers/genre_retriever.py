@@ -42,6 +42,7 @@ def retrieve_genre_candidates(
     limit: int = 300,
     refresh: int = 0,
     playlist_id: int | None = None,
+    excluded_track_ids: list[int] | None = None,
 ):
     """Family-matched candidates over the WHOLE library.
 
@@ -80,7 +81,7 @@ def retrieve_genre_candidates(
     if not target_genres:
         return candidates
 
-    excluded_ids = set(playlist_track_ids)
+    excluded_ids = set(playlist_track_ids) | set(excluded_track_ids or [])
 
     families_by_track: dict[int, set[str]] = defaultdict(set)
 

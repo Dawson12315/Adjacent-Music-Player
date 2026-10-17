@@ -12,7 +12,16 @@ def retrieve_behavior_candidates(
     playlist_profile: dict,
     limit: int = 150,
     user_id: int | None = None,
+    excluded_track_ids: list[int] | None = None,
+    exclude_liked: bool = False,
 ):
+    """What the listener has played, liked and finished, as candidates.
+
+    `exclude_liked` is the For you rail's setting: a liked track is kept out
+    of the answer, so fetching liked rows here would spend the whole budget
+    on tracks that are then thrown away. Liked rows are not fetched and the
+    like count earns nothing; plays and completions still count.
+    """
     candidates: dict[int, RetrievedCandidate] = {}
 
     family_counts = playlist_profile.get("family_counts", {})
@@ -29,12 +38,21 @@ def retrieve_behavior_candidates(
             selectinload(Track.track_artists),
         )
         .filter(~Track.id.in_(playlist_track_ids))
-        .filter(
+    )
+
+    if excluded_track_ids:
+        query = query.filter(~Track.id.in_(list(excluded_track_ids)))
+
+    if exclude_liked:
+        query = query.filter(
+            (TrackUserStats.play_count > 0) | (TrackUserStats.completion_count > 0)
+        )
+    else:
+        query = query.filter(
             (TrackUserStats.play_count > 0)
             | (TrackUserStats.like_count > 0)
             | (TrackUserStats.completion_count > 0)
         )
-    )
 
     # Behavior is personal; without the filter one user's habits leaked into
     # another's recommendations.
@@ -58,7 +76,8 @@ def retrieve_behavior_candidates(
     for track, stats in rows:
         behavior_score = 0.0
 
-        behavior_score += float(stats.like_count) * 5.0
+        if not exclude_liked:
+            behavior_score += float(stats.like_count) * 5.0
         behavior_score += float(stats.play_count) * 1.5
         behavior_score += float(stats.completion_count) * 2.0
         behavior_score += float(stats.avg_completion_ratio) * 3.0
