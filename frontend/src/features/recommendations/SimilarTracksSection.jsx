@@ -9,6 +9,7 @@ import {
 } from "../../services/recommendationsService";
 import { getSimilarTracks } from "../../services/tracksService";
 import { resolveAlbumArtwork } from "../../utils/artwork";
+import { creditLine, recordArtist } from "../../utils/credits";
 
 const LIMIT = 10;
 
@@ -123,14 +124,14 @@ export function SimilarTracksSection({ sourceTrack, playlistId, onPlay, onAdd })
                 <Icon name="play" size={12} />
               </span>
               <Artwork
-                artwork={resolveAlbumArtwork(track.album, albumArtworkMap, track.artist)}
+                artwork={resolveAlbumArtwork(track.album, albumArtworkMap, recordArtist(track))}
                 className="track-row__art"
                 size={40}
               />
               <span className="track-row__content">
                 <span className="track-row__title">{track.title}</span>
                 <span className="track-row__meta">
-                  {track.artist || "Unknown Artist"} · {track.album || "Unknown Album"}
+                  {creditLine(track)} · {track.album || "Unknown Album"}
                 </span>
                 {track.debug?.reason_summary && (
                   <span className="track-row__reason">{track.debug.reason_summary}</span>

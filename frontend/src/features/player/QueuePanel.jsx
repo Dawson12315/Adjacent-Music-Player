@@ -2,6 +2,7 @@ import { List } from "react-window";
 
 import { Icon } from "../../components/Icon";
 import { usePlayer } from "../../contexts/PlayerContext";
+import { creditLine } from "../../utils/credits";
 
 /**
  * Declared at module scope on purpose.
@@ -28,7 +29,7 @@ function QueueRow({ index, style, tracks, queueIndex, onJump, onRemove }) {
           type="button"
         >
           <div className="queue-panel__item-title">{track.title}</div>
-          <div className="queue-panel__item-meta">{track.artist || "Unknown Artist"}</div>
+          <div className="queue-panel__item-meta">{creditLine(track)}</div>
         </button>
 
         <button

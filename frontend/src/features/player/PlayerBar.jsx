@@ -10,6 +10,7 @@ import { buildAlbumPath, buildArtistPath } from "../../hooks/useNavigation";
 import { resolveAlbumArtwork } from "../../utils/artwork";
 import { useDismissable } from "../../hooks/useDismissable";
 import { HandoffPopover } from "./HandoffPopover";
+import { recordArtist } from "../../utils/credits";
 
 export function PlayerBar() {
   const { albumArtworkMap } = useLibrary();
@@ -72,7 +73,7 @@ export function PlayerBar() {
 
   // The track shown is the one playing: the holder's while remote.
   const shownTrack = handoffPlayingElsewhere ? remoteTrack || currentTrack : currentTrack;
-  const artwork = shownTrack ? resolveAlbumArtwork(shownTrack.album, albumArtworkMap, shownTrack.artist) : null;
+  const artwork = shownTrack ? resolveAlbumArtwork(shownTrack.album, albumArtworkMap, recordArtist(shownTrack)) : null;
   const playLabel = awaitingGesture ? "Tap to play here" : displayPlaying ? "Pause" : "Play";
 
   return (

@@ -2,6 +2,7 @@ import { memo } from "react";
 
 import { Artwork } from "../../components/Artwork";
 import { Icon } from "../../components/Icon";
+import { creditLine } from "../../utils/credits";
 
 /**
  * One row in a track list.
@@ -55,7 +56,7 @@ export const TrackRow = memo(function TrackRow({
         <span className="track-row__content">
           <span className="track-row__title">{track.title}</span>
           <span className="track-row__meta">
-            {track.artist || "Unknown Artist"} · {track.album || "Unknown Album"}
+            {creditLine(track)} · {track.album || "Unknown Album"}
           </span>
           {track.debug?.reason_summary && (
             <span className="track-row__reason">{track.debug.reason_summary}</span>

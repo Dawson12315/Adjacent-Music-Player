@@ -5,6 +5,7 @@ import { useLibrary } from "../../contexts/LibraryContext";
 import { usePlayer } from "../../contexts/PlayerContext";
 import { useNavigation } from "../../hooks/useNavigation";
 import { resolveAlbumArtwork } from "../../utils/artwork";
+import { creditLine, recordArtist } from "../../utils/credits";
 
 /**
  * Listening analytics.
@@ -315,13 +316,13 @@ function TrackPanel({ title, icon, tracks, countKey, unit, albumArtworkMap, onPl
               >
                 <span className="track-row__index">{index + 1}</span>
                 <Artwork
-                  artwork={resolveAlbumArtwork(track.album, albumArtworkMap, track.artist)}
+                  artwork={resolveAlbumArtwork(track.album, albumArtworkMap, recordArtist(track))}
                   className="track-row__art"
                   size={40}
                 />
                 <span className="track-row__content">
                   <span className="track-row__title">{track.title}</span>
-                  <span className="track-row__meta">{track.artist || "Unknown Artist"}</span>
+                  <span className="track-row__meta">{creditLine(track)}</span>
                 </span>
               </button>
 

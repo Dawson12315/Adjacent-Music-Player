@@ -11,6 +11,7 @@ import { useLibrary } from "../../contexts/LibraryContext";
 import { usePlayer } from "../../contexts/PlayerContext";
 import { buildGenrePath, buildPlaylistPath } from "../../hooks/useNavigation";
 import { resolveAlbumArtwork, resolvePlaylistArtwork } from "../../utils/artwork";
+import { creditLine, recordArtist } from "../../utils/credits";
 
 /**
  * The landing surface.
@@ -33,7 +34,7 @@ export function HomeView() {
   );
 
   const artworkFor = useCallback(
-    (track) => resolveAlbumArtwork(track.album, albumArtworkMap, track.artist),
+    (track) => resolveAlbumArtwork(track.album, albumArtworkMap, recordArtist(track)),
     [albumArtworkMap],
   );
 
@@ -67,7 +68,7 @@ export function HomeView() {
               />
               <span className="quick-tile__body">
                 <span className="quick-tile__name">{track.title}</span>
-                <span className="quick-tile__meta">{track.artist || "Unknown Artist"}</span>
+                <span className="quick-tile__meta">{creditLine(track)}</span>
               </span>
             </button>
           ))}
@@ -253,7 +254,7 @@ function Rail({ title, subtitle, icon, tracks, isLoading, artworkFor, onPlay, sh
                 <span className="entity-card__meta">
                   {showCount && track.play_count
                     ? `${track.play_count} plays`
-                    : track.artist || "Unknown Artist"}
+                    : creditLine(track)}
                 </span>
               </span>
             </button>
