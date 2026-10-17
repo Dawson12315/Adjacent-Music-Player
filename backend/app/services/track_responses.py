@@ -8,6 +8,7 @@ queries per request and gives every route the same response shape.
 
 import os
 
+from sqlalchemy import func, literal
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.album_artwork import AlbumArtwork
@@ -28,6 +29,23 @@ def normalize_album_key(album_name: str | None) -> str:
 # be keyed by the title alone, so two artists' "Greatest Hits" shared one
 # picture: setting it for either changed both.
 ARTWORK_KEY_SEPARATOR = "\u001f"
+
+
+def record_artist(track) -> str | None:
+    """The artist a track's record is filed under: the album-artist tag when
+    the file has one, else the track artist. Artwork and album grouping key
+    on this, so every track of a compilation shares one album and one
+    picture whatever each track's own artist is."""
+    album_artist = getattr(track, "album_artist", None)
+    if album_artist:
+        return album_artist
+    return getattr(track, "artist", None)
+
+
+def record_artist_expr():
+    """The SQL form of `record_artist`, for grouping and filtering. An empty
+    string stands in for "no artist at all" so it can be grouped and compared."""
+    return func.coalesce(func.nullif(Track.album_artist, ""), Track.artist, literal(""))
 
 
 def album_artwork_key(album_name: str | None, artist: str | None) -> str:
@@ -76,7 +94,7 @@ def get_artwork_maps(
     album_keys = {
         key
         for track in tracks
-        for key in album_artwork_keys(track.album, track.artist)
+        for key in album_artwork_keys(track.album, record_artist(track))
     }
     artist_keys = {
         key
@@ -117,7 +135,7 @@ def build_track_response_from_maps(
     album_map: dict[str, str],
     artist_map: dict[str, str],
 ) -> TrackResponse:
-    album_artwork_path = resolve_album_artwork(album_map, track.album, track.artist)
+    album_artwork_path = resolve_album_artwork(album_map, track.album, record_artist(track))
     artist_artwork_path = artist_map.get(normalize_artist_name(track.artist))
 
     return TrackResponse(
@@ -128,6 +146,7 @@ def build_track_response_from_maps(
         genre=track.genre,
         genres=[item.genre for item in track.track_genres if item.genre],
         artists=[item.artist_name for item in track.track_artists if item.artist_name],
+        album_artist=record_artist(track),
         file_path=track.file_path,
         artwork_path=album_artwork_path,
         album_artwork_path=album_artwork_path,

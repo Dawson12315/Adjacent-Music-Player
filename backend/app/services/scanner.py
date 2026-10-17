@@ -8,6 +8,7 @@ from app.models.track_artist import TrackArtist
 from app.models.track_genre import TrackGenre
 from app.services.filename_metadata import extract_track_number_from_filename
 from app.services.metadata import extract_track_metadata
+from app.services.metadata_normalizer import normalize_primary_artist
 from app.services.musicbrainz_backfill_runner import start_musicbrainz_backfill_background
 from app.services.track_resolution import resolve_track_fields
 from app.utils.files import is_supported_audio_file
@@ -100,6 +101,7 @@ def _refresh_track_metadata(db, track_id: int, file_path: Path, stat, base_path=
     track.file_mtime_ns = stat.st_mtime_ns
     track.track_number = fields["track_number"]
     track.disc_number = fields["disc_number"]
+    track.album_artist = fields["album_artist"] or ""
 
     db.query(TrackArtist).filter(TrackArtist.track_id == track.id).delete(synchronize_session=False)
     for index, artist_name in enumerate(fields["artists"]):
@@ -115,6 +117,21 @@ def resolve_track_number(metadata: dict, file_path: str) -> int:
     if tagged:
         return int(tagged)
     return extract_track_number_from_filename(file_path) or 0
+
+
+def _backfill_album_artist(db, track_id: int, file_path) -> None:
+    """Read the album-artist tag of a row imported before it was stored.
+    Written as "" when the file has none, so the row is read once."""
+    value = ""
+    try:
+        metadata = extract_track_metadata(str(file_path))
+        raw = metadata.get("album_artist")
+        value = (normalize_primary_artist(raw) if raw else None) or ""
+    except Exception:  # noqa: BLE001
+        value = ""
+    db.query(Track).filter(Track.id == track_id).update(
+        {Track.album_artist: value}, synchronize_session=False
+    )
 
 
 def _backfill_track_number(db, track_id: int, file_path) -> None:
@@ -221,7 +238,9 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
         # Rows the old reader misread (see _looks_misread); re-read in place
         # as the walk passes them, so a library heals on its next scan.
         misread: set[str] = set()
-        for track_id, path, size, mtime_ns, number, artist, raw_artist in db.query(
+        # Rows from before the album-artist tag was stored; read once.
+        unread_album_artist: set[str] = set()
+        for track_id, path, size, mtime_ns, number, artist, raw_artist, album_artist in db.query(
             Track.id,
             Track.file_path,
             Track.file_size,
@@ -229,12 +248,15 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
             Track.track_number,
             Track.artist,
             Track.raw_artist,
+            Track.album_artist,
         ).all():
             known[path] = (track_id, size, mtime_ns)
             if number is None:
                 unnumbered.add(path)
             if _looks_misread(artist, raw_artist, path):
                 misread.add(path)
+            elif album_artist is None:
+                unread_album_artist.add(path)
 
         backfilled = 0
         healed = 0
@@ -251,6 +273,7 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
         refreshed = 0
         skipped_excluded = 0
         pending_updates = 0
+        album_artists_read = 0
 
         for file_path in base.rglob("*"):
             try:
@@ -308,6 +331,10 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
                 elif path_text in unnumbered:
                     _backfill_track_number(db, track_id, file_path)
                     backfilled += 1
+                    pending_updates += 1
+                elif path_text in unread_album_artist:
+                    _backfill_album_artist(db, track_id, file_path)
+                    album_artists_read += 1
                     pending_updates += 1
                 if pending_updates and pending_updates % 200 == 0:
                     db.commit()
@@ -370,6 +397,7 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
                         "file_mtime_ns": stat.st_mtime_ns,
                         "track_number": fields["track_number"],
                         "disc_number": fields["disc_number"],
+                        "album_artist": fields["album_artist"] or "",
                     },
                     "artists": fields["artists"],
                     "genres": fields["genres"],
@@ -392,6 +420,8 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
             logger.info("Numbered %s tracks imported before track numbers were read.", backfilled)
         if healed:
             logger.info("Re-read %s tracks the old tag reader had misread.", healed)
+        if album_artists_read:
+            logger.info("Read the album artist of %s tracks imported before it was stored.", album_artists_read)
         if skipped_excluded:
             logger.info("Skipped %s files in recycle, cache or hidden folders.", skipped_excluded)
 

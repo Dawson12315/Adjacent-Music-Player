@@ -48,6 +48,14 @@ class Track(Base):
     track_number = Column(Integer, nullable=True)
     disc_number = Column(Integer, nullable=True)
 
+    # The record's artist, from the album-artist tag: "Various Artists" on a
+    # compilation, the composer on a soundtrack. Albums group on this when it
+    # is set and on the track artist otherwise, so a properly tagged
+    # compilation is one album instead of one per performer. NULL means the
+    # tag has not been read yet (rows from before the column existed; the
+    # scanner reads them once); "" means read, and the file carries none.
+    album_artist = Column(String, nullable=True)
+
     # The track list sorts on lower(column) and the section jump counts on
     # it; declared here, not only in the SQLite migration runner, so Postgres
     # gets them too and the two schemas stop drifting.

@@ -237,10 +237,14 @@ size — is in **[Operating notes](docs/deploy/operating-notes.md)**.
   folders (`Composer/Album (Year)/Disc 2/07 - Title.flac`), and repairs rows
   it imported that way on its next scan. If a file sits in a folder that
   names nothing, tag it, or move it under `Artist/Album/`.
-- **An artist with a single track that shows another artist's name on it.**
-  The file credits a featured artist in its artist tag ("Kodak Black feat.
-  1900Rugrat"). Both are credited; the track row shows the first. Edit the
-  tag if the credit is wrong.
+- **An artist with a single track, by someone else.** The file credits a
+  featured artist in its artist tag ("Kodak Black feat. 1900Rugrat"). Both
+  are credited, the row names both, and the guest gets a page with that one
+  track on it. Edit the tag if the credit is wrong.
+- **A compilation or soundtrack shows as one album per performer.** The
+  files have no album-artist tag. Set it ("Various Artists", or the
+  composer) and the next scan files them as one record; files without the
+  tag group on their track artist, as before.
 - **`.m4a` files imported with no tags.** Fixed in October 2026; the next
   scan re-reads them. Nothing to do.
 - **The backend restarts forever, or `/api/health` says `degraded`.** The

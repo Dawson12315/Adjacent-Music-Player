@@ -62,6 +62,10 @@ def main():
                 track.raw_title = fields["raw_title"]
                 track.raw_artist = fields["raw_artist"]
                 track.raw_album = fields["raw_album"]
+            if "album_artist" in metadata:
+                # Only known when the file was read; stored rows keep NULL
+                # and the scanner reads them once on its next walk.
+                track.album_artist = fields["album_artist"] or ""
 
             if fields["track_number"] and track.track_number != fields["track_number"]:
                 track.track_number = fields["track_number"]

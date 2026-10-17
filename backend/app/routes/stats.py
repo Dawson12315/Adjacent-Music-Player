@@ -25,6 +25,7 @@ from app.services.timezones import (
 )
 from app.services.track_responses import (
     album_artwork_keys,
+    record_artist_expr,
     build_track_payloads,
     build_track_responses,
 )
@@ -405,7 +406,7 @@ def top_albums(
     album_rows = (
         db.query(
             Track.album.label("name"),
-            func.min(Track.artist).label("artist"),
+            func.min(record_artist_expr()).label("artist"),
             func.count(ListeningEvent.id).label("play_count"),
         )
         .join(ListeningEvent, ListeningEvent.track_id == Track.id)

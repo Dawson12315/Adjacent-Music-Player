@@ -21,6 +21,7 @@ from app.services.metadata_normalizer import (
     normalize_album,
     normalize_artist_list,
     normalize_genre_list,
+    normalize_primary_artist,
     normalize_title,
 )
 
@@ -100,6 +101,10 @@ def resolve_track_fields(metadata: dict, file_path: str, base_path: Optional[str
     artists = normalize_artist_list(artist_value)
     artist = artists[0] if artists else None
     album = normalize_album(album_value)
+    # The record's artist, only when the file says so. None here means the
+    # album groups on the track artist, which is right for a normal album
+    # and for a soundtrack filed under its composer's folder.
+    album_artist = normalize_primary_artist(raw_album_artist) if raw_album_artist else None
 
     genres = normalize_genre_list(metadata.get("genre"))
     genre = genres[0] if genres else normalize_genre(metadata.get("genre"))
@@ -119,6 +124,8 @@ def resolve_track_fields(metadata: dict, file_path: str, base_path: Optional[str
         "raw_artist": raw_artist,
         "raw_album": raw_album,
         "raw_genre": raw_genre,
+        "album_artist": album_artist,
+        "raw_album_artist": raw_album_artist,
         "track_number": track_number,
         "disc_number": disc_number,
         "sources": sources,

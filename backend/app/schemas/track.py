@@ -12,6 +12,9 @@ class TrackResponse(BaseModel):
     genre: Optional[str] = None
     genres: List[str] = Field(default_factory=list)
     artists: List[str] = Field(default_factory=list)
+    # The record's artist: the album-artist tag when the file has one, else
+    # the track artist. What the album the track belongs to is filed under.
+    album_artist: Optional[str] = None
     file_path: str
     artwork_path: Optional[str] = None
     album_artwork_path: Optional[str] = None

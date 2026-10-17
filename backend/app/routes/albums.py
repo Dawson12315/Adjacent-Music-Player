@@ -17,6 +17,7 @@ from app.services.track_responses import (
     album_artwork_key,
     album_artwork_keys,
     build_track_payloads,
+    record_artist_expr,
     resolve_album_artwork,
     track_load_options,
 )
@@ -41,8 +42,12 @@ def album_index_query(db: Session):
 
     Grouping by title alone folded two artists' "Greatest Hits" into one
     entry, and every page that opened it showed both records interleaved.
+
+    The artist is the record's: the album-artist tag where the file has
+    one, else the track's. Grouped on the track artist, a compilation with
+    fourteen performers was fourteen albums.
     """
-    artist_expr = func.coalesce(Track.artist, literal(""))
+    artist_expr = record_artist_expr()
     return (
         db.query(
             Track.album.label("album"),
@@ -191,7 +196,7 @@ def get_mobile_album_tracks(
     # Narrowed to one artist's record when the client names it; without it
     # every record of that title, as before.
     if isinstance(artist, str) and artist.strip():
-        query = query.filter(func.lower(func.coalesce(Track.artist, "")) == artist.strip().lower()[:300])
+        query = query.filter(func.lower(record_artist_expr()) == artist.strip().lower()[:300])
 
     tracks = query.order_by(*album_track_order()).all()
 

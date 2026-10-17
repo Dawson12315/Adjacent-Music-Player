@@ -16,6 +16,7 @@ from app.schemas.playlist import PlaylistPreviewItem, PlaylistResponse
 from app.services.track_responses import (
     album_artwork_key,
     get_artwork_maps,
+    record_artist,
     resolve_album_artwork,
 )
 
@@ -82,7 +83,7 @@ def _previews(db: Session, playlist_ids: list[int]) -> dict[int, list[PlaylistPr
         items = previews.setdefault(playlist_id, [])
         if len(items) >= PREVIEW_TILES:
             continue
-        album_key = album_artwork_key(track.album, track.artist)
+        album_key = album_artwork_key(track.album, record_artist(track))
         key = album_key or f"track:{track.id}"
         keys = seen.setdefault(playlist_id, set())
         if key in keys:
@@ -92,7 +93,7 @@ def _previews(db: Session, playlist_ids: list[int]) -> dict[int, list[PlaylistPr
             PlaylistPreviewItem(
                 title=track.title,
                 album=track.album,
-                artwork_path=resolve_album_artwork(album_map, track.album, track.artist),
+                artwork_path=resolve_album_artwork(album_map, track.album, record_artist(track)),
             )
         )
     return previews
