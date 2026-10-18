@@ -52,11 +52,13 @@ export function TracksView() {
     (track) => {
       actions.closeMenu();
       playTrack(track, feed.tracks, listeningSource);
-      // A paged list: the rest comes in behind the music and joins the
-      // queue, so a shuffle of a genre draws from the whole genre.
-      if (feed.hasMore) feed.loadAll();
+      // A genre is a bounded list worth having whole, so a shuffle of it
+      // draws from the whole genre. The library feed is not: thirty-six
+      // thousand rows is not a queue, and the page kept growing until the
+      // tab ran out of memory.
+      if (selectedGenre && feed.hasMore) feed.loadAll();
     },
-    [actions, playTrack, feed, listeningSource],
+    [actions, playTrack, feed, listeningSource, selectedGenre],
   );
 
   // The queue was a copy of the list at click time; when the list grows,

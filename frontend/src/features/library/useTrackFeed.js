@@ -32,6 +32,9 @@ export function useTrackFeed() {
 
   const offsetRef = useRef(0);
   const loadingRef = useRef(false);
+  // The whole-list load in flight, if any; a change of source aborts it so
+  // the old source's pages never land in the new list.
+  const loadAllControllerRef = useRef(null);
 
   // Typing should not fire a request per keystroke.
   useEffect(() => {
@@ -85,6 +88,10 @@ export function useTrackFeed() {
   useEffect(() => {
     const controller = new AbortController();
 
+    loadAllControllerRef.current?.abort();
+    loadAllControllerRef.current = null;
+    loadingRef.current = false;
+    setIsLoadingMore(false);
     offsetRef.current = 0;
     setIsLoading(true);
     setError("");
@@ -115,7 +122,10 @@ export function useTrackFeed() {
 
     run();
 
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      loadAllControllerRef.current?.abort();
+    };
     // `source` captures every input to fetchPage; depending on it keeps the reset to one
     // run per actual change of what is being asked for.
   }, [source]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -131,13 +141,17 @@ export function useTrackFeed() {
       return;
     }
 
+    const controller = new AbortController();
+    const { signal } = controller;
+    loadAllControllerRef.current = controller;
     loadingRef.current = true;
     setIsLoadingMore(true);
 
     try {
       let more = true;
-      while (more) {
-        const page = await fetchPage(offsetRef.current);
+      while (more && !signal.aborted) {
+        const page = await fetchPage(offsetRef.current, signal);
+        if (signal.aborted) return;
         const items = page.items || [];
 
         setTracks((previous) => {
@@ -151,10 +165,13 @@ export function useTrackFeed() {
         setHasMore(more);
       }
     } catch (err) {
-      setError(err.message || "Could not load more tracks.");
+      if (err.name !== "AbortError") setError(err.message || "Could not load more tracks.");
     } finally {
-      loadingRef.current = false;
-      setIsLoadingMore(false);
+      if (loadAllControllerRef.current === controller) {
+        loadAllControllerRef.current = null;
+        loadingRef.current = false;
+        setIsLoadingMore(false);
+      }
     }
   }, [fetchPage, hasMore]);
 
