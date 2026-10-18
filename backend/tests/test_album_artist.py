@@ -100,6 +100,10 @@ def test_artwork_set_on_the_record_shows_on_every_track(client, compilation):
     items = rows if isinstance(rows, list) else rows["items"]
     paths = {row["album_artwork_path"] for row in items}
     assert len(paths) == 1 and None not in paths, "one picture, on all three performers' tracks"
+    # The thin list projection the phone uses keys artwork the same way.
+    thin = client.get("/api/albums/Now That Is Music/tracks", params={"artist": "Various Artists", "fields": "list"}).json()
+    thin = thin if isinstance(thin, list) else thin["items"]
+    assert {row["album_artwork_path"] for row in thin} == paths
 
 
 def test_the_scanner_stores_the_album_artist_and_reads_it_once_for_old_rows(client, db_session_factory, tmp_path, monkeypatch):

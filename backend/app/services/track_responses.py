@@ -223,7 +223,7 @@ def build_track_list_items(db: Session, tracks: list[Track]) -> list[dict]:
     items = []
 
     for track in tracks:
-        album_artwork_path = resolve_album_artwork(album_map, track.album, track.artist)
+        album_artwork_path = resolve_album_artwork(album_map, track.album, record_artist(track))
         items.append(
             {
                 "id": track.id,
