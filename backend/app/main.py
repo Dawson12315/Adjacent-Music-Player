@@ -29,6 +29,7 @@ from app.routes.playlists import router as playlists_router
 from app.routes.scan import router as scan_router
 from app.routes.settings import router as settings_router
 from app.routes.similar_tracks import router as similar_tracks_router
+from app.routes.radio import router as radio_router
 from app.routes.stats import router as stats_router
 from app.routes.tracks import router as tracks_router
 from app.routes.users import router as users_router
@@ -345,6 +346,7 @@ app.include_router(maintenance_router, prefix="/api")
 app.include_router(artist_edit_router, prefix="/api")
 app.include_router(genres_router, prefix="/api")
 app.include_router(similar_tracks_router, prefix="/api")
+app.include_router(radio_router, prefix="/api")
 app.include_router(listening_router, prefix="/api")
 app.include_router(stats_router, prefix="/api")
 app.include_router(home_router, prefix="/api")

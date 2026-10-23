@@ -23,6 +23,8 @@ SourceType = Literal[
     "library",
     "recommendation",
     "queue",
+    # A radio station; the source id is the station's id.
+    "radio",
 ]
 
 SOURCE_TYPES = set(SourceType.__args__)
