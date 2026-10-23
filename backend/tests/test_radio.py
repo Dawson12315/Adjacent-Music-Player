@@ -192,3 +192,21 @@ def test_a_small_corner_of_the_library_runs_thin_but_still_plays(client, radio_l
     assert ids, "a thin station still plays what it has"
     assert set(ids) <= set(radio_library["elsewhere"])
     assert len(set(ids)) == len(ids)
+
+
+def test_an_exhausted_station_comes_round_again_rather_than_falling_silent(client, radio_library):
+    station = _station(client, seed_type="artist", seed_artist="Elsewhere Act")
+    first = [track["id"] for track in _next(client, station["id"])["tracks"]]
+    assert first
+    client.post(f"/api/radio/stations/{station['id']}/played", json={"track_ids": first})
+
+    # Everything the corner holds has played; the client still holds it all.
+    again = _next(client, station["id"], exclude_track_ids=",".join(map(str, first)))
+    assert again["thin"] is True
+    assert again["tracks"] == []
+
+    # With the queue let go, the station repeats rather than stopping.
+    once_more = _next(client, station["id"])
+    ids = [track["id"] for track in once_more["tracks"]]
+    assert ids and set(ids) <= set(radio_library["elsewhere"])
+    assert all(track["reason"] for track in once_more["tracks"])

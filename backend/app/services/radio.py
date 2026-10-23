@@ -435,4 +435,12 @@ def next_batch(
         have = {track_id for track_id, _ in batch}
         for track_id in _genre_fallback(db, seeds, excluded | have, limit - len(batch)):
             batch.append((track_id, f"Shares a genre with {own_name}"))
+            have.add(track_id)
+    if len(batch) < limit:
+        # The station has played everything its corner of the library holds.
+        # Radio keeps going: the memory is set aside and the genre pool comes
+        # round again, keeping out only what the client is still holding.
+        for track_id in _genre_fallback(db, seeds, client_excluded | have, limit - len(batch)):
+            batch.append((track_id, f"Back around to {own_name}"))
+            have.add(track_id)
     return batch[:limit], thin
