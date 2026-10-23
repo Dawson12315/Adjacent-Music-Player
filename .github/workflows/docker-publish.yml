@@ -34,6 +34,12 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
+      # The commit actually checked out, not the event payload: a workflow_run
+      # event's sha is the branch head, which may already be newer.
+      - name: Name the commit
+        id: commit
+        run: echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
       # arm64 too: Synology's ARM models, Raspberry Pi and Docker Desktop on
       # Apple silicon all pulled an amd64-only image and restart-looped on
       # "exec format error".
@@ -55,12 +61,9 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_BACKEND }}
-          # From the checked-out commit, not the event payload: a workflow_run
-          # event's sha is the branch head, which may already be newer.
-          context: git
           tags: |
             type=raw,value=latest
-            type=sha,prefix=sha-
+            type=raw,value=sha-${{ steps.commit.outputs.short }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
@@ -88,6 +91,12 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
+      # The commit actually checked out, not the event payload: a workflow_run
+      # event's sha is the branch head, which may already be newer.
+      - name: Name the commit
+        id: commit
+        run: echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
       # arm64 too: Synology's ARM models, Raspberry Pi and Docker Desktop on
       # Apple silicon all pulled an amd64-only image and restart-looped on
       # "exec format error".
@@ -109,10 +118,9 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_FRONTEND }}
-          context: git
           tags: |
             type=raw,value=latest
-            type=sha,prefix=sha-
+            type=raw,value=sha-${{ steps.commit.outputs.short }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
