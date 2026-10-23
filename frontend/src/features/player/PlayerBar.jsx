@@ -37,6 +37,8 @@ export function PlayerBar() {
     handoffPlayingElsewhere,
     remoteTrack,
     awaitingGesture,
+    radioStation,
+    radioReason,
   } = usePlayer();
 
   const [handoffOpen, setHandoffOpen] = useState(false);
@@ -94,6 +96,12 @@ export function PlayerBar() {
                   </span>
                 )}
                 <span className="player-bar__title">{shownTrack.title}</span>
+                {radioStation?.name && !handoffPlayingElsewhere && (
+                  <span className="player-bar__station" title={radioReason || radioStation.name}>
+                    <Icon name="radio" size={11} />
+                    {radioStation.name}
+                  </span>
+                )}
               </div>
               <span
                 className={`player-bar__meta ${

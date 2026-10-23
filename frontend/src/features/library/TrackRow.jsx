@@ -28,6 +28,7 @@ export const TrackRow = memo(function TrackRow({
   onAddToQueue,
   onAddToPlaylist,
   onRemoveFromPlaylist,
+  onStartRadio,
   playCount,
 }) {
   return (
@@ -93,6 +94,16 @@ export const TrackRow = memo(function TrackRow({
               menuDirection === "up" ? "menu--up" : "menu--down"
             }`}
           >
+            {onStartRadio && (
+              <>
+                <button className="menu__item menu__item--radio" onClick={() => onStartRadio(track)} type="button">
+                  <Icon name="radio" size={14} />
+                  Start radio
+                </button>
+                <div className="menu__divider" />
+              </>
+            )}
+
             <button className="menu__item" onClick={() => onEdit(track)} type="button">
               Edit info
             </button>

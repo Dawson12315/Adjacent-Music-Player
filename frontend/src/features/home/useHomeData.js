@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { getForYou } from "../../services/homeService";
+import { getStations } from "../../services/radioService";
 import * as statsService from "../../services/statsService";
 
 const EMPTY = {
@@ -8,6 +9,7 @@ const EMPTY = {
   forYou: [],
   topPlayed: [],
   topGenres: [],
+  stations: [],
 };
 
 /**
@@ -42,6 +44,9 @@ export function useHomeData() {
     Promise.all([
       settle(statsService.getRecentlyPlayed(12, signal), "recentlyPlayed"),
       settle(statsService.getTopPlayed(12, signal), "topPlayed"),
+      // Radio stations played lately; a server without radio answers 404 and
+      // the rail simply does not render.
+      settle(getStations({ signal }), "stations", (rows) => (Array.isArray(rows) ? rows : [])),
       settle(
         statsService.getStatsOverview({ signal }),
         "topGenres",

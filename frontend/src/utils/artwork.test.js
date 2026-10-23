@@ -27,3 +27,16 @@ describe("album artwork keys", () => {
     expect(resolveAlbumArtwork("Other", map, "The Band").type).not.toBe("image");
   });
 });
+
+describe("resolveStationArtwork", () => {
+  it("uses the seed's picture when there is one, else a generated tile named for the seed", async () => {
+    const { resolveStationArtwork } = await import("./artwork");
+    expect(resolveStationArtwork({ name: "Fen radio", artwork_path: "/uploads/fen.jpg" })).toMatchObject({
+      type: "image",
+      alt: "Fen radio",
+    });
+    const tile = resolveStationArtwork({ name: "Fen radio", artwork_path: null });
+    expect(tile.type).not.toBe("image");
+    expect(JSON.stringify(tile)).toContain("F");
+  });
+});

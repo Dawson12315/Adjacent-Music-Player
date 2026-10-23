@@ -25,7 +25,7 @@ export function PageHeader() {
   const { artists, albums, genres, playlists, playlistTracks, trackCount, albumArtworkMap, artistArtworkMap } =
     useLibrary();
   const { meta } = usePageMeta();
-  const { playTracks } = usePlayer();
+  const { playTracks, startRadio } = usePlayer();
   const {
     activeView,
     selectedArtist,
@@ -208,6 +208,24 @@ export function PageHeader() {
               >
                 <Icon name="play" size={14} />
                 Play
+              </button>
+            )}
+
+            {(selectedAlbum || selectedArtist) && feedTracks.length > 0 && (
+              <button
+                className="btn btn--ghost btn--sm"
+                type="button"
+                title={`Start radio from ${selectedAlbum || selectedArtist}`}
+                onClick={() =>
+                  startRadio(
+                    selectedAlbum
+                      ? { album: { name: selectedAlbum, artist: selectedAlbumArtist } }
+                      : { artist: selectedArtist },
+                  )
+                }
+              >
+                <Icon name="radio" size={14} />
+                Radio
               </button>
             )}
 

@@ -1172,3 +1172,31 @@
 .auth-link-button:hover {
   color: var(--text);
 }
+
+/* A radio station on the Home rail: the seed's picture with a badge. */
+.station-card__art {
+  position: relative;
+  display: block;
+}
+
+.station-card__badge {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--field, #0a0c11);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  color: var(--yellow, #ffc93c);
+}
+
+.menu__item--radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--blue-300, #8ab4ff);
+}

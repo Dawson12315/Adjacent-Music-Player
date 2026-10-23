@@ -497,3 +497,20 @@
   color: var(--text-muted);
   font-size: var(--text-xs);
 }
+
+/* The station a track is playing under, beside the title in the bar. */
+.player-bar__station {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--wash-strong, rgba(255, 255, 255, 0.08));
+  color: var(--yellow, #ffc93c);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}

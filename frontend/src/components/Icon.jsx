@@ -105,6 +105,13 @@ const icons = {
       <path {...STROKE} d="m8.6 6 -2.4 2.5L8.6 11M15.4 13l2.4 2.5-2.4 2.5" />
     </>
   ),
+  radio: (
+    <>
+      <circle cx="12" cy="12" r="2.1" fill="currentColor" stroke="none" />
+      <path {...STROKE} d="M8.6 15.4a4.8 4.8 0 0 1 0-6.8M15.4 8.6a4.8 4.8 0 0 1 0 6.8" />
+      <path {...STROKE} d="M5.8 18.2a8.75 8.75 0 0 1 0-12.4M18.2 5.8a8.75 8.75 0 0 1 0 12.4" />
+    </>
+  ),
   queue: (
     <>
       <path {...STROKE} d="M4 7h11M4 12h11M4 17h7" />

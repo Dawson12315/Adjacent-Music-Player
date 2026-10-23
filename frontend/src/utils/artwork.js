@@ -144,3 +144,16 @@ export function resolvePlaylistArtwork(playlist) {
 
   return generated(playlist.name);
 }
+
+/**
+ * A radio station's picture: the seed's own artwork when the server found
+ * one, else the generated tile for the seed's name, so a station card never
+ * sits blank beside the album and artist cards.
+ */
+export function resolveStationArtwork(station) {
+  if (station?.artwork_path) {
+    return { type: "image", src: artworkUrl(station.artwork_path), alt: station.name || "" };
+  }
+  const name = String(station?.name || "");
+  return generated(name.endsWith(" radio") ? name.slice(0, -" radio".length) : name);
+}

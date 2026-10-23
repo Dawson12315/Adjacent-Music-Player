@@ -151,6 +151,7 @@ export function PlaylistView() {
             onEdit={actions.handleEdit}
             onAddToQueue={actions.handleAddToQueue}
             onAddToPlaylist={actions.handleAddToPlaylist}
+            onStartRadio={actions.handleStartRadio}
             onRemoveFromPlaylist={handleRemove}
           />
         ))}

@@ -12,6 +12,21 @@ import { usePlaybackPersistence } from "../hooks/usePlaybackPersistence";
 import { useHandoff } from "../hooks/useHandoff";
 import { getPlaybackState } from "../services/playbackService";
 import { getTracksByIds } from "../services/tracksService";
+import {
+  createStation,
+  getStation,
+  getStationNext,
+  reportStationPlays,
+} from "../services/radioService";
+import {
+  EXHAUSTED_STATION_NOTICE,
+  THIN_STATION_NOTICE,
+  isRadioSource,
+  radioSource,
+  reasonsByTrackId,
+  stationBatchCandidates,
+  stationSeedFor,
+} from "../features/player/radio";
 import { interpolatedPosition } from "../services/handoffProtocol";
 import * as playlistsService from "../services/playlistsService";
 import { initialPlayerState, playerReducer } from "../features/player/playerReducer";
@@ -47,6 +62,21 @@ export function PlayerProvider({ children }) {
   // The context playback started from, captured at play time so an event fired after
   // navigating away still records where the track was actually played from.
   const sourceRef = useRef(DEFAULT_SOURCE);
+
+  // The radio station playing now, and why it chose each track.
+  const [radioStation, setRadioStation] = useState(null);
+  const radioReasonsRef = useRef(new Map());
+
+  /** The station a source names, looked up for the bar after a restore or a take-over. */
+  const syncStationFromSource = useCallback((source) => {
+    if (!isRadioSource(source)) {
+      setRadioStation(null);
+      return;
+    }
+    getStation(source.source_id)
+      .then((station) => setRadioStation(station || null))
+      .catch(() => setRadioStation(null));
+  }, []);
 
   const handlePlaybackError = useCallback(
     (error) => {
@@ -225,6 +255,11 @@ export function PlayerProvider({ children }) {
 
       await claimBeforePlay({ trackId: track.id, position: 0, playing: true });
       sourceRef.current = source;
+      // Anything but the station's own batches ends the station.
+      if (!isRadioSource(source)) {
+        setRadioStation(null);
+        radioReasonsRef.current = new Map();
+      }
       dispatch({ type: "PLAY_TRACK", track, sourceTracks });
       setIsPlaying(true);
     },
@@ -237,11 +272,63 @@ export function PlayerProvider({ children }) {
 
       await claimBeforePlay({ trackId: tracksToPlay[0]?.id ?? null, position: 0, playing: true });
       sourceRef.current = source;
+      if (!isRadioSource(source)) {
+        setRadioStation(null);
+        radioReasonsRef.current = new Map();
+      }
       dispatch({ type: "PLAY_TRACKS", tracks: tracksToPlay });
       setIsPlaying(true);
     },
     [claimBeforePlay],
   );
+
+  /**
+   * Play a station from its first batch, in the station's order: track
+   * radio opens with the seed, and the blend is the server's to decide.
+   */
+  const playStation = useCallback(
+    async (station) => {
+      if (!station?.id) return false;
+      const batch = await getStationNext(station.id);
+      const tracks = stationBatchCandidates(batch.tracks);
+      if (!tracks.length) {
+        notify("Nothing in your library to build that station from yet.");
+        return false;
+      }
+      radioReasonsRef.current = reasonsByTrackId(batch.tracks);
+      setRadioStation(batch.station || station);
+      await playTracks(tracks, radioSource(station.id));
+      if (batch.thin) notify(THIN_STATION_NOTICE);
+      return true;
+    },
+    [notify, playTracks],
+  );
+
+  /** "Start radio" from a track menu, an album page or an artist page. */
+  const startRadio = useCallback(
+    async (seedFrom) => {
+      const seed = stationSeedFor(seedFrom || {});
+      if (!seed) return false;
+      try {
+        const station = await createStation(seed);
+        return await playStation(station);
+      } catch (error) {
+        notify(
+          error?.status === 404
+            ? "This server has no radio yet, or nothing to build that station from."
+            : error?.message || "Couldn't start radio.",
+        );
+        return false;
+      }
+    },
+    [notify, playStation],
+  );
+
+  // The station remembers what it played, so the next batch moves on.
+  useEffect(() => {
+    if (currentTrackId == null || !isRadioSource(sourceRef.current)) return;
+    reportStationPlays(sourceRef.current.source_id, [currentTrackId]).catch(() => {});
+  }, [currentTrackId]);
 
   const togglePlay = useCallback(async () => {
     if (!currentTrack) return;
@@ -357,15 +444,38 @@ export function PlayerProvider({ children }) {
       return;
     }
 
-    // Stop at the end of the queue rather than wrapping around.
+    // Stop at the end of the queue rather than wrapping around, unless a
+    // station is playing: then the station is asked for its next batch.
     if (queueIndex === -1 || queueIndex >= queue.length - 1) {
+      const source = sourceRef.current;
+      if (isRadioSource(source)) {
+        const held = new Set(queue.map((track) => track?.id));
+        getStationNext(source.source_id, { excludeIds: [...held] })
+          .then((batch) => {
+            const tracks = stationBatchCandidates(batch.tracks, { excludeIds: held });
+            if (!tracks.length) {
+              notify(EXHAUSTED_STATION_NOTICE);
+              setIsPlaying(false);
+              return;
+            }
+            reasonsByTrackId(batch.tracks).forEach((reason, id) => radioReasonsRef.current.set(id, reason));
+            if (batch.thin) notify(THIN_STATION_NOTICE);
+            dispatch({ type: "PLAY_TRACKS", tracks });
+            setIsPlaying(true);
+          })
+          .catch(() => {
+            notify("Couldn't reach your server for the station's next tracks.");
+            setIsPlaying(false);
+          });
+        return;
+      }
       setIsPlaying(false);
       return;
     }
 
     dispatch({ type: "NEXT" });
     setIsPlaying(true);
-  }, [currentTrack, events, isLoop, queueIndex, queue.length, seek, audioRef]);
+  }, [currentTrack, events, isLoop, queueIndex, queue, seek, audioRef, notify]);
 
   // The element fires `pause` before `ended` at the end of a track. Taking
   // that pause as the user's flipped isPlaying false and back, which sent a
@@ -461,6 +571,7 @@ export function PlayerProvider({ children }) {
         if (!startTrack) return;
 
         sourceRef.current = { source_type: serverState.source_type ?? null, source_id: serverState.source_id ?? null };
+        syncStationFromSource(sourceRef.current);
         dispatch({
           type: "RESTORE",
           queue: tracks,
@@ -480,7 +591,7 @@ export function PlayerProvider({ children }) {
         console.error("Failed to take over playback", error);
       }
     },
-    [dispatch, requestSeek],
+    [dispatch, requestSeek, syncStationFromSource],
   );
 
   // A remote asked this (the holding) browser to do something.
@@ -670,6 +781,10 @@ export function PlayerProvider({ children }) {
       handoffPlayingElsewhere,
       remoteTrack,
       awaitingGesture,
+      radioStation,
+      radioReason: radioReasonsRef.current.get(String(currentTrackId)) || null,
+      startRadio,
+      playStation,
     }),
     [
       currentTrack,
@@ -707,6 +822,10 @@ export function PlayerProvider({ children }) {
       handoffPlayingElsewhere,
       remoteTrack,
       awaitingGesture,
+      radioStation,
+      currentTrackId,
+      startRadio,
+      playStation,
     ],
   );
 

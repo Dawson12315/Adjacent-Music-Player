@@ -10,8 +10,9 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { usePlayer } from "../../contexts/PlayerContext";
 import { buildGenrePath, buildPlaylistPath } from "../../hooks/useNavigation";
-import { resolveAlbumArtwork, resolvePlaylistArtwork } from "../../utils/artwork";
+import { resolveAlbumArtwork, resolvePlaylistArtwork, resolveStationArtwork } from "../../utils/artwork";
 import { creditLine, recordArtist } from "../../utils/credits";
+import { stationKindLabel } from "../player/radio";
 
 /**
  * The landing surface.
@@ -23,7 +24,7 @@ import { creditLine, recordArtist } from "../../utils/credits";
 export function HomeView() {
   const { currentUser } = useAuth();
   const { playlists, albumArtworkMap, artists, albums, trackCount } = useLibrary();
-  const { playTrack } = usePlayer();
+  const { playTrack, playStation } = usePlayer();
   const home = useHomeData();
 
   const playFrom = useCallback(
@@ -73,6 +74,39 @@ export function HomeView() {
             </button>
           ))}
         </div>
+      )}
+
+      {home.stations?.length > 0 && playStation && (
+        <section className="rail">
+          <div className="section-head">
+            <h2 className="section-head__title">
+              <Icon name="radio" size={16} /> Recent stations
+            </h2>
+            <span className="section-head__subtitle">Pick up a station where you left it</span>
+          </div>
+          <div className="rail__scroller scroll-x">
+            {home.stations.map((station) => (
+              <button
+                key={station.id}
+                className="entity-card station-card"
+                type="button"
+                onClick={() => playStation(station)}
+                aria-label={`Play ${station.name}`}
+              >
+                <span className="station-card__art">
+                  <Artwork artwork={resolveStationArtwork(station)} className="entity-card__art" size={168} />
+                  <span className="station-card__badge" aria-hidden="true">
+                    <Icon name="radio" size={14} />
+                  </span>
+                </span>
+                <span className="entity-card__body">
+                  <span className="entity-card__name">{station.name}</span>
+                  <span className="entity-card__meta">{stationKindLabel(station)}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
       )}
 
       <Rail

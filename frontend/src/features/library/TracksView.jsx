@@ -126,6 +126,7 @@ export function TracksView() {
             onEdit={actions.handleEdit}
             onAddToQueue={actions.handleAddToQueue}
             onAddToPlaylist={actions.handleAddToPlaylist}
+            onStartRadio={actions.handleStartRadio}
           />
         ))}
       </div>

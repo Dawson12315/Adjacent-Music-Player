@@ -16,7 +16,7 @@ import * as playlistsService from "../../services/playlistsService";
  */
 export function useTrackActions() {
   const { playlists, albumArtworkMap, openTrackEditor } = useLibrary();
-  const { addToQueue } = usePlayer();
+  const { addToQueue, startRadio } = usePlayer();
   const { notify } = useNotifications();
 
   const [openMenuTrackId, setOpenMenuTrackId] = useState(null);
@@ -56,6 +56,14 @@ export function useTrackActions() {
     [playlists, notify, closeMenu],
   );
 
+  const handleStartRadio = useCallback(
+    (track) => {
+      closeMenu();
+      startRadio?.({ track });
+    },
+    [startRadio, closeMenu],
+  );
+
   const handleEdit = useCallback(
     (track) => {
       openTrackEditor(track);
@@ -77,6 +85,7 @@ export function useTrackActions() {
     closeMenu,
     handleAddToQueue,
     handleAddToPlaylist,
+    handleStartRadio,
     handleEdit,
     artworkFor,
   };
