@@ -40,7 +40,9 @@ from app.services.track_order import album_track_order
 from app.services.track_responses import record_artist_expr
 
 BATCH = 20
-CANDIDATE_POOL = 60
+# Forty is enough to blend from; the recommender retrieves twenty times
+# this and walks the lot once per pick, so the pool is the cost of a batch.
+CANDIDATE_POOL = 40
 # How much of a batch is the seed's own material, per seed type.
 OWN_SHARE = {"track": 4, "album": 4, "artist": 5}
 # How many of the artist's tracks seed the recommender: enough to carry the

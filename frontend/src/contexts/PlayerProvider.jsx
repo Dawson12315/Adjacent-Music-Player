@@ -311,6 +311,24 @@ export function PlayerProvider({ children }) {
       if (!seed) return false;
       try {
         const station = await createStation(seed);
+
+        // Track radio opens with the seed, and the seed is in hand: it plays
+        // now, and the rest of the batch extends the queue behind it when
+        // the station answers, so the server's moment is not heard.
+        if (seed.seed_type === "track" && seedFrom.track?.id) {
+          const seedTrack = seedFrom.track;
+          radioReasonsRef.current = new Map([[String(seedTrack.id), "The track you started from"]]);
+          setRadioStation(station);
+          await playTracks([seedTrack], radioSource(station.id));
+          const batch = await getStationNext(station.id, { excludeIds: [seedTrack.id] });
+          if (!isRadioSource(sourceRef.current) || sourceRef.current.source_id !== station.id) return true;
+          const rest = stationBatchCandidates(batch.tracks, { excludeIds: new Set([seedTrack.id]) });
+          reasonsByTrackId(batch.tracks).forEach((reason, id) => radioReasonsRef.current.set(id, reason));
+          if (rest.length) dispatch({ type: "EXTEND_QUEUE", tracks: [seedTrack, ...rest] });
+          if (batch.thin) notify(THIN_STATION_NOTICE);
+          return true;
+        }
+
         return await playStation(station);
       } catch (error) {
         notify(
@@ -321,7 +339,7 @@ export function PlayerProvider({ children }) {
         return false;
       }
     },
-    [notify, playStation],
+    [notify, playStation, playTracks],
   );
 
   // The station remembers what it played, so the next batch moves on.

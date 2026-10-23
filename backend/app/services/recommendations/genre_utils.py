@@ -1,4 +1,5 @@
 import re
+from functools import lru_cache
 
 from app.models.track import Track
 
@@ -374,6 +375,7 @@ def get_track_genres(track: Track) -> list[str]:
     return []
 
 
+@lru_cache(maxsize=8192)
 def normalize_genre_name(value: str) -> str:
     """
     Normalize genre string for consistent comparison.
@@ -385,6 +387,7 @@ def normalize_genre_name(value: str) -> str:
     return normalized
 
 
+@lru_cache(maxsize=8192)
 def map_genre_to_family(genre: str) -> str:
     """
     Map raw genre -> broader family bucket.

@@ -43,14 +43,29 @@ def diversify_tracks(
         score, track = entry
         return score, track, {}
 
+    # A candidate's family is asked for on every pass over the pool, and the
+    # pool is walked once per pick: a thousand candidates and twenty picks
+    # meant a quarter of a million genre lookups, each re-normalising every
+    # tag. The answer never changes within one call, so it is kept.
+    families_by_track_id: dict = {}
+    family_by_track_id: dict = {}
+
+    def families_of(track: Track):
+        cached = families_by_track_id.get(track.id)
+        if cached is None:
+            cached = get_track_families(track)
+            families_by_track_id[track.id] = cached
+        return cached
+
     def best_family(track: Track):
-        families = get_track_families(track)
-        valid = [f for f in families if f in family_counts]
+        cached = family_by_track_id.get(track.id, family_by_track_id)
+        if cached is not family_by_track_id:
+            return cached
 
-        if not valid:
-            return None
-
-        return max(valid, key=lambda f: family_counts[f])
+        valid = [f for f in families_of(track) if f in family_counts]
+        answer = max(valid, key=lambda f: family_counts[f]) if valid else None
+        family_by_track_id[track.id] = answer
+        return answer
 
     def candidate_cluster_family(meta: dict):
         cluster_families = meta.get("cluster_families", [])
@@ -169,7 +184,7 @@ def diversify_tracks(
                 ):
                     continue
 
-                families = get_track_families(track)
+                families = families_of(track)
                 cluster_family = candidate_cluster_family(meta)
 
                 diversity_penalty = 0.0
