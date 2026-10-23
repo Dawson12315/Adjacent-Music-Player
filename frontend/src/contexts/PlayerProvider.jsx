@@ -319,8 +319,10 @@ export function PlayerProvider({ children }) {
           const seedTrack = seedFrom.track;
           radioReasonsRef.current = new Map([[String(seedTrack.id), "The track you started from"]]);
           setRadioStation(station);
+          // Asked for while the seed starts, not after.
+          const batchPromise = getStationNext(station.id, { excludeIds: [seedTrack.id] });
           await playTracks([seedTrack], radioSource(station.id));
-          const batch = await getStationNext(station.id, { excludeIds: [seedTrack.id] });
+          const batch = await batchPromise;
           if (!isRadioSource(sourceRef.current) || sourceRef.current.source_id !== station.id) return true;
           const rest = stationBatchCandidates(batch.tracks, { excludeIds: new Set([seedTrack.id]) });
           reasonsByTrackId(batch.tracks).forEach((reason, id) => radioReasonsRef.current.set(id, reason));
