@@ -22,8 +22,9 @@ one of their own, so the station announces what it is.
 
 from __future__ import annotations
 
+import json
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
@@ -51,6 +52,10 @@ ARTIST_SEED_SAMPLE = 40
 MEMORY = 200
 MEMORY_RELAXED = 50
 RECENT_STATIONS = 12
+# How long a station keeps its lineup, so coming back continues it; and how
+# much of the lineup is kept, the newest end.
+LINEUP_DAYS = 10
+LINEUP_MAX = 200
 
 
 # ------------------------------------------------------------------ stations
@@ -139,6 +144,67 @@ def recent_stations(db: Session, user_id: int, limit: int = RECENT_STATIONS) -> 
         .limit(limit)
         .all()
     )
+
+
+# -------------------------------------------------------------------- lineup
+
+
+def lineup_of(station: RadioStation, now: datetime | None = None) -> list[dict]:
+    """The station's lineup as [{track_id, reason}], or [] once it has aged out."""
+    if not station.lineup_json or not station.lineup_saved_at:
+        return []
+    now = now or datetime.utcnow()
+    if station.lineup_saved_at < now - timedelta(days=LINEUP_DAYS):
+        return []
+    try:
+        rows = json.loads(station.lineup_json)
+    except (TypeError, ValueError):
+        return []
+    return [row for row in rows if isinstance(row, dict) and row.get("track_id") is not None]
+
+
+def extend_lineup(db: Session, station: RadioStation, pairs: list[tuple[int, str | None]]) -> None:
+    """Add a handed-out batch to the lineup. An aged-out lineup starts over.
+
+    Trimmed to the newest LINEUP_MAX entries, keeping the position pointing
+    at the same track.
+    """
+    now = datetime.utcnow()
+    rows = lineup_of(station, now)
+    position = station.lineup_position or 0 if rows else 0
+    rows = rows + [{"track_id": int(track_id), "reason": reason} for track_id, reason in pairs]
+    if len(rows) > LINEUP_MAX:
+        cut = len(rows) - LINEUP_MAX
+        rows = rows[cut:]
+        position = max(0, position - cut)
+    station.lineup_json = json.dumps(rows)
+    station.lineup_position = min(position, max(0, len(rows) - 1))
+    station.lineup_saved_at = now
+    db.commit()
+
+
+def remaining_lineup(station: RadioStation) -> list[tuple[int, str | None]]:
+    """The lineup from the track the listener got to, onward."""
+    rows = lineup_of(station)
+    if not rows:
+        return []
+    position = min(max(0, station.lineup_position or 0), len(rows) - 1)
+    return [(int(row["track_id"]), row.get("reason")) for row in rows[position:]]
+
+
+def _advance_lineup(station: RadioStation, track_ids: list[int]) -> None:
+    """The listener reached these tracks: the position moves to the last of
+    them that is in the lineup, searching from the end so a repeat lands on
+    its latest appearance."""
+    rows = lineup_of(station)
+    if not rows:
+        return
+    wanted = {int(track_id) for track_id in track_ids}
+    for index in range(len(rows) - 1, -1, -1):
+        if int(rows[index]["track_id"]) in wanted:
+            station.lineup_position = index
+            station.lineup_saved_at = datetime.utcnow()
+            return
 
 
 def delete_station(db: Session, station: RadioStation) -> None:
@@ -259,6 +325,7 @@ def record_plays(db: Session, station: RadioStation, track_ids: list[int]) -> No
     for offset, track_id in enumerate(dict.fromkeys(int(track_id) for track_id in track_ids)):
         db.add(RadioStationPlay(station_id=station.id, track_id=track_id, played_at=now))
     station.last_played_at = now
+    _advance_lineup(station, [int(track_id) for track_id in track_ids])
     db.flush()
 
     keep = (

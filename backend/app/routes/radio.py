@@ -8,6 +8,7 @@ from app.models.track import Track
 from app.models.user import User
 from app.routes.tracks import build_track_responses_for_ids
 from app.schemas.radio import (
+    RadioLineupResponse,
     RadioNextResponse,
     RadioPlayedRequest,
     RadioStationCreate,
@@ -128,6 +129,13 @@ def next_tracks(
     pairs, thin = radio.next_batch(
         db, station, current_user.id, limit=limit, exclude_track_ids=_parse_ids(exclude_track_ids)
     )
+    # Handed out, so remembered: coming back to the station continues this.
+    if pairs:
+        radio.extend_lineup(db, station, pairs)
+    return RadioNextResponse(station=_station_response(db, station), tracks=_radio_tracks(db, pairs), thin=thin)
+
+
+def _radio_tracks(db: Session, pairs) -> list[RadioTrackResponse]:
     responses = {
         response.id: response
         for response in build_track_responses_for_ids([track_id for track_id, _ in pairs], db)
@@ -138,7 +146,28 @@ def next_tracks(
         if base is None:
             continue
         tracks.append(RadioTrackResponse(**base.model_dump(), reason=reason))
-    return RadioNextResponse(station=_station_response(db, station), tracks=tracks, thin=thin)
+    return tracks
+
+
+@router.get("/radio/stations/{station_id}/lineup", response_model=RadioLineupResponse, tags=["radio"])
+def station_lineup(
+    station_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Where the station was left: its lineup from the track the listener
+    got to, onward, so a client can continue it without asking the
+    recommender. Empty when the station has never played, or its lineup is
+    older than ten days."""
+    station = _station_or_404(db, station_id, current_user.id)
+    pairs = radio.remaining_lineup(station)
+    tracks = _radio_tracks(db, pairs)
+    return RadioLineupResponse(
+        station=_station_response(db, station),
+        tracks=tracks,
+        resumable=bool(tracks),
+        saved_at=station.lineup_saved_at if tracks else None,
+    )
 
 
 @router.post("/radio/stations/{station_id}/played", tags=["radio"])

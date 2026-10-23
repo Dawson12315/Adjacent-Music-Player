@@ -210,3 +210,48 @@ def test_an_exhausted_station_comes_round_again_rather_than_falling_silent(clien
     ids = [track["id"] for track in once_more["tracks"]]
     assert ids and set(ids) <= set(radio_library["elsewhere"])
     assert all(track["reason"] for track in once_more["tracks"])
+
+
+def test_a_station_keeps_its_lineup_and_the_place_the_listener_got_to(client, radio_library):
+    # A seed no earlier test has played, so the station starts with nothing.
+    station = _station(client, seed_type="track", seed_track_id=radio_library["lp"][3])
+    # Nothing has played: nothing to continue.
+    empty = client.get(f"/api/radio/stations/{station['id']}/lineup").json()
+    assert empty["resumable"] is False and empty["tracks"] == []
+
+    first = [track["id"] for track in _next(client, station["id"])["tracks"]]
+    lineup = client.get(f"/api/radio/stations/{station['id']}/lineup").json()
+    assert lineup["resumable"] is True
+    assert [track["id"] for track in lineup["tracks"]] == first
+    assert all(track["reason"] for track in lineup["tracks"])
+
+    # The listener got to the fifth track: coming back starts there.
+    client.post(f"/api/radio/stations/{station['id']}/played", json={"track_ids": first[:5]})
+    lineup = client.get(f"/api/radio/stations/{station['id']}/lineup").json()
+    assert [track["id"] for track in lineup["tracks"]] == first[4:]
+
+    # The next batch joins the lineup behind the first.
+    second = [track["id"] for track in _next(client, station["id"], exclude_track_ids=",".join(map(str, first)))["tracks"]]
+    lineup = client.get(f"/api/radio/stations/{station['id']}/lineup").json()
+    assert [track["id"] for track in lineup["tracks"]] == first[4:] + second
+
+
+def test_a_lineup_older_than_ten_days_starts_over(client, db_session_factory, radio_library):
+    from datetime import datetime, timedelta
+
+    from app.models.radio_station import RadioStation
+
+    station = _station(client, seed_type="track", seed_track_id=radio_library["lp"][2])
+    assert _next(client, station["id"])["tracks"]
+    assert client.get(f"/api/radio/stations/{station['id']}/lineup").json()["resumable"] is True
+
+    db = db_session_factory()
+    try:
+        row = db.query(RadioStation).filter(RadioStation.id == station["id"]).one()
+        row.lineup_saved_at = datetime.utcnow() - timedelta(days=11)
+        db.commit()
+    finally:
+        db.close()
+
+    stale = client.get(f"/api/radio/stations/{station['id']}/lineup").json()
+    assert stale["resumable"] is False and stale["tracks"] == []

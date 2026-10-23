@@ -48,6 +48,20 @@ export async function getStationNext(stationId, { limit = 20, excludeIds = [], s
   };
 }
 
+/**
+ * Where the station was left: its lineup from the track the listener got
+ * to, onward. `resumable` is false when the station has never played or its
+ * lineup is older than ten days; an older server answers 404.
+ */
+export async function getStationLineup(stationId, options) {
+  const data = await apiClient.get(`/api/radio/stations/${stationId}/lineup`, options);
+  return {
+    station: data?.station ?? null,
+    tracks: (data?.tracks || []).map((track) => ({ ...normalizeTrack(track), reason: track.reason ?? null })),
+    resumable: Boolean(data?.resumable),
+  };
+}
+
 /** What the station played; those stay out of the next two hundred. */
 export function reportStationPlays(stationId, trackIds) {
   return apiClient.post(`/api/radio/stations/${stationId}/played`, {

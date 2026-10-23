@@ -15,6 +15,7 @@ import { getTracksByIds } from "../services/tracksService";
 import {
   createStation,
   getStation,
+  getStationLineup,
   getStationNext,
   reportStationPlays,
 } from "../services/radioService";
@@ -289,7 +290,17 @@ export function PlayerProvider({ children }) {
   const playStation = useCallback(
     async (station) => {
       if (!station?.id) return false;
-      const batch = await getStationNext(station.id);
+      // Where the station was left, if it played in the last ten days: that
+      // continues, from the track the listener got to, without asking the
+      // recommender again. An older server has no lineup and answers 404.
+      let batch = null;
+      try {
+        const lineup = await getStationLineup(station.id);
+        if (lineup.resumable && lineup.tracks.length) batch = lineup;
+      } catch {
+        batch = null;
+      }
+      if (!batch) batch = await getStationNext(station.id);
       const tracks = stationBatchCandidates(batch.tracks);
       if (!tracks.length) {
         notify("Nothing in your library to build that station from yet.");

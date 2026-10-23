@@ -54,5 +54,14 @@ class RadioNextResponse(BaseModel):
     thin: bool = False
 
 
+class RadioLineupResponse(BaseModel):
+    station: RadioStationResponse
+    # The lineup from the track the listener got to, onward. Empty when the
+    # station has never played, or its lineup is older than ten days.
+    tracks: list[RadioTrackResponse]
+    resumable: bool = False
+    saved_at: Optional[datetime] = None
+
+
 class RadioPlayedRequest(BaseModel):
     track_ids: list[int] = Field(default_factory=list, max_length=200)

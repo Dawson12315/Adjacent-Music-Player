@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Index, Integer, String, UniqueConstraint
+from sqlalchemy import Column, DateTime, Index, Integer, String, Text, UniqueConstraint
 
 from app.db import Base
 
@@ -28,6 +28,13 @@ class RadioStation(Base):
     name = Column(String, nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     last_played_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    # What the station has handed out, in order, with the reason for each
+    # (a JSON list of {track_id, reason}), and where in it the listener got
+    # to, so coming back to the station continues rather than restarts.
+    # Kept for LINEUP_DAYS after the last play, then it starts over.
+    lineup_json = Column(Text, nullable=True)
+    lineup_position = Column(Integer, nullable=False, default=0)
+    lineup_saved_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("user_id", "seed_key", name="uq_radio_station_seed"),
