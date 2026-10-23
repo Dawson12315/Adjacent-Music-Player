@@ -33,7 +33,9 @@ class RadioStation(Base):
     # to, so coming back to the station continues rather than restarts.
     # Kept for LINEUP_DAYS after the last play, then it starts over.
     lineup_json = Column(Text, nullable=True)
-    lineup_position = Column(Integer, nullable=False, default=0)
+    # A server default too, so the column can be added to a table that
+    # already has stations: the schema sync skips NOT NULL columns without one.
+    lineup_position = Column(Integer, nullable=False, default=0, server_default="0")
     lineup_saved_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
