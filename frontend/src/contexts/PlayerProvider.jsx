@@ -296,13 +296,31 @@ export function PlayerProvider({ children }) {
         return false;
       }
       radioReasonsRef.current = reasonsByTrackId(batch.tracks);
-      setRadioStation(batch.station || station);
+      const played = batch.station || station;
+      setRadioStation(played);
       await playTracks(tracks, radioSource(station.id));
       if (batch.thin) notify(THIN_STATION_NOTICE);
-      return true;
+      return played;
     },
     [notify, playTracks],
   );
+
+  /** "Fresh batch" on the station's page: the next twenty, behind what is queued. */
+  const fetchStationBatch = useCallback(async () => {
+    const source = sourceRef.current;
+    if (!isRadioSource(source)) return false;
+    const held = new Set(queue.map((track) => track?.id));
+    const batch = await getStationNext(source.source_id, { excludeIds: [...held] });
+    const rest = stationBatchCandidates(batch.tracks, { excludeIds: held });
+    if (!rest.length) {
+      notify(EXHAUSTED_STATION_NOTICE);
+      return false;
+    }
+    reasonsByTrackId(batch.tracks).forEach((reason, id) => radioReasonsRef.current.set(id, reason));
+    dispatch({ type: "EXTEND_QUEUE", tracks: [...state.originalQueue, ...rest] });
+    if (batch.thin) notify(THIN_STATION_NOTICE);
+    return true;
+  }, [queue, state.originalQueue, notify]);
 
   /** "Start radio" from a track menu, an album page or an artist page. */
   const startRadio = useCallback(
@@ -323,12 +341,12 @@ export function PlayerProvider({ children }) {
           const batchPromise = getStationNext(station.id, { excludeIds: [seedTrack.id] });
           await playTracks([seedTrack], radioSource(station.id));
           const batch = await batchPromise;
-          if (!isRadioSource(sourceRef.current) || sourceRef.current.source_id !== station.id) return true;
+          if (!isRadioSource(sourceRef.current) || sourceRef.current.source_id !== station.id) return station;
           const rest = stationBatchCandidates(batch.tracks, { excludeIds: new Set([seedTrack.id]) });
           reasonsByTrackId(batch.tracks).forEach((reason, id) => radioReasonsRef.current.set(id, reason));
           if (rest.length) dispatch({ type: "EXTEND_QUEUE", tracks: [seedTrack, ...rest] });
           if (batch.thin) notify(THIN_STATION_NOTICE);
-          return true;
+          return station;
         }
 
         return await playStation(station);
@@ -803,8 +821,10 @@ export function PlayerProvider({ children }) {
       awaitingGesture,
       radioStation,
       radioReason: radioReasonsRef.current.get(String(currentTrackId)) || null,
+      radioReasons: Object.fromEntries(radioReasonsRef.current),
       startRadio,
       playStation,
+      fetchStationBatch,
     }),
     [
       currentTrack,
@@ -846,6 +866,7 @@ export function PlayerProvider({ children }) {
       currentTrackId,
       startRadio,
       playStation,
+      fetchStationBatch,
     ],
   );
 

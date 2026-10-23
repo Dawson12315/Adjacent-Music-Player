@@ -8,7 +8,8 @@ import { useLibrary } from "../contexts/LibraryContext";
 import { usePageMeta } from "../contexts/PageMetaContext";
 import { usePlayer } from "../contexts/PlayerContext";
 import { useDismissable } from "../hooks/useDismissable";
-import { useNavigation } from "../hooks/useNavigation";
+import { useNavigate } from "react-router-dom";
+import { buildStationPath, useNavigation } from "../hooks/useNavigation";
 import { getArtistGenres } from "../services/artistsService";
 import { artworkUrl } from "../config";
 import { getArtistArtworkPath, resolveAlbumArtwork } from "../utils/artwork";
@@ -26,6 +27,7 @@ export function PageHeader() {
     useLibrary();
   const { meta } = usePageMeta();
   const { playTracks, startRadio } = usePlayer();
+  const navigate = useNavigate();
   const {
     activeView,
     selectedArtist,
@@ -79,8 +81,8 @@ export function PageHeader() {
     return () => controller.abort();
   }, [selectedArtist, genreRefreshKey]);
 
-  // Home owns its own greeting.
-  if (activeView === "home") {
+  // Home owns its own greeting; a station's page owns its banner.
+  if (activeView === "home" || activeView === "station") {
     return null;
   }
 
@@ -221,7 +223,9 @@ export function PageHeader() {
                     selectedAlbum
                       ? { album: { name: selectedAlbum, artist: selectedAlbumArtist } }
                       : { artist: selectedArtist },
-                  )
+                  ).then((station) => {
+                    if (station?.id) navigate(buildStationPath(station.id));
+                  })
                 }
               >
                 <Icon name="radio" size={14} />

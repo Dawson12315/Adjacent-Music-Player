@@ -1,9 +1,11 @@
 import { useCallback, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { useLibrary } from "../../contexts/LibraryContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { usePlayer } from "../../contexts/PlayerContext";
 import { useDismissable } from "../../hooks/useDismissable";
+import { buildStationPath } from "../../hooks/useNavigation";
 import { resolveAlbumArtwork } from "../../utils/artwork";
 import * as playlistsService from "../../services/playlistsService";
 
@@ -18,6 +20,7 @@ export function useTrackActions() {
   const { playlists, albumArtworkMap, openTrackEditor } = useLibrary();
   const { addToQueue, startRadio } = usePlayer();
   const { notify } = useNotifications();
+  const navigate = useNavigate();
 
   const [openMenuTrackId, setOpenMenuTrackId] = useState(null);
   const [menuDirection, setMenuDirection] = useState("down");
@@ -59,9 +62,12 @@ export function useTrackActions() {
   const handleStartRadio = useCallback(
     (track) => {
       closeMenu();
-      startRadio?.({ track });
+      // The station's page opens once the station exists.
+      Promise.resolve(startRadio?.({ track })).then((station) => {
+        if (station?.id) navigate(buildStationPath(station.id));
+      });
     },
-    [startRadio, closeMenu],
+    [startRadio, closeMenu, navigate],
   );
 
   const handleEdit = useCallback(

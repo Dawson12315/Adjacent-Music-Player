@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { getGreeting, useHomeData } from "./useHomeData";
 import { Artwork } from "../../components/Artwork";
@@ -9,7 +9,7 @@ import { CardGridSkeleton } from "../library/TrackListSkeleton";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { usePlayer } from "../../contexts/PlayerContext";
-import { buildGenrePath, buildPlaylistPath } from "../../hooks/useNavigation";
+import { buildGenrePath, buildPlaylistPath, buildStationPath } from "../../hooks/useNavigation";
 import { resolveAlbumArtwork, resolvePlaylistArtwork, resolveStationArtwork } from "../../utils/artwork";
 import { creditLine, recordArtist } from "../../utils/credits";
 import { stationKindLabel } from "../player/radio";
@@ -25,6 +25,7 @@ export function HomeView() {
   const { currentUser } = useAuth();
   const { playlists, albumArtworkMap, artists, albums, trackCount } = useLibrary();
   const { playTrack, playStation } = usePlayer();
+  const navigate = useNavigate();
   const home = useHomeData();
 
   const playFrom = useCallback(
@@ -90,7 +91,11 @@ export function HomeView() {
                 key={station.id}
                 className="entity-card station-card"
                 type="button"
-                onClick={() => playStation(station)}
+                onClick={() =>
+                  Promise.resolve(playStation(station)).then((played) => {
+                    if (played) navigate(buildStationPath(station.id));
+                  })
+                }
                 aria-label={`Play ${station.name}`}
               >
                 <span className="station-card__art">

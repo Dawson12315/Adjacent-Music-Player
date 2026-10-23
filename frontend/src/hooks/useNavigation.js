@@ -31,6 +31,11 @@ export function buildPlaylistPath(playlistId) {
   return `/playlists/${playlistId}`;
 }
 
+/** A radio station's page. */
+export function buildStationPath(stationId) {
+  return `/radio/${stationId}`;
+}
+
 /**
  * Parsed from the pathname rather than from `useParams`, because route params only
  * accumulate downwards: a layout component rendering the sidebar and header sits above
@@ -69,6 +74,8 @@ function parseLocation(pathname) {
       return name ? { activeView: "tracks", selectedAlbum: name } : { activeView: "albums" };
     case "genres":
       return name ? { activeView: "tracks", selectedGenre: name } : { activeView: "genres" };
+    case "radio":
+      return { activeView: "station", selectedStationId: name ? Number(name) : null };
     default:
       return { activeView: "home" };
   }
@@ -85,6 +92,7 @@ export function useNavigation() {
     selectedAlbum = null,
     selectedGenre = null,
     selectedPlaylistId = null,
+    selectedStationId = null,
   } = parseLocation(pathname);
 
   const searchQuery = searchParams.get("q") || "";
@@ -149,6 +157,7 @@ export function useNavigation() {
       selectedAlbumArtist,
       selectedGenre,
       selectedPlaylistId,
+      selectedStationId,
       searchQuery,
       setSearchQuery,
       page,
@@ -163,6 +172,7 @@ export function useNavigation() {
     }),
     [
       activeView,
+      selectedStationId,
       selectedArtist,
       selectedAlbum,
       selectedAlbumArtist,

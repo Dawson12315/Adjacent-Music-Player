@@ -36,6 +36,9 @@ const GenresView = lazy(() =>
 const PlaylistView = lazy(() =>
   import("./features/playlists/PlaylistView").then((m) => ({ default: m.PlaylistView })),
 );
+const StationView = lazy(() =>
+  import("./features/radio/StationView").then((m) => ({ default: m.StationView })),
+);
 const InsightsView = lazy(() =>
   import("./features/insights/InsightsView").then((m) => ({ default: m.InsightsView })),
 );
@@ -99,6 +102,8 @@ function AuthenticatedApp() {
                 <Route path="/genres/:name" element={<TracksView />} />
 
                 <Route path="/playlists/:playlistId" element={<PlaylistView />} />
+                <Route path="/radio/:stationId" element={<StationView />} />
+                <Route path="/radio/:stationId" element={<StationView />} />
 
                 <Route path="/insights" element={<InsightsView />} />
 

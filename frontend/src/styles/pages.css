@@ -1200,3 +1200,17 @@
   gap: 8px;
   color: var(--blue-300, #8ab4ff);
 }
+
+/* ================================================================== *
+ * A radio station's page
+ * ================================================================== */
+.station-page { padding: var(--space-6) var(--space-8) var(--space-8); max-width: var(--content-max); }
+.station-page__back { display: inline-flex; align-items: center; gap: var(--space-1); background: none; border: 0; padding: 0; margin-bottom: var(--space-4); color: var(--blue-300, #8ab4ff); font: inherit; font-weight: var(--weight-semibold); cursor: pointer; }
+.station-page__back:focus-visible { outline: 2px solid var(--yellow, #ffc93c); outline-offset: 3px; border-radius: var(--radius-sm); }
+.station-page__banner { position: relative; height: 220px; border-radius: var(--radius-xl); overflow: hidden; background: var(--surface); border: 1px solid var(--border, rgba(255, 255, 255, 0.1)); margin-bottom: var(--space-5); }
+.station-page__banner-art { width: 100%; height: 100%; font-size: 220px; border-radius: 0; }
+.station-page__banner-art img { width: 100%; height: 100%; object-fit: cover; }
+.station-page__chip { position: absolute; left: var(--space-4); bottom: var(--space-4); display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border-radius: var(--radius-pill, 999px); background: rgba(10, 12, 17, 0.72); color: var(--yellow, #ffc93c); font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.12em; text-transform: uppercase; }
+.station-page__line { color: var(--text-secondary); font-size: var(--text-sm); margin: 0 0 var(--space-4); }
+.station-page__controls { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-6); }
+.station-page__section { margin-bottom: var(--space-3); }

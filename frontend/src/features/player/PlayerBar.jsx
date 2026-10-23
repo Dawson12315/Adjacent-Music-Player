@@ -6,7 +6,7 @@ import { Icon } from "../../components/Icon";
 import { PlayerProgress } from "./PlayerProgress";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { usePlayer } from "../../contexts/PlayerContext";
-import { buildAlbumPath, buildArtistPath } from "../../hooks/useNavigation";
+import { buildAlbumPath, buildArtistPath, buildStationPath } from "../../hooks/useNavigation";
 import { resolveAlbumArtwork } from "../../utils/artwork";
 import { useDismissable } from "../../hooks/useDismissable";
 import { HandoffPopover } from "./HandoffPopover";
@@ -97,10 +97,14 @@ export function PlayerBar() {
                 )}
                 <span className="player-bar__title">{shownTrack.title}</span>
                 {radioStation?.name && !handoffPlayingElsewhere && (
-                  <span className="player-bar__station" title={radioReason || radioStation.name}>
+                  <Link
+                    className="player-bar__station"
+                    to={buildStationPath(radioStation.id)}
+                    title={radioReason || radioStation.name}
+                  >
                     <Icon name="radio" size={11} />
                     {radioStation.name}
-                  </span>
+                  </Link>
                 )}
               </div>
               <span
