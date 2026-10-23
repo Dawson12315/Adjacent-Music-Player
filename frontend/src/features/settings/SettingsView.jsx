@@ -14,7 +14,7 @@ import * as settingsService from "../../services/settingsService";
 import { purgeTracks } from "../../services/tracksService";
 
 export function SettingsView() {
-  const { notice, notify } = useNotifications();
+  const { notify } = useNotifications();
   const { currentUser } = useAuth();
   const { refreshLibrary, clearTracks } = useLibrary();
   const { clearPlayback } = usePlayer();
@@ -116,10 +116,6 @@ export function SettingsView() {
 
   return (
     <div className="settings-page">
-      <div aria-live="polite">
-        {notice && <div className="settings-notice">{notice}</div>}
-      </div>
-
       <AccountPanel />
 
       <ServerPanel />

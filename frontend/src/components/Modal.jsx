@@ -11,6 +11,15 @@ export function Modal({ title, onClose, children, actions }) {
   const dialogRef = useRef(null);
   const previouslyFocused = useRef(null);
 
+  // Read through a ref so the effect below can run once. It used to depend
+  // on onClose, which callers pass inline; every keystroke in a confirm
+  // field re-rendered the parent, re-ran the effect, and moved focus to the
+  // Close button, so "type migrate to confirm" could not be typed.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     previouslyFocused.current = document.activeElement;
 
@@ -24,7 +33,7 @@ export function Modal({ title, onClose, children, actions }) {
     function handleKeyDown(event) {
       if (event.key === "Escape") {
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -58,7 +67,7 @@ export function Modal({ title, onClose, children, actions }) {
       document.removeEventListener("keydown", handleKeyDown, true);
       previouslyFocused.current?.focus?.();
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div className="modal-overlay" onClick={onClose}>

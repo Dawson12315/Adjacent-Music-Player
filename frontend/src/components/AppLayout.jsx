@@ -14,6 +14,7 @@ import { useLibrary } from "../contexts/LibraryContext";
 import { useNotifications } from "../contexts/NotificationContext";
 import { usePlayer } from "../contexts/PlayerContext";
 import { useNavigation } from "../hooks/useNavigation";
+import { Toast } from "./Toast";
 
 /** Views that browse a list and want the shared search field above them. */
 const SEARCHABLE_VIEWS = new Set(["tracks", "artists", "albums", "genres", "playlist"]);
@@ -22,7 +23,7 @@ export function AppLayout() {
   const location = useLocation();
   const { editingTrack } = useLibrary();
   const { isQueueOpen } = usePlayer();
-  const { notice } = useNotifications();
+  const { notice, clearNotice } = useNotifications();
   const { activeView, searchQuery, setSearchQuery } = useNavigation();
 
   // Every sidebar link calls onNavigate, which is how the drawer closes behind you on
@@ -80,10 +81,7 @@ export function AppLayout() {
 
       <PlayerBar />
 
-      {/* One live region for app-level notices */}
-      <div aria-live="polite" className="visually-hidden">
-        {notice}
-      </div>
+      <Toast notice={notice} onDismiss={clearNotice} />
 
       {editingTrack && <EditTrackModal key={editingTrack.id} />}
     </div>

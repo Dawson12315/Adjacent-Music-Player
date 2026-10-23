@@ -529,3 +529,50 @@ textarea.input {
 .scroll-x::-webkit-scrollbar {
   display: none;
 }
+
+/* ================================================================== *
+ * Toast: the app's one notice, above the player bar
+ * ================================================================== */
+
+.toast-region {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--player-height) + var(--space-4));
+  transform: translateX(-50%);
+  z-index: var(--z-toast);
+  width: min(92vw, 480px);
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--blue-wash);
+  border: 1px solid var(--blue-border);
+  color: var(--blue-100);
+  font-size: var(--text-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+  animation: toast-in 160ms ease-out;
+}
+
+.toast__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast__close {
+  flex: none;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+}
