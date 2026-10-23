@@ -11,7 +11,7 @@ from app import models
 from app.dependencies.auth import PASSWORD_CHANGE_REQUIRED_CODE, PasswordChangeRequired
 from app.config import settings
 from app.db import Base, engine
-from app.db_migrations import run_simple_migrations, sync_model_columns, sync_model_indexes
+from app.db_migrations import dedupe_playlist_tracks, run_simple_migrations, sync_model_columns, sync_model_indexes
 from app.middleware.body_limit import BodySizeLimitMiddleware
 from app.routes.albums import router as albums_router
 from app.routes.artist_edit import router as artist_edit_router
@@ -265,6 +265,7 @@ def on_startup():
     # database was created. Required on PostgreSQL, where the SQLite-only
     # migrations above do not run at all.
     sync_model_columns()
+    dedupe_playlist_tracks()
     sync_model_indexes()
 
     # Jobs die with the process; their locks must not survive it.

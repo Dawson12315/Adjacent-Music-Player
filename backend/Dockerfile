@@ -46,8 +46,11 @@ USER adjacent
 
 EXPOSE 8000
 
+# The liveness probe, not the full health check: the full one answers 503
+# while the music folder is empty or not yet mounted, which marked a fresh
+# install unhealthy for ever when run without the compose file's override.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -sf http://localhost:8000/api/health || exit 1
+    CMD curl -sf http://localhost:8000/api/health/live || exit 1
 
 # Single process by design: the login limiter, the migration guard and the
 # scheduled jobs live in memory. Do not add --workers.

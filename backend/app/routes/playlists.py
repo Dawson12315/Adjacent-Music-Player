@@ -5,6 +5,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import case
 
@@ -402,7 +403,13 @@ def add_track_to_playlist(
     )
 
     db.add(playlist_track)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        # The check above and this insert are two steps; a double tap lands
+        # between them, and the unique pair index catches it here.
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Track already exists in playlist")
 
     record_listening_event(
         db,

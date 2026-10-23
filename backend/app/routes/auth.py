@@ -221,13 +221,30 @@ def login(
     response: Response,
     db: Session = Depends(get_db),
 ):
-    # Both tiers are checked after the password, not before: behind a proxy
-    # that is not trusted to say who the client is, every client shares one
-    # address, and ten wrong guesses by anyone used to lock everyone out —
-    # the account's owner, typing the right password, included. A limiter
-    # that only ever slows *wrong* guesses still stops a brute force cold.
+    # Two tiers, treated differently on purpose. The per-address tier is
+    # checked only after a failed password: behind a proxy that is not
+    # trusted to say who the client is, every client shares one address, and
+    # ten wrong guesses by anyone used to lock everyone out, the account's
+    # owner typing the right password included. The per-username tier is
+    # checked before the password, right or wrong: it is keyed on the
+    # account, so a shared address cannot trip it for a bystander, and a
+    # limiter that never blocks a correct guess does not stop a brute force
+    # at all, it only prices it at one bcrypt per attempt.
     limiter_key = rate_limit_key(request, payload.username)
     name_key = username_key(payload.username)
+
+    held_for = username_login_limiter.retry_after_seconds(name_key)
+    if held_for:
+        logger.warning(
+            "Login for %r refused: the account is held after too many failed attempts (latest from %s)",
+            payload.username.strip(),
+            request.client.host if request.client else "unknown",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts. Try again later.",
+            headers={"Retry-After": str(held_for)},
+        )
 
     user = get_user_by_username(db, payload.username.strip())
 

@@ -342,28 +342,31 @@ def test_recovery_codes_are_keyed_hashes_and_the_username_tier_applies(client, d
     assert good.status_code == 200, good.text
 
 
-def test_the_right_password_is_never_locked_out_by_others_guesses(client):
+def test_a_hammered_account_is_held_for_everyone_until_the_window_passes(client):
+    """The per-username tier is an account lock, not a wrong-guess tax.
+
+    It used to let the right password through while the name was being
+    hammered, which meant a brute force was never stopped, only priced.
+    Now fifty wrong guesses hold the account for the window, owner included;
+    the per-address tier still never blocks a correct password, so a shared
+    proxy address cannot lock a bystander out.
+    """
     from app.services.rate_limit import username_login_limiter
 
     _admin(client)
     for _ in range(60):
         username_login_limiter.record_failure("admin")
 
-    # A wrong guess is refused across clients...
-    wrong = client.post(
-        "/api/auth/login",
-        json={"username": "admin", "password": "not-it"},
-    )
+    wrong = client.post("/api/auth/login", json={"username": "admin", "password": "not-it"})
     assert wrong.status_code == 429
 
-    # ...and the right password still gets in, which is what the owner needs
-    # while somebody else is hammering their username.
-    login = client.post(
-        "/api/auth/login",
-        json={"username": "admin", "password": "test-password-1"},
-    )
-    assert login.status_code == 200, login.text
+    held = client.post("/api/auth/login", json={"username": "admin", "password": "test-password-1"})
+    assert held.status_code == 429
+    assert held.headers.get("retry-after")
+
     username_login_limiter.record_success("admin")
+    login = client.post("/api/auth/login", json={"username": "admin", "password": "test-password-1"})
+    assert login.status_code == 200, login.text
 
 
 def test_renaming_to_a_taken_username_does_not_say_it_is_taken(client):

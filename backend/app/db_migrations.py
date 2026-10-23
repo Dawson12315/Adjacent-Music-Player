@@ -190,6 +190,27 @@ def existing_index_names(table_name: str) -> set[str]:
         return {row[0] for row in rows}
 
 
+def dedupe_playlist_tracks():
+    """One row per (playlist, track), keeping the earliest.
+
+    Older installs could hold the same track twice in a playlist (the add
+    route checked and inserted in two steps). The unique index the model
+    now declares cannot be created over them, so the extras go first.
+    Idempotent and engine-neutral: a plain DELETE with a correlated MIN.
+    """
+    if "playlist_tracks" not in set(inspect(engine).get_table_names()):
+        return
+    with engine.begin() as connection:
+        removed = connection.execute(
+            text(
+                "DELETE FROM playlist_tracks WHERE id NOT IN ("
+                "SELECT MIN(id) FROM playlist_tracks GROUP BY playlist_id, track_id)"
+            )
+        ).rowcount
+    if removed:
+        logger.info("Removed %s duplicate playlist rows before indexing", removed)
+
+
 def sync_model_indexes():
     """Create any index the models declare that the database lacks.
 
