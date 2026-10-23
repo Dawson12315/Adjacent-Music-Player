@@ -20,16 +20,17 @@ In your backend environment:
       - FRONTEND_ORIGIN=https://music.example.com
       # Cookies must be HTTPS-only now that TLS exists.
       - AUTH_COOKIE_SECURE=true
-      # Trust forwarded client IPs ONLY from your proxy's address, so the login
-      # rate limiter sees real clients instead of the proxy. Never "*".
+      # Trust forwarded client IPs ONLY from the web container (172.28.0.3,
+      # its fixed address on adjacent-net) and your proxy, so the login rate
+      # limiter sees real clients instead of the proxy. Never "*".
       #
       # A proxy running on the host does NOT arrive as 127.0.0.1: Docker
-      # rewrites its traffic, so the backend sees the bridge network's gateway.
-      # Find it with
+      # rewrites its traffic, so the backend sees the network's gateway,
+      # 172.28.0.1 with the compose in the deploy guides. Confirm with
       #   docker network inspect adjacent-net --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'
-      # and put that here (or the whole subnet). A proxy in a container has
-      # its own address — see nginx-proxy-manager.md in this folder.
-      - FORWARDED_ALLOW_IPS=172.18.0.1
+      # A proxy in a container has its own address — see
+      # nginx-proxy-manager.md in this folder.
+      - FORWARDED_ALLOW_IPS=172.28.0.3,172.28.0.1
 ```
 
 and in the frontend environment:

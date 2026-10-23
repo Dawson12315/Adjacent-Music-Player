@@ -1,9 +1,18 @@
 name: Build and Publish Docker Images
 
+# Images are published only from a commit whose test run passed: the suite
+# used to run in a separate workflow nobody waited for, so a commit that
+# broke it still reached :latest, and every install that pulled got it.
+# A pushed tag (v1.2.3) is the same build with a version tag on the image,
+# so an install can pin to a release and roll back to the one before.
 on:
+  workflow_run:
+    workflows: [Tests]
+    types: [completed]
+    branches: [main]
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
   workflow_dispatch:
 
 env:
@@ -13,6 +22,7 @@ env:
 
 jobs:
   build-and-push-backend:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,6 +31,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       # arm64 too: Synology's ARM models, Raspberry Pi and Docker Desktop on
       # Apple silicon all pulled an amd64-only image and restart-looped on
@@ -43,9 +55,14 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_BACKEND }}
+          # From the checked-out commit, not the event payload: a workflow_run
+          # event's sha is the branch head, which may already be newer.
+          context: git
           tags: |
             type=raw,value=latest
-            type=sha
+            type=sha,prefix=sha-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push backend image
         uses: docker/build-push-action@v6
@@ -59,6 +76,7 @@ jobs:
           cache-to: type=gha,scope=backend,mode=max
 
   build-and-push-frontend:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -67,6 +85,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       # arm64 too: Synology's ARM models, Raspberry Pi and Docker Desktop on
       # Apple silicon all pulled an amd64-only image and restart-looped on
@@ -89,9 +109,12 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_FRONTEND }}
+          context: git
           tags: |
             type=raw,value=latest
-            type=sha
+            type=sha,prefix=sha-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push frontend image
         uses: docker/build-push-action@v6

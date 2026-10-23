@@ -22,11 +22,16 @@ services:
       # How long a device stays signed in after it last used Adjacent, in
       # minutes. Sessions renew while in use. Default 30 days.
       - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-43200}
-      # Behind a reverse proxy, set this to the proxy's address so the login
-      # rate limiter keys on real client IPs instead of the proxy's. Empty
-      # (the default) means "trust nobody", which is correct for direct/LAN
-      # access. Never set it to "*" on an internet-exposed install.
-      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-}
+      # Whose X-Forwarded-For the login rate limiter believes. The web
+      # container forwards /api/ and sits at a fixed address on adjacent-net,
+      # so by default it is the one trusted proxy: a phone signing in through
+      # the web port is then seen as itself, not as the container. Behind a
+      # reverse proxy add its address too, comma-separated. Never "*" on an
+      # internet-exposed install.
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-172.28.0.3}
+      # The zone scheduled jobs run in (the scan time in Settings, the
+      # nightly backup). Containers are UTC unless told otherwise.
+      - TZ=${TZ:-UTC}
       # Optional. When set, creating the first admin account requires this
       # value — closes the first-run land grab on a fresh public install.
       - SETUP_TOKEN=${SETUP_TOKEN:-}
@@ -42,6 +47,7 @@ services:
         max-size: "10m"
         max-file: "3"
     restart: unless-stopped
+    networks: [adjacent-net]
 
   # Optional — only needed for multi-user mode. Start it with:
   #   docker compose --profile postgres up -d
@@ -69,6 +75,7 @@ services:
         max-size: "10m"
         max-file: "3"
     restart: unless-stopped
+    networks: [adjacent-net]
 
   frontend:
     build:
@@ -78,6 +85,7 @@ services:
       - "5173:8080"
     environment:
       - API_BASE_URL=${API_BASE_URL}
+      - TZ=${TZ:-UTC}
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
       interval: 30s
@@ -93,3 +101,15 @@ services:
         max-size: "10m"
         max-file: "3"
     restart: unless-stopped
+    networks:
+      adjacent-net:
+        ipv4_address: 172.28.0.3
+
+# One named network, so the reverse-proxy guides can join it by name and the
+# web container keeps the address the backend trusts for forwarded headers.
+networks:
+  adjacent-net:
+    name: adjacent-net
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24

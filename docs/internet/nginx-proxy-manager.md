@@ -44,9 +44,9 @@ In the **backend** environment:
       - FRONTEND_ORIGIN=https://music.example.com
       # TLS exists now, so cookies must be HTTPS-only.
       - AUTH_COOKIE_SECURE=true
-      # Trust forwarded client IPs only from NPM. See the note below — the
-      # default of 127.0.0.1 is wrong once the proxy is a container.
-      - FORWARDED_ALLOW_IPS=172.18.0.0/16
+      # Trust forwarded client IPs from the web container (its fixed address)
+      # and from NPM. See the note below.
+      - FORWARDED_ALLOW_IPS=172.28.0.3,172.28.0.0/24
 ```
 
 In the **frontend** environment:
@@ -62,18 +62,21 @@ works, but `/` cannot go stale when the domain changes.
 
 > **`FORWARDED_ALLOW_IPS` deserves a sentence.** The backend reads
 > `X-Forwarded-For` to rate-limit sign-ins by real client IP. It only trusts that
-> header from addresses you list, and the default is `127.0.0.1` — which a
-> containerised NPM never is. Left alone, every request appears to come from the
-> proxy and one person tripping the limiter locks out everyone.
+> header from addresses you list. The deploy guides' compose already trusts the
+> web container at its fixed `172.28.0.3`; once NPM joins `adjacent-net` it has
+> an address on the same `172.28.0.0/24`, so listing the subnet covers it. Left
+> alone, every request through NPM appears to come from the proxy and one person
+> tripping the limiter locks out everyone.
 >
-> Find the subnet:
+> If your network uses a different subnet, find it:
 >
 > ```bash
 > docker network inspect adjacent-net --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
 > ```
 >
-> Use that value. Never `*` — that would let anyone forge a client IP by sending
-> the header themselves.
+> Never `*` — that would let anyone forge a client IP by sending the header
+> themselves. The subnet is safe only because the API port is not published to
+> the outside; keep the `ports:` blocks removed as this guide says.
 
 Redeploy the stack so the new environment takes effect.
 

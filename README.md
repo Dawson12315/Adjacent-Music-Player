@@ -260,12 +260,18 @@ size — is in **[Operating notes](docs/deploy/operating-notes.md)**.
 
 ## Updating
 
-Images are rebuilt and published on every push to `main`, so updating is a pull.
+Images are published from every commit to `main` whose tests passed, so
+updating is a pull.
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
+
+`:latest` follows `main`. Each release is also tagged (`:1.2`, `:1.2.3`) and
+every build carries its commit (`:sha-abcdef0`), so an install can pin to a
+release, and a bad update can be undone by putting the previous tag in the
+compose file and pulling again.
 
 Per platform:
 
