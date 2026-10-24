@@ -16,17 +16,19 @@ const PROGRESS_INTERVAL_MS = 10000;
  * Structural changes are debounced; progress is written on a slow interval while playing
  * and flushed on pause, on unmount, and when the page is hidden.
  */
-export function usePlaybackPersistence({ enabled, snapshot, getCurrentTime, deviceId = null }) {
+export function usePlaybackPersistence({ enabled, snapshot, getCurrentTime, getSource = null, deviceId = null }) {
   const snapshotRef = useRef(snapshot);
   const getCurrentTimeRef = useRef(getCurrentTime);
+  const getSourceRef = useRef(getSource);
   const deviceIdRef = useRef(deviceId);
   const timeoutRef = useRef(null);
 
   useEffect(() => {
     snapshotRef.current = snapshot;
     getCurrentTimeRef.current = getCurrentTime;
+    getSourceRef.current = getSource;
     deviceIdRef.current = deviceId;
-  }, [snapshot, getCurrentTime, deviceId]);
+  }, [snapshot, getCurrentTime, getSource, deviceId]);
 
   const save = useCallback(async () => {
     try {
@@ -34,9 +36,15 @@ export function usePlaybackPersistence({ enabled, snapshot, getCurrentTime, devi
       // A null position means "not yet known" (a restored seek still
       // pending): the write would only replace a real position with zero.
       if (position == null) return;
+      // What the queue is playing from goes up with it. A save without it
+      // used to blank the station on the server every tick, so a reload or
+      // a handoff came back as a bare queue.
+      const source = getSourceRef.current?.() || null;
       await savePlaybackState({
         ...snapshotRef.current,
         currentTimeSeconds: position,
+        sourceType: source?.source_type ?? null,
+        sourceId: source?.source_id ?? null,
         deviceId: deviceIdRef.current,
       });
     } catch (error) {

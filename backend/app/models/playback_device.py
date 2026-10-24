@@ -39,8 +39,15 @@ class PlaybackDevice(Base):
     # moment, carried on hello, not an identity.
     context = Column(String(16), nullable=True)
 
-    # Bumped on every hello and heartbeat; how "online" and "away" are decided.
+    # Bumped on every hello, report and heartbeat; half of how "online" is
+    # decided.
     last_seen_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    # When this device's control socket last went away, and null while it has
+    # one (or has never had one). A device that held a socket and lost it is
+    # unreachable *now*, whatever its last-seen says, so the music must not be
+    # handed to it; a polling client never sets this and keeps the last-seen
+    # grace. Nullable so it can be added to a table that already has rows.
+    away_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     user = relationship("User")

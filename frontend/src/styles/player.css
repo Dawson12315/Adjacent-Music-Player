@@ -468,7 +468,8 @@
   gap: var(--space-3);
 }
 
-.handoff-menu__item:disabled {
+.handoff-menu__item:disabled,
+.handoff-menu__item[aria-disabled="true"] {
   opacity: 0.5;
   cursor: default;
 }

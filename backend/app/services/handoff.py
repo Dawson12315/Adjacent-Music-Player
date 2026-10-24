@@ -124,6 +124,8 @@ def _describe(device: PlaybackDevice, info: dict, now: datetime) -> None:
     device.app_version = info.get("app_version")
     device.context = info.get("context")
     device.last_seen_at = now
+    # Saying hello is the device announcing it is reachable again.
+    device.away_at = None
 
 
 def find_device(db: Session, user_id: int, device_id: str) -> PlaybackDevice | None:
@@ -145,14 +147,85 @@ def require_device(db: Session, user_id: int, device_id: str | None) -> Playback
 
 
 def touch(db: Session, device: PlaybackDevice, now: datetime | None = None) -> None:
+    """The device has been heard from over HTTP: present, whatever its socket did."""
     device.last_seen_at = now or datetime.utcnow()
+    device.away_at = None
     db.commit()
 
 
 def is_online(device: PlaybackDevice, connected: set[str], now: datetime) -> bool:
+    """Whether the music could actually reach this device right now.
+
+    A live socket is proof. Without one, a device that *had* a socket and lost
+    it is away immediately — the frame that carries the music would go nowhere,
+    and waiting out the last-seen grace is how a transfer used to strand the
+    account. Only a client that has never held a socket (the Android service
+    with the app swiped away, a proxy that blocks WebSocket) falls back to the
+    grace, because polling is the only way it can be heard from at all.
+    """
     if device.device_id in connected:
         return True
+    away_at = getattr(device, "away_at", None)
+    if away_at is not None and away_at >= device.last_seen_at:
+        return False
     return now - device.last_seen_at <= timedelta(seconds=AWAY_AFTER_S)
+
+
+def mark_away(db: Session, user_id: int, device_id: str, now: datetime | None = None) -> bool:
+    """This device's socket has gone. True if a row was marked."""
+    device = find_device(db, user_id, device_id)
+    if device is None:
+        return False
+    device.away_at = now or datetime.utcnow()
+    db.commit()
+    return True
+
+
+def mark_present(db: Session, user_id: int, device_id: str, now: datetime | None = None) -> None:
+    """This device has a socket again (or has just polled): it is reachable."""
+    device = find_device(db, user_id, device_id)
+    if device is None:
+        return
+    device.away_at = None
+    device.last_seen_at = now or datetime.utcnow()
+    db.commit()
+
+
+# How many devices an account keeps, and how long an unused one lingers. The
+# picker showed every device the account had ever signed in on, back to a
+# fortnight of throwaway rows; these are what keep that list a list of devices
+# the listener actually has.
+KEEP_DEVICES = 12
+FORGET_DEVICES_AFTER_DAYS = 30
+
+
+def prune_devices(db: Session, user_id: int, now: datetime | None = None) -> int:
+    """Forget devices the listener no longer has. Returns how many went.
+
+    Never touches the device holding the lease, nor anything seen recently:
+    the row being pruned is always one that has not been heard from in a month
+    or has fallen off the end of a long list.
+    """
+    now = now or datetime.utcnow()
+    session = get_or_create_playback_session(db, user_id)
+    rows = (
+        db.query(PlaybackDevice)
+        .filter(PlaybackDevice.user_id == user_id)
+        .order_by(PlaybackDevice.last_seen_at.desc())
+        .all()
+    )
+    cutoff = now - timedelta(days=FORGET_DEVICES_AFTER_DAYS)
+    doomed = [
+        row
+        for index, row in enumerate(rows)
+        if row.id != session.active_device_id
+        and (row.last_seen_at < cutoff or index >= KEEP_DEVICES)
+    ]
+    for row in doomed:
+        db.delete(row)
+    if doomed:
+        db.commit()
+    return len(doomed)
 
 
 def list_devices(
@@ -230,8 +303,14 @@ def apply_state(db: Session, session: PlaybackSession, state: dict, now: datetim
     session.is_playing = bool(state.get("is_playing"))
     session.is_shuffle = bool(state.get("is_shuffle"))
     session.is_loop = bool(state.get("is_loop"))
-    session.source_type = state.get("source_type")
-    session.source_id = state.get("source_id")
+    # Only a payload that names a source changes it. The browser's debounced
+    # save carried no source at all, and assigning straight from it blanked
+    # the station on every tick: a radio handed to another device arrived as
+    # a bare queue with nothing to refill from. "library" is how a client says
+    # "no source" on purpose.
+    if state.get("source_type") is not None:
+        session.source_type = state.get("source_type")
+        session.source_id = state.get("source_id")
     session.state_version = version if version is not None else (session.state_version or 0) + 1
     session.reported_at = now
 
@@ -370,7 +449,10 @@ def report(
         took_spare = True
     elif session.active_device_id != device.id:
         raise HandoffError("device_not_active", "Another device is playing.")
+    # A report is the holder being heard from: it is the freshest proof of
+    # reachability there is, and the picker and the transfer guard read it.
     device.last_seen_at = now
+    device.away_at = None
     if full:
         apply_state(db, session, state, now)
     else:
@@ -410,6 +492,50 @@ def transfer(
     db.commit()
     db.refresh(session)
     return session, target
+
+
+# How long the device a transfer named has to take the music up before the
+# lease goes back where it came from. Long enough for a phone to load a queue
+# and start a stream, short enough that nobody stares at a dead player.
+HANDOVER_GRACE_S = 6
+
+
+def reclaim_unconfirmed_handover(
+    db: Session,
+    user_id: int,
+    target_device_id: str,
+    sender_device_id: str,
+    now: datetime | None = None,
+) -> PlaybackSession | None:
+    """Give the lease back when the device it was handed to never arrived.
+
+    A transfer to a device that has quietly died used to leave the lease on it
+    for good: the `take_over` went to a socket that was gone, nothing came
+    back, and no other device would play because the server still named a
+    holder. Called once, a few seconds after the transfer. Returns the session
+    if it handed back, None if there was nothing to do.
+    """
+    now = now or datetime.utcnow()
+    session = get_or_create_playback_session(db, user_id)
+    target = find_device(db, user_id, target_device_id)
+    if target is None or session.active_device_id != target.id:
+        return None  # someone else has taken it since; not ours to undo
+    if session.reported_at is not None and session.active_since is not None:
+        if session.reported_at > session.active_since:
+            return None  # it arrived and is reporting
+    sender = find_device(db, user_id, sender_device_id)
+    if sender is None or sender.id == target.id:
+        # Nowhere to hand it back to: leave it spare rather than on a device
+        # that is not there, so the next device to press play simply takes it.
+        session.active_device_id = None
+        session.active_since = None
+    else:
+        session.active_device_id = sender.id
+        session.active_since = now
+    session.is_playing = False
+    db.commit()
+    db.refresh(session)
+    return session
 
 
 def release(db: Session, user_id: int, device: PlaybackDevice, now: datetime | None = None) -> PlaybackSession | None:

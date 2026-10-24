@@ -14,6 +14,7 @@ database work; this module runs that work off the event loop with
 import asyncio
 import contextlib
 import logging
+import time
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, WebSocket, status
 from starlette.concurrency import run_in_threadpool
@@ -86,6 +87,21 @@ def _user_from_token(db: Session, token: str | None) -> User | None:
 # --- fan-out helpers (shared by the socket and the twins) --------------------
 
 
+async def _broadcast_devices(user_id: int) -> None:
+    """Send every connected device the device list as it now stands.
+
+    The list used to go out once, when a socket opened, and never again: a
+    client that had been connected for an hour still drew its picker from the
+    devices of an hour ago, marked the wrong device as playing, and disabled
+    the row the listener needed. Each frame is built for its recipient,
+    because the payload says which row is "this device".
+    """
+    connected = hub.connected_device_ids(user_id)
+    for device_id in list(hub.connected_device_ids(user_id)):
+        payload = await run_in_threadpool(_devices_dict, user_id, connected, device_id)
+        await hub.send(user_id, device_id, {"type": "devices", **payload})
+
+
 async def _after_claim(user_id: int, this_device_id: str) -> None:
     """Tell everyone the lease moved: the rest so they pause, the claimer so
     it hears the version the server settled on. A fresh client's counter
@@ -93,6 +109,9 @@ async def _after_claim(user_id: int, this_device_id: str) -> None:
     connected = hub.connected_device_ids(user_id)
     lease = await run_in_threadpool(_lease_dict, user_id, connected, False)
     await hub.broadcast(user_id, {"type": "lease", **lease})
+    # Who is playing is part of the device list too; a picker drawn from a
+    # stale list contradicts the very lease frame above.
+    await _broadcast_devices(user_id)
 
 
 async def _after_report(user_id: int, this_device_id: str, full: bool) -> None:
@@ -111,6 +130,7 @@ async def _after_transfer(user_id: int, target_device_id: str, from_device_id: s
     # well as from the take_over, so its reports go out as the holder's even
     # on a client that reads only one of the two.
     await hub.broadcast(user_id, {"type": "lease", **lease})
+    await _broadcast_devices(user_id)
 
 
 def _lease_dict(user_id: int, connected: set[str], with_state: bool) -> dict:
@@ -210,6 +230,10 @@ async def playback_socket(websocket: WebSocket) -> None:
                 _devices_dict, user_id, hub.connected_device_ids(user_id), device_id
             )
         await websocket.send_json({"type": "devices", **devices})
+        # The others learn a device has arrived (or come back) now, not at the
+        # next lease change: a phone signed in after a browser opened used to
+        # be missing from that browser's picker for the life of its socket.
+        _spawn(_broadcast_devices(user_id))
 
         ping_task = asyncio.create_task(_ping_loop(websocket, user_id, device_id))
 
@@ -223,24 +247,54 @@ async def playback_socket(websocket: WebSocket) -> None:
     finally:
         if ping_task is not None:
             ping_task.cancel()
-            # CancelledError is a BaseException, so suppress it by name — a bare
-            # suppress(Exception) lets it escape into the portal and surface at
-            # the socket's close.
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await ping_task
         if device_id is not None:
-            async with hub.lock(user_id):
-                hub.detach(user_id, device_id, websocket)
-                # A device that already reconnected on a newer socket has not
-                # left; its old handler must not take its lease away.
-                reconnected = hub.is_connected(user_id, device_id)
-                released = (
-                    await run_in_threadpool(_release, user_id, device_id)
-                    if said_bye and not reconnected
-                    else False
-                )
-                if released:
-                    await _after_claim(user_id, device_id)  # lease went spare: others learn of it
+            # On a task of its own, not awaited here: a client that goes
+            # without a goodbye tears this handler down, and the news that it
+            # has gone must not be torn down with it.
+            _spawn(_on_socket_gone(user_id, device_id, websocket, said_bye))
+
+
+# Tasks the handlers hand off to the loop, held so they are not collected
+# half-way through.
+_background: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+    return task
+
+
+async def _on_socket_gone(user_id: int, device_id: str, websocket: WebSocket, said_bye: bool) -> None:
+    """A socket has closed: forget it, and tell the others what that means.
+
+    A goodbye releases the lease. A drop keeps it — the device may be back in
+    a moment and still playing — but marks the device away, so no picker
+    offers it the music, and announces that, so every other device's list
+    stops claiming it can be reached.
+    """
+    try:
+        async with hub.lock(user_id):
+            hub.detach(user_id, device_id, websocket)
+            # A device that already reconnected on a newer socket has not
+            # left; its old handler must not take its lease away.
+            reconnected = hub.is_connected(user_id, device_id)
+            released = (
+                await run_in_threadpool(_release, user_id, device_id)
+                if said_bye and not reconnected
+                else False
+            )
+            if released:
+                await _after_claim(user_id, device_id)  # lease went spare: others learn of it
+            elif not reconnected:
+                await run_in_threadpool(_mark_away, user_id, device_id)
+                connected = hub.connected_device_ids(user_id)
+                lease = await run_in_threadpool(_lease_dict, user_id, connected, False)
+                await hub.broadcast(user_id, {"type": "lease", **lease})
+                await _broadcast_devices(user_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("handoff: socket departure failed")
 
 
 async def _ping_loop(websocket: WebSocket, user_id: int, device_id: str) -> None:
@@ -265,10 +319,17 @@ async def _dispatch(websocket: WebSocket, user_id: int, device_id: str, frame: d
     try:
         if kind == "pong":
             hub.note_pong(user_id, device_id)
+            # Sockets are proof of life on their own, but the stamp is what
+            # the picker prints and what a polling client is judged by, and a
+            # device connected for an hour used to read "last seen an hour
+            # ago" the moment it dropped. Throttled: this is a write.
+            if _should_touch(user_id, device_id):
+                await run_in_threadpool(_touch_device, user_id, device_id)
             return
         if kind == "hello":
             info = DeviceInfo(**{k: v for k, v in frame.items() if k != "type"})
             await run_in_threadpool(_register, user_id, info.model_dump())
+            await _broadcast_devices(user_id)
             return
         if kind == "claim":
             state = ClaimBody(**{k: v for k, v in frame.items() if k != "type"}).state.model_dump()
@@ -300,6 +361,7 @@ async def _dispatch(websocket: WebSocket, user_id: int, device_id: str, frame: d
             async with hub.lock(user_id):
                 await run_in_threadpool(_transfer, user_id, device_id, body.to, state)
                 await _after_transfer(user_id, body.to, device_id)
+            _watch_handover(user_id, body.to, device_id)
             return
         if kind == "command":
             body = CommandBody(**{k: v for k, v in frame.items() if k != "type"})
@@ -331,8 +393,84 @@ def _register(user_id: int, info: dict) -> None:
     db = SessionLocal()
     try:
         handoff.register(db, user_id, info)
+        # Every hello is a chance to forget the devices the listener no longer
+        # has; the list it is about to receive should be a list of real ones.
+        handoff.prune_devices(db, user_id)
     finally:
         db.close()
+
+
+def _mark_away(user_id: int, device_id: str) -> None:
+    db = SessionLocal()
+    try:
+        handoff.mark_away(db, user_id, device_id)
+    finally:
+        db.close()
+
+
+def _touch_device(user_id: int, device_id: str) -> None:
+    db = SessionLocal()
+    try:
+        handoff.mark_present(db, user_id, device_id)
+    finally:
+        db.close()
+
+
+# When each device's last-seen was last written from a pong, so a pong is not
+# a database write every ten seconds per device.
+_touched_at: dict[tuple[int, str], float] = {}
+TOUCH_EVERY_S = 30
+
+
+def _should_touch(user_id: int, device_id: str) -> bool:
+    now = time.monotonic()
+    last = _touched_at.get((user_id, device_id), 0.0)
+    if now - last < TOUCH_EVERY_S:
+        return False
+    _touched_at[(user_id, device_id)] = now
+    if len(_touched_at) > 4096:
+        # Sweep rather than grow forever: drop the oldest half.
+        for key in sorted(_touched_at, key=_touched_at.get)[: len(_touched_at) // 2]:
+            _touched_at.pop(key, None)
+    return True
+
+
+def _reclaim_handover(user_id: int, target_device_id: str, sender_device_id: str) -> bool:
+    db = SessionLocal()
+    try:
+        return handoff.reclaim_unconfirmed_handover(db, user_id, target_device_id, sender_device_id) is not None
+    finally:
+        db.close()
+
+
+def _watch_handover(user_id: int, target_device_id: str, sender_device_id: str) -> None:
+    """A few seconds after a transfer, check the target took the music up.
+
+    If it has not reported by then it was never really there — a tab that
+    closed without a goodbye, a phone that lost its network — and the lease
+    goes back to the sender, paused, and everyone is told. Without this the
+    lease sat on the missing device for good and nothing on the account would
+    play.
+    """
+
+    async def check() -> None:
+        try:
+            await asyncio.sleep(handoff.HANDOVER_GRACE_S)
+            async with hub.lock(user_id):
+                handed_back = await run_in_threadpool(
+                    _reclaim_handover, user_id, target_device_id, sender_device_id
+                )
+                if handed_back:
+                    logger.info(
+                        "handoff: %s never took the music up; handed back to %s",
+                        target_device_id,
+                        sender_device_id,
+                    )
+                    await _after_claim(user_id, sender_device_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("handover watchdog failed")
+
+    _spawn(check())
 
 
 def _claim(user_id: int, device_id: str, state: dict | None) -> None:
@@ -410,13 +548,16 @@ async def http_hello(
     current_user: User = Depends(get_current_user),
 ):
     connected = hub.connected_device_ids(current_user.id)
-    return await run_in_threadpool(_hello_sync, current_user.id, info.model_dump(), connected)
+    result = await run_in_threadpool(_hello_sync, current_user.id, info.model_dump(), connected)
+    _spawn(_broadcast_devices(current_user.id))
+    return result
 
 
 def _hello_sync(user_id: int, info: dict, connected: set[str]) -> dict:
     db = SessionLocal()
     try:
         handoff.register(db, user_id, info)
+        handoff.prune_devices(db, user_id)
         return _devices_dict_sync(db, user_id, connected, info["device_id"])
     finally:
         db.close()
@@ -495,6 +636,7 @@ async def http_transfer(
             await _after_transfer(current_user.id, body.to, device_id)
     except HandoffError as error:
         _raise(error)
+    _watch_handover(current_user.id, body.to, device_id)
     return {"ok": True}
 
 

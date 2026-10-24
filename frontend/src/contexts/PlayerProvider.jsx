@@ -79,6 +79,10 @@ export function PlayerProvider({ children }) {
       .catch(() => setRadioStation(null));
   }, []);
 
+  // Who holds the music, for the error path below: the handoff hook mounts
+  // further down, so it is read through a ref kept current each render.
+  const holderNameRef = useRef(null);
+
   const handlePlaybackError = useCallback(
     (error) => {
       setIsPlaying(false);
@@ -88,6 +92,12 @@ export function PlayerProvider({ children }) {
       // leaving a paused bar that looks like nothing happened.
       if (error.kind === "autoplay-blocked") {
         setAwaitingGesture(true);
+        return;
+      }
+      // A stream refused because another device is playing surfaces as a
+      // media error, and the generic text said the format was unsupported.
+      if (error.kind === "media-error" && holderNameRef.current) {
+        notify(`Playing on ${holderNameRef.current}. Press play here to bring it to this browser.`);
         return;
       }
       notify(error.message);
@@ -112,7 +122,7 @@ export function PlayerProvider({ children }) {
     holdSource,
   });
 
-  const { audioRef, currentTime, duration, seek, requestSeek, hasPendingSeek } = audio;
+  const { audioRef, currentTime, duration, seek, requestSeek, hasPendingSeek, hasSource } = audio;
 
   const getPosition = useCallback(() => audioRef.current?.currentTime ?? 0, [audioRef]);
   const getDuration = useCallback(() => audioRef.current?.duration || null, [audioRef]);
@@ -152,18 +162,35 @@ export function PlayerProvider({ children }) {
 
         if (cancelled) return;
 
+        // The saved index is the server's; the resolved list may be shorter
+        // (a track cleaned up since) and the index must land inside it.
+        const byId = saved.currentTrackId != null
+          ? restoredQueue.findIndex((item) => item?.id === saved.currentTrackId)
+          : -1;
+        const restoredIndex =
+          byId >= 0
+            ? byId
+            : Math.min(Math.max(0, Number(saved.queueIndex) || 0), Math.max(0, restoredQueue.length - 1));
         const restoredTrack =
-          restoredQueue[saved.queueIndex] ??
+          restoredQueue[restoredIndex] ??
           (saved.currentTrackId
             ? (await getTracksByIds([saved.currentTrackId]))[0] ?? null
             : null);
 
         if (cancelled) return;
 
+        // What the queue was playing from comes back with it, so a station
+        // is still a station after a reload: chip, page and refills intact.
+        sourceRef.current = {
+          source_type: saved.sourceType ?? DEFAULT_SOURCE.source_type,
+          source_id: saved.sourceId ?? null,
+        };
+        syncStationFromSource(sourceRef.current);
+
         dispatch({
           type: "RESTORE",
           queue: restoredQueue,
-          queueIndex: saved.queueIndex,
+          queueIndex: restoredQueue.length ? restoredIndex : saved.queueIndex,
           currentTrack: restoredTrack,
           isShuffle: saved.isShuffle,
           isLoop: saved.isLoop,
@@ -193,12 +220,14 @@ export function PlayerProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [currentUser, libraryLoading, hasRestored, requestSeek]);
+  }, [currentUser, libraryLoading, hasRestored, requestSeek, syncStationFromSource]);
 
   /* ---------- persistence ---------- */
 
   const queueTrackIds = useMemo(() => queue.map((track) => track.id), [queue]);
 
+  // The source is read live at save time (it lives in a ref), so a station
+  // started a moment ago is saved as one: see usePlaybackPersistence.
   const snapshot = useMemo(
     () => ({
       currentTrackId,
@@ -254,8 +283,10 @@ export function PlayerProvider({ children }) {
         events.skipped(currentTrack);
       }
 
-      await claimBeforePlay({ trackId: track.id, position: 0, playing: true });
+      // The source first: the claim snapshots it, and a claim that carried the
+      // previous source told the server a station was a library queue.
       sourceRef.current = source;
+      await claimBeforePlay({ trackId: track.id, position: 0, playing: true });
       // Anything but the station's own batches ends the station.
       if (!isRadioSource(source)) {
         setRadioStation(null);
@@ -271,8 +302,8 @@ export function PlayerProvider({ children }) {
     async (tracksToPlay, source = DEFAULT_SOURCE) => {
       if (tracksToPlay.length === 0) return;
 
-      await claimBeforePlay({ trackId: tracksToPlay[0]?.id ?? null, position: 0, playing: true });
       sourceRef.current = source;
+      await claimBeforePlay({ trackId: tracksToPlay[0]?.id ?? null, position: 0, playing: true });
       if (!isRadioSource(source)) {
         setRadioStation(null);
         radioReasonsRef.current = new Map();
@@ -589,12 +620,15 @@ export function PlayerProvider({ children }) {
       queue: queueTrackIds,
       index: queueIndex,
       position: getPosition(),
-      playing: isPlaying,
+      // "Playing" to the other devices means audio is actually attached and
+      // rolling here. An element with no stream reported itself playing,
+      // took the lease, and silenced every other device for nothing.
+      playing: isPlaying && hasSource(),
       shuffle: isShuffle,
       loop: isLoop,
       source: getSource(),
     }),
-    [currentTrackId, queueTrackIds, queueIndex, getPosition, isPlaying, isShuffle, isLoop, getSource],
+    [currentTrackId, queueTrackIds, queueIndex, getPosition, isPlaying, isShuffle, isLoop, getSource, hasSource],
   );
 
   const handoffPauseForRemote = useCallback(() => setIsPlaying(false), []);
@@ -629,7 +663,15 @@ export function PlayerProvider({ children }) {
           isShuffle: Boolean(serverState.is_shuffle),
           isLoop: Boolean(serverState.is_loop),
         });
-        const position = Number(serverState.current_time_seconds) || 0;
+        // Where the other device is *now*: its last report plus the time
+        // since, while it was playing. Reports are five seconds apart, and
+        // a take-over used to land up to that far behind.
+        const reportedAtMs = serverState.reported_at ? Date.parse(serverState.reported_at) : NaN;
+        const position = interpolatedPosition({
+          position: Number(serverState.current_time_seconds) || 0,
+          playing: Boolean(serverState.is_playing),
+          reportedAtMs: Number.isFinite(reportedAtMs) ? reportedAtMs : null,
+        });
         if (position > 0) requestSeek(position, startTrack.id);
         // The browser may refuse autoplay without a gesture; the bar then
         // asks for the tap and the lease stays here, paused, with the pause
@@ -693,6 +735,7 @@ export function PlayerProvider({ children }) {
   // this browser, which is the only thing they could usefully do.
   const handoffPlayingElsewhere =
     handoff.available && !handoff.isActiveHere && Boolean(handoff.activeDeviceId) && !handoff.stale;
+  holderNameRef.current = handoffPlayingElsewhere ? handoff.activeName || "another device" : null;
 
   const { claim: handoffClaim, reportPosition: handoffReport, isActiveHere: handoffActiveHere, leaseKnown } = handoff;
   handoffClaimRef.current = handoffClaim;
@@ -771,6 +814,9 @@ export function PlayerProvider({ children }) {
       handoffReport({ playing: false });
       return undefined;
     }
+    // At once on the way in too, so the others see the music start rather
+    // than a pause that lasts until the first five-second tick.
+    handoffReport();
     const id = setInterval(() => handoffReport(), 5000);
     return () => clearInterval(id);
   }, [handoffActiveHere, isPlaying, handoffReport]);
@@ -790,6 +836,7 @@ export function PlayerProvider({ children }) {
     enabled: Boolean(currentUser) && hasRestored && !handoffPlayingElsewhere,
     snapshot,
     getCurrentTime: getPersistedPosition,
+    getSource,
     deviceId: handoff.me?.deviceId ?? null,
   });
 

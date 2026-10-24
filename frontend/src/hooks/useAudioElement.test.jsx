@@ -61,3 +61,44 @@ describe("useAudioElement and the lease hold", () => {
     expect(audio.play).not.toHaveBeenCalled();
   });
 });
+
+describe("useAudioElement never plays an empty element", () => {
+  it("attaches the source before play when the element has none", () => {
+    // The track arrives while the lease is unknown; the hold lifts in the
+    // same render as the play. Whatever the order, play() must find a src.
+    const { audio, hook } = mount({ track: { id: 7 }, isPlaying: true, volume: 1, isMuted: false, holdSource: true });
+    hook.rerender({ track: { id: 7 }, isPlaying: true, volume: 1, isMuted: false, holdSource: true });
+    expect(audio.src).toBe("");
+
+    hook.rerender({ track: { id: 7 }, isPlaying: true, volume: 1, isMuted: false, holdSource: false });
+    expect(audio.src).toContain("/api/tracks/7/stream");
+    expect(audio.load).toHaveBeenCalled();
+    expect(audio.play).toHaveBeenCalled();
+    expect(hook.result.current.hasSource()).toBe(true);
+  });
+
+  it("re-points an element something emptied, without reloading one that is fine", () => {
+    // Mounted held, so the lift is a dependency change the effects see.
+    const { audio, hook } = mount({ track: { id: 3 }, isPlaying: false, volume: 1, isMuted: false, holdSource: true });
+    hook.rerender({ track: { id: 3 }, isPlaying: false, volume: 1, isMuted: false, holdSource: false });
+    expect(audio.load).toHaveBeenCalledTimes(1);
+
+    // A pause/resume on a loaded element is not a reload: the position would go.
+    hook.rerender({ track: { id: 3 }, isPlaying: true, volume: 1, isMuted: false, holdSource: false });
+    expect(audio.load).toHaveBeenCalledTimes(1);
+    expect(audio.play).toHaveBeenCalledTimes(1);
+
+    // The element lost its source behind the hook's back (a fresh element,
+    // a reset): the next play attaches it again.
+    audio.src = "";
+    hook.rerender({ track: { id: 3 }, isPlaying: false, volume: 1, isMuted: false, holdSource: false });
+    hook.rerender({ track: { id: 3 }, isPlaying: true, volume: 1, isMuted: false, holdSource: false });
+    expect(audio.src).toContain("/api/tracks/3/stream");
+    expect(audio.load).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports no source until one is attached", () => {
+    const { hook } = mount({ track: null, isPlaying: false, volume: 1, isMuted: false, holdSource: false });
+    expect(hook.result.current.hasSource()).toBe(false);
+  });
+});

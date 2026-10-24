@@ -241,6 +241,7 @@ export function PlayerBar() {
             {handoffOpen ? (
               <HandoffPopover
                 devices={handoff.devices}
+                activeDeviceId={handoff.activeDeviceId ?? null}
                 onChoose={(deviceId) => {
                   setHandoffOpen(false);
                   // "This browser" is a transfer to ourselves: the holder's queue

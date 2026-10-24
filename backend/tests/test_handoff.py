@@ -580,3 +580,204 @@ def test_health_advertises_handoff(client):
     body = client.get("/api/health").json()
     assert body["api_version"] >= 8
     assert "device-handoff" in body["capabilities"]
+
+
+# --- the lease tells the truth (pass 1 of the handoff audit) ------------------
+
+
+def test_a_device_that_lost_its_socket_is_away_at_once(svc, db_session_factory):
+    """A fresh last-seen used to keep a dead device "online" for a minute, and
+    a transfer to it stranded the account. Losing the socket is losing
+    reachability, immediately; a polling client that never had a socket keeps
+    the grace."""
+    from app.services import handoff
+
+    db = db_session_factory()
+    try:
+        b = handoff.register(db, svc, {"device_id": "b", "name": "B", "kind": "web"})
+        now = datetime.utcnow()
+        assert handoff.is_online(b, set(), now) is True  # just said hello, polling grace
+
+        handoff.mark_away(db, svc, "b", now=now + timedelta(seconds=1))
+        db.refresh(b)
+        assert handoff.is_online(b, set(), now + timedelta(seconds=2)) is False
+        # A live socket is proof regardless of the stamp.
+        assert handoff.is_online(b, {"b"}, now + timedelta(seconds=2)) is True
+
+        # Heard from again: present.
+        handoff.mark_present(db, svc, "b", now=now + timedelta(seconds=3))
+        db.refresh(b)
+        assert b.away_at is None
+        assert handoff.is_online(b, set(), now + timedelta(seconds=4)) is True
+    finally:
+        db.close()
+
+
+def test_a_transfer_to_a_device_that_just_dropped_is_refused(svc, db_session_factory):
+    from app.services import handoff
+    from app.services.handoff import HandoffError
+
+    db = db_session_factory()
+    try:
+        a = handoff.register(db, svc, {"device_id": "a", "name": "A", "kind": "phone"})
+        handoff.register(db, svc, {"device_id": "b", "name": "B", "kind": "web"})
+        handoff.claim(db, svc, a, None)
+        # b said hello a moment ago, then its socket died.
+        handoff.mark_away(db, svc, "b")
+
+        with pytest.raises(HandoffError) as caught:
+            handoff.transfer(db, svc, a, "b", None, connected=set())
+        assert caught.value.code == "device_away"
+        session = handoff.get_or_create_playback_session(db, svc)
+        assert session.active_device_id == a.id  # the lease did not move
+    finally:
+        db.close()
+
+
+def test_an_unconfirmed_handover_goes_back_to_the_sender(svc, db_session_factory):
+    """The device the lease was handed to never reported: it was not really
+    there. The lease returns to the sender, paused, rather than sitting on a
+    device that cannot play."""
+    from app.services import handoff
+
+    db = db_session_factory()
+    try:
+        a = handoff.register(db, svc, {"device_id": "a", "name": "A", "kind": "phone"})
+        b = handoff.register(db, svc, {"device_id": "b", "name": "B", "kind": "web"})
+        t0 = datetime.utcnow()
+        handoff.claim(db, svc, a, _state(None, []), now=t0)
+        session, target = handoff.transfer(db, svc, a, "b", None, connected={"b"}, now=t0 + timedelta(seconds=1))
+        assert session.active_device_id == b.id
+
+        # Nothing heard from b: back it goes.
+        handed = handoff.reclaim_unconfirmed_handover(db, svc, "b", "a", now=t0 + timedelta(seconds=8))
+        assert handed is not None
+        assert handed.active_device_id == a.id
+        assert handed.is_playing is False
+
+        # Hand it over again, and this time b reports: the lease stays with b.
+        handoff.transfer(db, svc, a, "b", None, connected={"b"}, now=t0 + timedelta(seconds=10))
+        handoff.report(db, svc, b, {"current_track_id": None, "queue_index": 0, "current_time_seconds": 3,
+                                    "is_playing": True, "is_shuffle": False, "is_loop": False},
+                       now=t0 + timedelta(seconds=12))
+        assert handoff.reclaim_unconfirmed_handover(db, svc, "b", "a", now=t0 + timedelta(seconds=17)) is None
+        session = handoff.get_or_create_playback_session(db, svc)
+        assert session.active_device_id == b.id
+    finally:
+        db.close()
+
+
+def test_pruning_keeps_the_holder_and_the_recent_and_forgets_the_rest(svc, db_session_factory):
+    from app.services import handoff
+
+    db = db_session_factory()
+    try:
+        now = datetime.utcnow()
+        # Fifteen devices: the holder is the oldest of all, four are a month
+        # stale, and the rest overflow the keep list.
+        rows = []
+        for i in range(15):
+            d = handoff.register(db, svc, {"device_id": f"d{i:02d}", "name": f"D{i}", "kind": "web"})
+            rows.append(d)
+        holder = rows[0]
+        holder.last_seen_at = now - timedelta(days=90)
+        for d in rows[1:5]:
+            d.last_seen_at = now - timedelta(days=40)
+        for i, d in enumerate(rows[5:]):
+            d.last_seen_at = now - timedelta(minutes=i)
+        db.commit()
+        handoff.claim(db, svc, holder, None, now=now)
+
+        gone = handoff.prune_devices(db, svc, now=now)
+        left = {d.device_id for d in db.query(handoff.PlaybackDevice).filter_by(user_id=svc).all()}
+        assert "d00" in left  # the holder survives whatever its age
+        assert not any(f"d{i:02d}" in left for i in range(1, 5))  # the month-old ones are gone
+        assert len(left) <= handoff.KEEP_DEVICES
+        assert gone == 15 - len(left)
+    finally:
+        db.close()
+
+
+def test_a_claim_sends_everyone_a_fresh_device_list(client, db_session_factory):
+    """The device list used to arrive once, at connect. After a claim every
+    socket gets the list again, with the new holder marked, so a picker never
+    disables the row the listener needs."""
+    _admin(client)
+    tid = _make_track(db_session_factory, "/h/list.flac")
+
+    with client.websocket_connect("/api/playback/ws") as a, client.websocket_connect("/api/playback/ws") as b:
+        a.send_json(HELLO_A)
+        assert a.receive_json()["type"] == "devices"
+        b.send_json(HELLO_B)
+        assert b.receive_json()["type"] == "devices"
+
+        a.send_json({"type": "claim", "state": _state(tid, [tid])})
+        # a's arrival already sent b a list; read on until the one that
+        # follows the claim, with a marked as playing.
+        rows, saw_lease = None, False
+        for _ in range(8):
+            frame = b.receive_json()
+            if frame["type"] == "lease":
+                saw_lease = True
+            if frame["type"] == "devices":
+                rows = {row["device_id"]: row for row in frame["devices"]}
+                if rows.get("dev-a", {}).get("is_active"):
+                    break
+        assert saw_lease
+        assert rows["dev-a"]["is_active"] is True
+        assert rows["dev-b"]["is_active"] is False
+        assert rows["dev-b"]["is_this_device"] is True
+
+
+def test_a_dropped_socket_tells_the_others_the_device_is_away(client, db_session_factory):
+    """A device that vanishes without a goodbye is announced as away so no
+    picker offers it the music."""
+    _admin(client)
+
+    with client.websocket_connect("/api/playback/ws") as b:
+        b.send_json(HELLO_B)
+        assert b.receive_json()["type"] == "devices"
+        with client.websocket_connect("/api/playback/ws") as a:
+            a.send_json(HELLO_A)
+            assert a.receive_json()["type"] == "devices"
+            # b hears a arrive? (no frame is promised for a plain hello; drain nothing)
+        # a's context closed without a bye: a drop. Lists from a's arrival
+        # and the keepalive ping may be queued ahead; read until the list
+        # that shows a as unreachable.
+        rows = None
+        for _ in range(10):
+            frame = b.receive_json()
+            if frame["type"] != "devices":
+                continue
+            rows = {row["device_id"]: row for row in frame["devices"]}
+            if "dev-a" in rows and rows["dev-a"]["online"] is False:
+                break
+        assert rows is not None and rows["dev-a"]["online"] is False
+
+    polled = client.get("/api/playback/devices", headers={"X-Adjacent-Device": "dev-b"}).json()
+    assert {row["device_id"]: row["online"] for row in polled["devices"]}["dev-a"] is False
+
+
+def test_a_save_that_names_no_source_keeps_the_one_there(svc, db_session_factory):
+    """The browser's debounced save carried no source and used to blank the
+    station on every tick. A payload names a source to change it; "library"
+    is how a client clears it on purpose."""
+    from app.services import handoff
+
+    db = db_session_factory()
+    try:
+        a = handoff.register(db, svc, {"device_id": "a", "name": "A", "kind": "phone"})
+        with_station = {**_state(None, [], version=1), "source_type": "radio", "source_id": 7}
+        handoff.claim(db, svc, a, with_station)
+        session = handoff.get_or_create_playback_session(db, svc)
+        assert (session.source_type, session.source_id) == ("radio", 7)
+
+        handoff.report(db, svc, a, _state(None, [], version=2), full=True)  # no source fields
+        db.refresh(session)
+        assert (session.source_type, session.source_id) == ("radio", 7)
+
+        handoff.report(db, svc, a, {**_state(None, [], version=3), "source_type": "library", "source_id": None}, full=True)
+        db.refresh(session)
+        assert (session.source_type, session.source_id) == ("library", None)
+    finally:
+        db.close()

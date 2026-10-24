@@ -46,17 +46,32 @@ export async function getTrack(trackId, options) {
  * Resolve many tracks by id, in the order asked for. Used to rebuild a saved playback
  * queue after a reload, now that the whole library is no longer held in memory.
  */
+// The most ids one by-ids request carries: the server's own limit on the
+// route. Longer lists go up in pages and come back whole.
+const TRACKS_BY_IDS_PAGE = 500;
+
 export async function getTracksByIds(ids, options) {
   if (!ids || ids.length === 0) {
     return [];
   }
 
-  const data = await apiClient.get("/api/tracks/by-ids", {
-    ...options,
-    params: { ids: ids.slice(0, 500).join(",") },
-  });
+  // A queue can be up to the server's five thousand; the request used to be
+  // cut to the first five hundred without a word, and a long "play all"
+  // restored or handed over lost its tail.
+  const pages = [];
+  for (let start = 0; start < ids.length; start += TRACKS_BY_IDS_PAGE) {
+    pages.push(ids.slice(start, start + TRACKS_BY_IDS_PAGE));
+  }
+  const results = await Promise.all(
+    pages.map((page) =>
+      apiClient.get("/api/tracks/by-ids", {
+        ...options,
+        params: { ids: page.join(",") },
+      }),
+    ),
+  );
 
-  return normalizeTracks(data, { metadataComplete: true });
+  return results.flatMap((data) => normalizeTracks(data, { metadataComplete: true }));
 }
 
 /** Every track for one artist. Exact, case-insensitive match on the credited artists. */

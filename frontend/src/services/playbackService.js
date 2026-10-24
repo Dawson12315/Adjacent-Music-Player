@@ -20,6 +20,8 @@ export async function getPlaybackState(options) {
     isShuffle: data.is_shuffle,
     isLoop: data.is_loop,
     queueTrackIds: data.queue_track_ids || [],
+    sourceType: data.source_type ?? null,
+    sourceId: data.source_id ?? null,
   };
 }
 
@@ -36,6 +38,8 @@ export function savePlaybackState({
   isShuffle,
   isLoop,
   queueTrackIds,
+  sourceType = null,
+  sourceId = null,
   deviceId = null,
 }) {
   return apiClient.put(
@@ -49,6 +53,8 @@ export function savePlaybackState({
       is_shuffle: isShuffle,
       is_loop: isLoop,
       queue_track_ids: queueTrackIds,
+      // Omitted (null) leaves the server's source alone; named, it is set.
+      ...(sourceType ? { source_type: sourceType, source_id: sourceId ?? null } : {}),
     },
     deviceId ? { headers: { "X-Adjacent-Device": deviceId } } : undefined,
   );

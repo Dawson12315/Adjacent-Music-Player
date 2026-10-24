@@ -15,6 +15,7 @@ class PlaybackStateResponse(BaseModel):
     source_type: Optional[str] = None
     source_id: Optional[int] = None
     version: Optional[int] = None
+    reported_at: Optional[str] = None
 
 
 class PlaybackStateUpdate(BaseModel):

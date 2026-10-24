@@ -36,8 +36,29 @@ export function useAudioElement({ track, isPlaying, volume, isMuted, onPlaybackE
   const pendingSeekRef = useRef(null);
   const playGenerationRef = useRef(0);
   const errorHandlerRef = useRef(onPlaybackError);
+  // The stream URL last given to the element, so a play never finds the
+  // element empty. Whatever order the lease, the track and the element's
+  // own mounting arrive in, play() is only ever called on an element that
+  // has been pointed at the track.
+  const assignedSrcRef = useRef("");
 
   const trackId = track?.id ?? null;
+
+  /** Point the element at the track unless it already is. True if it changed. */
+  const ensureSource = useCallback((audio, forTrackId) => {
+    const url = streamUrl(forTrackId);
+    if (assignedSrcRef.current === url && audio.src) {
+      return false;
+    }
+    playGenerationRef.current += 1;
+    assignedSrcRef.current = url;
+    audio.src = url;
+    audio.load();
+    return true;
+  }, []);
+
+  /** Whether the element currently has a stream to play. */
+  const hasSource = useCallback(() => Boolean(audioRef.current?.src), []);
 
   useEffect(() => {
     errorHandlerRef.current = onPlaybackError;
@@ -81,10 +102,8 @@ export function useAudioElement({ track, isPlaying, volume, isMuted, onPlaybackE
       return;
     }
 
-    playGenerationRef.current += 1;
-    audio.src = streamUrl(trackId);
-    audio.load();
-  }, [trackId, holdSource]);
+    ensureSource(audio, trackId);
+  }, [trackId, holdSource, ensureSource]);
 
   // Mirror the desired play state onto the element. Held for the same
   // reason the source is: while another device holds the lease the element
@@ -103,12 +122,15 @@ export function useAudioElement({ track, isPlaying, volume, isMuted, onPlaybackE
     }
 
     // An element whose last load failed (a stream refused while another
-    // device was playing) rejects play() for good without a fresh load.
+    // device was playing) rejects play() for good without a fresh load; and
+    // an element that was never given this track — the source effect ran
+    // while the lease was still unknown, or before the element existed —
+    // would "play" silence forever while the bar showed the track rolling.
     if (audio.error) {
       playGenerationRef.current += 1;
-      audio.src = streamUrl(trackId);
-      audio.load();
+      assignedSrcRef.current = "";
     }
+    ensureSource(audio, trackId);
 
     const generation = playGenerationRef.current;
     const result = audio.play();
@@ -128,7 +150,7 @@ export function useAudioElement({ track, isPlaying, volume, isMuted, onPlaybackE
         });
       });
     }
-  }, [isPlaying, trackId, holdSource]);
+  }, [isPlaying, trackId, holdSource, ensureSource]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -192,6 +214,7 @@ export function useAudioElement({ track, isPlaying, volume, isMuted, onPlaybackE
     seek,
     requestSeek,
     hasPendingSeek,
+    hasSource,
     handleTimeUpdate,
     handleLoadedMetadata,
     handleError,

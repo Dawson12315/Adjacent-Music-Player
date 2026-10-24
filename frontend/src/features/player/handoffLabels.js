@@ -19,3 +19,10 @@ export function statusLine(device) {
   if (device.online) return device.context === "carplay" ? "Ready · CarPlay" : "Ready";
   return lastSeenLabel(device.last_seen_at);
 }
+
+/** Why a row cannot be picked, in the words the row shows; null if it can. */
+export function unpickableReason(device) {
+  if (device.is_active) return "Already playing here";
+  if (!device.online) return "Not reachable right now";
+  return null;
+}

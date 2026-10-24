@@ -34,16 +34,10 @@ def get_playback_state(
     current_user: User = Depends(get_current_user),
 ):
     session = get_or_create_playback_session(db, current_user.id)
-
-    return {
-        "current_track_id": session.current_track_id,
-        "queue_index": session.queue_index,
-        "current_time_seconds": session.current_time_seconds,
-        "is_playing": session.is_playing,
-        "is_shuffle": session.is_shuffle,
-        "is_loop": session.is_loop,
-        "queue_track_ids": [item.track_id for item in session.queue_items],
-    }
+    # The same shape the writes answer with. The read used to leave out the
+    # source, so a phone bringing the music here with "Play here" — which
+    # reads this — got a bare queue where the other device had a station.
+    return _state_response(session)
 
 
 def _state_response(session) -> dict:
@@ -58,6 +52,9 @@ def _state_response(session) -> dict:
         "source_type": session.source_type,
         "source_id": session.source_id,
         "version": session.state_version,
+        # When the holder last reported, so a device taking the music up can
+        # add the time since and land where the holder is now.
+        "reported_at": session.reported_at.isoformat() + "Z" if session.reported_at else None,
     }
 
 
