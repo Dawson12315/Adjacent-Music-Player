@@ -87,7 +87,7 @@ def _user_from_token(db: Session, token: str | None) -> User | None:
 # --- fan-out helpers (shared by the socket and the twins) --------------------
 
 
-async def _broadcast_devices(user_id: int) -> None:
+async def _broadcast_devices(user_id: int, exclude: str | None = None) -> None:
     """Send every connected device the device list as it now stands.
 
     The list used to go out once, when a socket opened, and never again: a
@@ -98,6 +98,8 @@ async def _broadcast_devices(user_id: int) -> None:
     """
     connected = hub.connected_device_ids(user_id)
     for device_id in list(hub.connected_device_ids(user_id)):
+        if device_id == exclude:
+            continue  # it was just handed the list directly
         payload = await run_in_threadpool(_devices_dict, user_id, connected, device_id)
         await hub.send(user_id, device_id, {"type": "devices", **payload})
 
@@ -233,7 +235,7 @@ async def playback_socket(websocket: WebSocket) -> None:
         # The others learn a device has arrived (or come back) now, not at the
         # next lease change: a phone signed in after a browser opened used to
         # be missing from that browser's picker for the life of its socket.
-        _spawn(_broadcast_devices(user_id))
+        _spawn(_broadcast_devices(user_id, exclude=device_id))
 
         ping_task = asyncio.create_task(_ping_loop(websocket, user_id, device_id))
 
@@ -329,7 +331,7 @@ async def _dispatch(websocket: WebSocket, user_id: int, device_id: str, frame: d
         if kind == "hello":
             info = DeviceInfo(**{k: v for k, v in frame.items() if k != "type"})
             await run_in_threadpool(_register, user_id, info.model_dump())
-            await _broadcast_devices(user_id)
+            await _broadcast_devices(user_id, exclude=device_id)
             return
         if kind == "claim":
             state = ClaimBody(**{k: v for k, v in frame.items() if k != "type"}).state.model_dump()
@@ -549,7 +551,7 @@ async def http_hello(
 ):
     connected = hub.connected_device_ids(current_user.id)
     result = await run_in_threadpool(_hello_sync, current_user.id, info.model_dump(), connected)
-    _spawn(_broadcast_devices(current_user.id))
+    _spawn(_broadcast_devices(current_user.id, exclude=info.device_id))
     return result
 
 

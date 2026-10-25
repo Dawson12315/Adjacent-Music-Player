@@ -311,7 +311,12 @@ def test_a_dropped_socket_keeps_the_lease_and_a_bye_gives_it_up(client, db_sessi
         a.send_json(HELLO_A)
         assert a.receive_json()["type"] == "devices"
         a.send_json({"type": "claim", "state": _state(tid, [tid])})
-        # Wait for the claim to land before the socket goes away.
+        # Wait for the claim to land before the socket goes away: the server
+        # echoes it as a lease frame once it is committed. Reading the lease
+        # over HTTP straight after the send raced the commit on Postgres.
+        for _ in range(6):
+            if a.receive_json()["type"] == "lease":
+                break
         held = client.get("/api/playback/devices", headers={"X-Adjacent-Device": "dev-a"}).json()
         assert held["lease"]["active_device_id"] == "dev-a"
     # The context closed the socket without a bye: a drop.
