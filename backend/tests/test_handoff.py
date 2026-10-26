@@ -347,6 +347,11 @@ def test_a_reconnect_while_the_old_socket_lingers_keeps_the_lease(client, db_ses
         old.send_json(HELLO_A)
         assert old.receive_json()["type"] == "devices"
         old.send_json({"type": "claim", "state": _state(tid, [tid])})
+        # The claim is committed once the server echoes it as a lease frame;
+        # reading the lease over HTTP before that raced the commit on CI.
+        for _ in range(6):
+            if old.receive_json()["type"] == "lease":
+                break
         assert client.get("/api/playback/devices", headers={"X-Adjacent-Device": "dev-a"}).json()["lease"]["active_device_id"] == "dev-a"
 
         with client.websocket_connect("/api/playback/ws") as new:
