@@ -786,3 +786,30 @@ def test_a_save_that_names_no_source_keeps_the_one_there(svc, db_session_factory
         assert (session.source_type, session.source_id) == ("library", None)
     finally:
         db.close()
+
+
+def test_a_non_holder_cannot_rewrite_the_record_while_the_holder_merely_pauses(client, db_session_factory):
+    """The stream gate opens when the holder pauses (a second device may
+    start playing); the session record must not. A second device's save
+    used to replace the holder's track, queue and position the moment it
+    paused — or reported paused for an instant mid-buffer."""
+    _admin(client)
+    tid = _make_track(db_session_factory, "/h/record.flac")
+    other = _make_track(db_session_factory, "/h/record-b.flac")
+
+    with client.websocket_connect("/api/playback/ws") as a:
+        a.send_json(HELLO_A)
+        assert a.receive_json()["type"] == "devices"
+        a.send_json({"type": "claim", "state": _state(tid, [tid], playing=False)})
+        for _ in range(6):
+            if a.receive_json()["type"] == "lease":
+                break
+        # The holder is paused and connected. A second device writes.
+        body = {**_state(other, [other]), "version": None}
+        refused = client.put("/api/playback", json=body, headers={"X-Adjacent-Device": "dev-b"})
+        assert refused.status_code == 409
+        held = client.get("/api/playback").json()
+        assert held["current_track_id"] == tid
+        # The holder itself may still write.
+        ok = client.put("/api/playback", json={**_state(tid, [tid], playing=False), "version": None}, headers={"X-Adjacent-Device": "dev-a"})
+        assert ok.status_code == 200

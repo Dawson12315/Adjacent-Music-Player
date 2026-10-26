@@ -9,6 +9,7 @@ from app.models.user import User
 from app.schemas.playback import PlaybackStateResponse, PlaybackStateUpdate
 from app.services.playback import get_or_create_playback_session
 from app.services import handoff
+from app.services.handoff_hub import hub
 
 router = APIRouter()
 
@@ -73,7 +74,7 @@ def update_playback_state(
     # holder writes, a spare or stale lease lets anyone write, and a device
     # that is not the holder while the holder is playing is turned away — a
     # 409 when it named itself, the holder's state unchanged when it did not.
-    if not handoff.stream_allowed(db, current_user.id, x_adjacent_device or "legacy-client"):
+    if not handoff.write_allowed(db, current_user.id, x_adjacent_device or "legacy-client", connected=hub.connected_device_ids(current_user.id)):
         if x_adjacent_device:
             raise HTTPException(
                 status_code=409,

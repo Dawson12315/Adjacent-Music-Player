@@ -110,6 +110,7 @@ async def _after_claim(user_id: int, this_device_id: str) -> None:
     starts low, and without the echo its next report could read as stale."""
     connected = hub.connected_device_ids(user_id)
     lease = await run_in_threadpool(_lease_dict, user_id, connected, False)
+    _log_lease("claim", user_id, this_device_id, lease)
     await hub.broadcast(user_id, {"type": "lease", **lease})
     # Who is playing is part of the device list too; a picker drawn from a
     # stale list contradicts the very lease frame above.
@@ -127,12 +128,31 @@ async def _after_transfer(user_id: int, target_device_id: str, from_device_id: s
     """Send the chosen device the music, and tell the rest who holds it now."""
     connected = hub.connected_device_ids(user_id)
     lease = await run_in_threadpool(_lease_dict, user_id, connected, True)
+    _log_lease("transfer", user_id, f"{from_device_id} -> {target_device_id}", lease)
     await hub.send(user_id, target_device_id, {"type": "take_over", "state": lease["state"]})
     # The target included: it learns it is the holder from the lease frame as
     # well as from the take_over, so its reports go out as the holder's even
     # on a client that reads only one of the two.
     await hub.broadcast(user_id, {"type": "lease", **lease})
     await _broadcast_devices(user_id)
+
+
+def _log_lease(event: str, user_id: int, who: str, lease: dict) -> None:
+    """One line per lease change, so the next 'the music stopped' report
+    comes with its answer attached. Socket and HTTP paths both land here."""
+    state = lease.get("state") or {}
+    logger.info(
+        "lease %s user=%s by=%s holder=%s(%s) stale=%s playing=%s track=%s t=%s",
+        event,
+        user_id,
+        who,
+        lease.get("active_device_name"),
+        (lease.get("active_device_id") or "")[:8],
+        lease.get("stale"),
+        state.get("is_playing"),
+        state.get("current_track_id"),
+        state.get("current_time_seconds"),
+    )
 
 
 def _lease_dict(user_id: int, connected: set[str], with_state: bool) -> dict:
@@ -288,8 +308,10 @@ async def _on_socket_gone(user_id: int, device_id: str, websocket: WebSocket, sa
                 else False
             )
             if released:
+                logger.info("lease released user=%s by=%s (bye)", user_id, device_id[:8])
                 await _after_claim(user_id, device_id)  # lease went spare: others learn of it
             elif not reconnected:
+                logger.info("device away user=%s device=%s (socket gone without bye)", user_id, device_id[:8])
                 await run_in_threadpool(_mark_away, user_id, device_id)
                 connected = hub.connected_device_ids(user_id)
                 lease = await run_in_threadpool(_lease_dict, user_id, connected, False)

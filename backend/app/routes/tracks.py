@@ -220,6 +220,17 @@ MOBILE_CACHE_LOCKS_MAX = 512
 # spawns one transcode per request and starves the host. Threads queue here.
 TRANSCODE_CONCURRENCY = 2
 TRANSCODE_SEMAPHORE = threading.BoundedSemaphore(TRANSCODE_CONCURRENCY)
+# One more slot, reserved for the track a device is playing *right now*. The
+# shared pool used to be first come first served: a phone that started a
+# track asked, two seconds later, for the next track's cache warm-up, and the
+# playing track's build then shared the CPU with it — and the variant switch
+# the starving player tried found no slot at all and was refused. Foreground
+# work takes this slot first and may still use the pool; warm-ups and
+# background variants never touch it.
+FOREGROUND_SEMAPHORE = threading.BoundedSemaphore(1)
+# A wait longer than this is logged, so a slow host shows up in the log
+# before it shows up as silence.
+TRANSCODE_WAIT_LOG_SECONDS = 2.0
 
 # Every streaming handler is a sync `def`, so it occupies one of the ~40 AnyIO
 # worker threads for its whole lifetime. Blocking indefinitely on the
@@ -229,8 +240,33 @@ TRANSCODE_SEMAPHORE = threading.BoundedSemaphore(TRANSCODE_CONCURRENCY)
 TRANSCODE_WAIT_TIMEOUT_SECONDS = 10
 
 # A single song should transcode in seconds; a hung ffmpeg otherwise holds a
-# semaphore slot forever, permanently halving transcode capacity.
+# semaphore slot forever, permanently halving transcode capacity. The flat
+# figure is the floor: a slow host building a long track at around realtime
+# needs longer, and killing it mid-play deleted the cache under the listener.
 FFMPEG_TIMEOUT_SECONDS = 180
+
+
+def ffmpeg_command_prefix(foreground: bool) -> list[str]:
+    """Background work yields the CPU to the track being played.
+
+    A slot keeps the queue honest, but two ffmpeg processes still share the
+    cores: a cache warm-up beside a playing track's build halved the build's
+    speed on a small host, which is how a track ran out of segments at 28
+    seconds. Background jobs run niced and on one thread; the foreground build
+    keeps the rest.
+    """
+    if foreground:
+        return []
+    return ["nice", "-n", "15"] if shutil.which("nice") else []
+
+
+def ffmpeg_timeout_for(duration_seconds: float | None) -> int:
+    """Twice the track's length plus a minute, never below the floor."""
+    try:
+        duration = float(duration_seconds or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    return max(FFMPEG_TIMEOUT_SECONDS, int(duration * 2) + 60)
 
 # Background pre-build threads are fire-and-forget, so repeated requests for
 # the same not-yet-cached variant used to stack one thread per request, all
@@ -240,8 +276,15 @@ _INFLIGHT_GUARD = threading.Lock()
 
 
 @contextmanager
-def transcode_slot(context: str):
-    """Hold one transcode slot, or give up rather than pin a worker thread."""
+def transcode_slot(context: str, *, foreground: bool = False):
+    """Hold one transcode slot, or give up rather than pin a worker thread.
+
+    `foreground` is work for the track a device is playing now: it takes the
+    reserved slot when that is free, and otherwise queues for the shared pool
+    like everything else. Background work (a cache warm-up for the next
+    track, the other HLS quality) uses the pool only, so it can never be the
+    reason the playing track has no CPU.
+    """
     from app.services.stream_cache_maintenance import has_room_for_transcode
 
     # The caches share a volume with the database; filling it takes the whole
@@ -254,9 +297,18 @@ def transcode_slot(context: str):
             detail="The server is out of disk space for audio conversion.",
         )
 
-    acquired = TRANSCODE_SEMAPHORE.acquire(timeout=TRANSCODE_WAIT_TIMEOUT_SECONDS)
+    started = time.monotonic()
+    held = None
+    if foreground and FOREGROUND_SEMAPHORE.acquire(blocking=False):
+        held = FOREGROUND_SEMAPHORE
+    elif TRANSCODE_SEMAPHORE.acquire(timeout=TRANSCODE_WAIT_TIMEOUT_SECONDS):
+        held = TRANSCODE_SEMAPHORE
+    elif foreground and FOREGROUND_SEMAPHORE.acquire(timeout=TRANSCODE_WAIT_TIMEOUT_SECONDS):
+        # The pool stayed full for the whole wait; the reserved slot may have
+        # come free in the meantime.
+        held = FOREGROUND_SEMAPHORE
 
-    if not acquired:
+    if held is None:
         logger.warning("Transcode queue full; refusing %s", context)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -264,10 +316,14 @@ def transcode_slot(context: str):
             headers={"Retry-After": "5"},
         )
 
+    waited = time.monotonic() - started
+    if waited >= TRANSCODE_WAIT_LOG_SECONDS:
+        logger.info("Transcode slot for %s took %.1fs to come free", context, waited)
+
     try:
         yield
     finally:
-        TRANSCODE_SEMAPHORE.release()
+        held.release()
 
 
 @contextmanager
@@ -291,6 +347,10 @@ HLS_SEGMENT_DURATION_SECONDS = 4
 # ffmpeg appends this when an event-style playlist is finished.
 HLS_END_TAG = "#EXT-X-ENDLIST"
 # Segments that must exist before a growing playlist is handed to a player.
+# Two, and served at once. A longer lead was tried for slow hosts and made
+# things worse: the first playlist request then blocked for the better part of
+# twenty seconds, which a cold AVPlayer answers by abandoning the start offset
+# and sitting at the live edge. The lead is the player's to build, from zero.
 HLS_MIN_SEGMENTS_TO_START = 2
 # How long the first request waits for those segments before giving up.
 HLS_START_WAIT_SECONDS = 30
@@ -299,6 +359,8 @@ HLS_START_WAIT_SECONDS = 30
 # build and the requests that arrive during it all wait on the same event.
 _HLS_BUILDS: dict[str, "threading.Event"] = {}
 _HLS_BUILDS_GUARD = threading.Lock()
+# When each build started, for the lead rule above.
+_HLS_BUILD_STARTED: dict[str, float] = {}
 HLS_CACHE_ROOT = Path("data/hls_cache")
 # Matches ffmpeg's -hls_segment_filename output plus the playlist itself.
 HLS_SEGMENT_NAME_PATTERN = re.compile(r"segment_\d{5}\.ts|index\.m3u8")
@@ -553,6 +615,7 @@ def ensure_mobile_stream_cache(
     file_path: Path,
     profile: dict,
     quality: str,
+    foreground: bool = True,
 ) -> Path:
     cache_dir = Path("data/mobile_cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -603,14 +666,14 @@ def ensure_mobile_stream_cache(
 
         logger.info("Transcoding track %s (%s) for mobile cache", track.id, quality)
 
-        with transcode_slot(f"mobile transcode of track {track.id} ({quality})"):
+        with transcode_slot(f"mobile transcode of track {track.id} ({quality})", foreground=foreground):
             try:
                 result = subprocess.run(
-                    ffmpeg_command,
+                    ffmpeg_command_prefix(foreground) + ffmpeg_command + ([] if foreground else ["-threads", "1"]),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    timeout=FFMPEG_TIMEOUT_SECONDS,
+                    timeout=ffmpeg_timeout_for(getattr(track, "duration_seconds", None)),
                 )
             except subprocess.TimeoutExpired:
                 if temp_file_path.exists():
@@ -678,6 +741,8 @@ def _run_hls_build(
     playlist_path: Path,
     done: "threading.Event",
     cache_key: str,
+    foreground: bool = True,
+    timeout_seconds: int = FFMPEG_TIMEOUT_SECONDS,
 ):
     """The ffmpeg run, off the request thread.
 
@@ -687,14 +752,16 @@ def _run_hls_build(
     for the playlist is a 404 and the player falls into its own recovery.
     """
     try:
-        with transcode_slot(f"HLS build of track {track_id} ({quality})"):
+        with transcode_slot(f"HLS build of track {track_id} ({quality})", foreground=foreground):
+            with _HLS_BUILDS_GUARD:
+                _HLS_BUILD_STARTED[cache_key] = time.monotonic()
             try:
                 result = subprocess.run(
-                    ffmpeg_command,
+                    ffmpeg_command_prefix(foreground) + ffmpeg_command + ([] if foreground else ["-threads", "1"]),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    timeout=FFMPEG_TIMEOUT_SECONDS,
+                    timeout=timeout_seconds,
                 )
             except subprocess.TimeoutExpired:
                 shutil.rmtree(track_dir, ignore_errors=True)
@@ -725,6 +792,7 @@ def _run_hls_build(
     finally:
         with _HLS_BUILDS_GUARD:
             _HLS_BUILDS.pop(cache_key, None)
+            _HLS_BUILD_STARTED.pop(cache_key, None)
         done.set()
 
 
@@ -734,6 +802,7 @@ def ensure_hls_stream_cache(
     profile: dict,
     quality: str,
     wait_for_completion: bool = False,
+    foreground: bool = True,
 ):
     """The HLS playlist for this track and quality, building it if needed.
 
@@ -807,20 +876,24 @@ def ensure_hls_stream_cache(
             with _HLS_BUILDS_GUARD:
                 _HLS_BUILDS[cache_key] = done
 
+            timeout_seconds = ffmpeg_timeout_for(getattr(track, "duration_seconds", None))
             threading.Thread(
                 target=_run_hls_build,
                 args=(track.id, quality, ffmpeg_command, track_dir, playlist_path, done, cache_key),
+                kwargs={"foreground": foreground, "timeout_seconds": timeout_seconds},
                 name=f"hls-build-{track.id}-{quality}",
                 daemon=True,
             ).start()
 
     if wait_for_completion:
-        done.wait(timeout=FFMPEG_TIMEOUT_SECONDS + TRANSCODE_WAIT_TIMEOUT_SECONDS + 5)
+        timeout_seconds = ffmpeg_timeout_for(getattr(track, "duration_seconds", None))
+        done.wait(timeout=timeout_seconds + TRANSCODE_WAIT_TIMEOUT_SECONDS + 5)
         if not _hls_playlist_complete(playlist_path):
             raise HTTPException(status_code=500, detail="Failed to create HLS stream")
         return playlist_path
 
-    # Enough to start: a couple of segments on disk and the playlist listing them.
+    # Enough to start: segments on disk, the playlist listing them, and a lead
+    # the player can live on at the speed this host is building.
     deadline = time.monotonic() + HLS_START_WAIT_SECONDS
 
     while time.monotonic() < deadline:
@@ -840,6 +913,14 @@ def ensure_hls_stream_cache(
         status_code=status.HTTP_504_GATEWAY_TIMEOUT,
         detail="Audio conversion is taking too long to start.",
     )
+
+
+def hls_variant_listable(track_id: int, quality: str, fingerprint: str, requested_quality: str) -> bool:
+    """The requested rung always; any other only once its playlist is complete."""
+    if quality == requested_quality:
+        return True
+    paths = get_hls_cache_paths(track_id, quality, fingerprint)
+    return _hls_playlist_complete(paths["playlist_path"])
 
 
 def build_hls_variant_playlist_url(
@@ -910,6 +991,7 @@ def prepare_hls_variants_in_background(track_id: int, file_path_text: str):
                     file_path=file_path,
                     profile=profile,
                     quality=quality,
+                    foreground=False,
                 )
             except HTTPException:
                 # Transcode queue was full (503) or ffmpeg timed out — this is
@@ -1326,6 +1408,7 @@ def prepare_mobile_stream_cache(
             file_path=file_path,
             profile=profile,
             quality=quality,
+            foreground=False,
         )
 
     return {
@@ -1384,11 +1467,15 @@ def mobile_stream_track(
         )
 
     output_extension = profile["extension"]
+    # A client marks the items it queues *behind* the playing one with
+    # `prefetch=1`; those are warm-ups and must not take the playing track's
+    # slot. Anything else is a device about to play this.
     cached_file_path = ensure_mobile_stream_cache(
         track=track,
         file_path=file_path,
         profile=profile,
         quality=quality,
+        foreground=request.query_params.get("prefetch") != "1",
     )
 
     return range_file_response(
@@ -1433,14 +1520,16 @@ def get_hls_master_playlist(
 
     db.close()
 
+    prefetch = request.query_params.get("prefetch") == "1"
     ensure_hls_stream_cache(
         track=track,
         file_path=file_path,
         profile=startup_profile,
         quality=requested_hls_quality,
+        foreground=not prefetch,
     )
 
-    if not fast_start_only:
+    if not fast_start_only and not prefetch:
         threading.Thread(
             target=prepare_hls_variants_in_background,
             args=(track.id, str(file_path)),
@@ -1459,6 +1548,7 @@ def get_hls_master_playlist(
         key=lambda variant: variant["quality"] != requested_hls_quality,
     )
 
+    fingerprint = source_fingerprint(file_path)
     for variant in ordered_variants:
         quality = variant["quality"]
         profile = MOBILE_STREAM_PROFILES.get(quality)
@@ -1466,11 +1556,18 @@ def get_hls_master_playlist(
         if not profile or profile.get("passthrough"):
             continue
 
+        # Only rungs that exist. Listing a variant that had not been built yet
+        # invited the starving player to switch to it, and that build then
+        # queued behind the one it was abandoning — or was refused outright.
+        if not hls_variant_listable(track.id, quality, fingerprint, requested_hls_quality):
+            continue
+
         lines.append(
             f'#EXT-X-STREAM-INF:BANDWIDTH={variant["bandwidth"]},NAME="{variant["name"]}",CODECS="{variant["codecs"]}"'
         )
         lines.append(
             build_hls_variant_playlist_url(track.id, quality, token, fast_start_only)
+            + ("&prefetch=1" if prefetch else "")
         )
 
     return Response(
@@ -1478,6 +1575,31 @@ def get_hls_master_playlist(
         media_type="application/vnd.apple.mpegurl",
         headers={"Cache-Control": "private, max-age=60", "Vary": "X-Stream-Token"},
     )
+
+
+def render_variant_playlist(playlist_text: str, *, complete: bool, segment_url) -> list[str]:
+    """ffmpeg's playlist with segment URIs rewritten, and — while it is still
+    growing — a start offset of zero.
+
+    A playlist with no end tag is "live" to the players: AVPlayer and ExoPlayer
+    both begin three target durations before its end, not at the start. With
+    four segments on disk a track began at four seconds; with six, at twelve —
+    and the player then waited there for a lead it was never going to get. The
+    START tag puts the playhead at zero, where the lead actually is. It needs
+    protocol version 6, which the players this serves all speak.
+    """
+    lines: list[str] = []
+    for line in playlist_text.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            lines.append(segment_url(Path(stripped).name))
+            continue
+        if not complete and stripped.startswith("#EXT-X-VERSION:"):
+            lines.append("#EXT-X-VERSION:6")
+            lines.append("#EXT-X-START:TIME-OFFSET=0,PRECISE=YES")
+            continue
+        lines.append(line)
+    return lines
 
 
 @router.get("/tracks/{track_id}/hls/{quality}/index.m3u8", tags=["tracks"])
@@ -1513,14 +1635,16 @@ def get_hls_quality_playlist(
     track_id_value = track.id
     db.close()
 
+    prefetch = request.query_params.get("prefetch") == "1"
     playlist_path = ensure_hls_stream_cache(
         track=track,
         file_path=file_path,
         profile=profile,
         quality=quality,
+        foreground=not prefetch,
     )
 
-    if quality == HLS_DEFAULT_QUALITY and not fast_start_only:
+    if quality == HLS_DEFAULT_QUALITY and not fast_start_only and not prefetch:
         threading.Thread(
             target=prepare_hls_variants_in_background,
             args=(track_id_value, str(file_path)),
@@ -1529,19 +1653,12 @@ def get_hls_quality_playlist(
 
     playlist_text = playlist_path.read_text()
     complete = HLS_END_TAG in playlist_text
-    rewritten_lines = []
-
-    for line in playlist_text.splitlines():
-        stripped = line.strip()
-
-        if stripped and not stripped.startswith("#"):
-            segment_name = Path(stripped).name
-            rewritten_lines.append(
-                f"/api/tracks/{track_id_value}/hls/{quality}/{segment_name}?token={token}"
-                + ("&fast_start=1" if fast_start_only else "")
-            )
-        else:
-            rewritten_lines.append(line)
+    segment_suffix = ("&fast_start=1" if fast_start_only else "") + ("&prefetch=1" if prefetch else "")
+    rewritten_lines = render_variant_playlist(
+        playlist_text,
+        complete=complete,
+        segment_url=lambda name: f"/api/tracks/{track_id_value}/hls/{quality}/{name}?token={token}{segment_suffix}",
+    )
 
     # A playlist still growing is re-fetched by the player every few
     # seconds; it must not be served from any cache in between.

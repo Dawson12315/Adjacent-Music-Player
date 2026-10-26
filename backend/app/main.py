@@ -1,4 +1,5 @@
 import logging
+import logging
 import os
 
 from fastapi import FastAPI
@@ -82,6 +83,23 @@ app = FastAPI(
     title=settings.app_name,
     debug=settings.debug,
 )
+
+@app.middleware("http")
+async def _log_refusals(request, call_next):
+    """The container runs without the access log — stream URLs carry tokens,
+    and an access log would print them. But a refusal is the one line a
+    report needs: a 409 from the lease, a 503 from the transcode queue, a
+    504 from a slow build. Those are logged here, path only, never the query."""
+    response = await call_next(request)
+    if response.status_code >= 400 and request.url.path.startswith("/api/"):
+        logging.getLogger("app.requests").info(
+            "%s %s -> %s device=%s",
+            request.method,
+            request.url.path,
+            response.status_code,
+            (request.headers.get("x-adjacent-device") or request.query_params.get("device") or "-")[:8],
+        )
+    return response
 
 
 def ensure_upload_dirs():

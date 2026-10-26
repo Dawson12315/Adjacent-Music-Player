@@ -701,9 +701,14 @@ export function PlayerProvider({ children }) {
         case "previous":
           previous();
           break;
-        case "seek":
+        case "seek": {
+          // A seek from another device is for the track it was looking at,
+          // not for whatever this browser has moved on to since.
+          const forTrack = args?.trackId;
+          if (forTrack != null && currentTrackId != null && String(forTrack) !== String(currentTrackId)) break;
           if (Number.isFinite(Number(args?.position))) seek(Number(args.position));
           break;
+        }
         case "shuffle":
           if ((args?.mode === "on") !== isShuffle) toggleShuffle();
           break;
@@ -717,7 +722,7 @@ export function PlayerProvider({ children }) {
           break;
       }
     },
-    [currentTrack, next, previous, seek, isShuffle, toggleShuffle, isLoop, toggleLoop, changeVolume],
+    [currentTrack, currentTrackId, next, previous, seek, isShuffle, toggleShuffle, isLoop, toggleLoop, changeVolume],
   );
 
   const handoffOnError = useCallback((error) => notify(error.message), [notify]);
@@ -800,9 +805,12 @@ export function PlayerProvider({ children }) {
   const { sendCommand: handoffSendCommand } = handoff;
   const remoteSeek = useCallback(
     (seconds) => {
-      if (Number.isFinite(seconds)) handoffSendCommand("seek", { position: Math.max(0, Math.floor(seconds)) });
+      if (!Number.isFinite(seconds)) return;
+      // Named for the track the bar is showing, so the holder can ignore it
+      // if it has moved on by the time it arrives.
+      handoffSendCommand("seek", { position: Math.max(0, Math.floor(seconds)), trackId: remoteTrackId ?? undefined });
     },
-    [handoffSendCommand],
+    [handoffSendCommand, remoteTrackId],
   );
 
   // Report position to the other devices every few seconds while holding,

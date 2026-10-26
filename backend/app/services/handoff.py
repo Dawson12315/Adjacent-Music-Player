@@ -552,6 +552,35 @@ def release(db: Session, user_id: int, device: PlaybackDevice, now: datetime | N
     return session
 
 
+def write_allowed(
+    db: Session,
+    user_id: int,
+    device_id: str | None,
+    connected: set[str] | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Whether this device may replace the session record (track, queue, position).
+
+    Stricter than the stream gate on purpose. The stream gate opens the moment
+    the holder reads paused, which is right for audio: a second device may
+    start playing then. It was wrong for the *record*: a second device's
+    debounced save replaced the holder's track, queue and position while the
+    holder had merely paused — or had reported paused for a moment mid-buffer.
+    The record belongs to the holder for as long as it holds a live lease;
+    only a spare or stale lease lets another device write it.
+    """
+    if not device_id:
+        return True  # an old client with no identity: the legacy rule applies to it
+    now = now or datetime.utcnow()
+    session = db.query(PlaybackSession).filter(PlaybackSession.user_id == user_id).first()
+    if session is None or session.active_device_id is None:
+        return True
+    holder = db.get(PlaybackDevice, session.active_device_id)
+    if holder is None or holder.device_id == device_id:
+        return True
+    return not is_online(holder, connected or set(), now)
+
+
 # --- the stream lease (hard enforcement) ------------------------------------
 
 
