@@ -10,29 +10,47 @@ import { useListeningEvents } from "../hooks/useListeningEvents";
 import { useMediaSession } from "../hooks/useMediaSession";
 import { usePlaybackPersistence } from "../hooks/usePlaybackPersistence";
 import { useHandoff } from "../hooks/useHandoff";
+import { getHealth } from "../services/healthService";
 import { getPlaybackState } from "../services/playbackService";
 import { getTracksByIds } from "../services/tracksService";
 import {
   createStation,
+  deleteStation,
   getStation,
   getStationLineup,
   getStationNext,
+  giveStationFeedback as postStationFeedback,
   reportStationPlays,
+  takeBackStationFeedback,
 } from "../services/radioService";
 import {
   EXHAUSTED_STATION_NOTICE,
-  THIN_STATION_NOTICE,
+  RADIO_UNAVAILABLE_NOTICE,
+  REFILL_AHEAD,
+  STATION_GONE_NOTICE,
+  announceStationsChanged,
+  feedbackState,
   isRadioSource,
+  radioAvailableFor,
+  radioFeedbackAvailableFor,
   radioSource,
+  reachNotice,
   reasonsByTrackId,
   stationBatchCandidates,
   stationSeedFor,
+  stationSeedName,
 } from "../features/player/radio";
 import { interpolatedPosition } from "../services/handoffProtocol";
 import * as playlistsService from "../services/playlistsService";
 import { initialPlayerState, playerReducer } from "../features/player/playerReducer";
 
 const DEFAULT_SOURCE = { source_type: "library", source_id: null };
+// What a station's queue plays under once the station is stopped: the
+// tracks stay, nothing more arrives.
+const QUEUE_SOURCE = { source_type: "queue", source_id: null };
+const NO_SERVER = { apiVersion: 0, capabilities: [] };
+// How many unplayable tracks in a row a station skips past before it stops.
+const MAX_SKIPPED_ERRORS = 3;
 
 /**
  * The single owner of playback state.
@@ -60,24 +78,164 @@ export function PlayerProvider({ children }) {
   const { currentTrack, queue, queueIndex, isShuffle, isLoop } = state;
   const currentTrackId = currentTrack?.id ?? null;
 
+  // The latest state for the asynchronous paths (a refill landing, a track
+  // ending), which must not act on the queue a stale closure remembers.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
   // The context playback started from, captured at play time so an event fired after
   // navigating away still records where the track was actually played from.
   const sourceRef = useRef(DEFAULT_SOURCE);
 
-  // The radio station playing now, and why it chose each track.
+  /* ---------- the server's radio ---------- */
+
+  const [server, setServer] = useState(NO_SERVER);
+  useEffect(() => {
+    if (!currentUser) {
+      setServer(NO_SERVER);
+      return undefined;
+    }
+    let cancelled = false;
+    getHealth()
+      .then((health) => {
+        if (!cancelled) setServer(health);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
+  const radioAvailable = radioAvailableFor(server);
+  const radioFeedbackAvailable = radioFeedbackAvailableFor(server);
+
+  /* ---------- the station playing now ---------- */
+
+  // The station, why it chose each track (by track id, as a string), and
+  // which queue tracks came from it — a track added to the queue by hand is
+  // not the station's, and is not reported to it.
   const [radioStation, setRadioStation] = useState(null);
-  const radioReasonsRef = useRef(new Map());
+  const [radioReasons, setRadioReasons] = useState(() => new Map());
+  const stationTrackIdsRef = useRef(new Set());
+  // One "reaching wider" notice per station, not one per batch.
+  const reachNoticedRef = useRef(null);
+  // The refill in flight, so the end of the queue and the look-ahead share
+  // one request; and the queue length the look-ahead last asked at.
+  const refillRef = useRef(null);
+  const refillAskedForRef = useRef(null);
+  // The last (station, track) reported, so a pause and resume is one play.
+  const reportedPlayRef = useRef(null);
+  // Unplayable tracks skipped in a row on a station.
+  const skippedErrorsRef = useRef(0);
+  // Station look-ups can overlap (a restore and a take-over); the last wins.
+  const stationSyncRef = useRef(0);
+
+  const clearStation = useCallback(() => {
+    // No new state when there is nothing to clear: this runs on every play.
+    setRadioStation((previous) => (previous ? null : previous));
+    setRadioReasons((previous) => (previous.size ? new Map() : previous));
+    stationTrackIdsRef.current = new Set();
+    refillRef.current = null;
+    refillAskedForRef.current = null;
+  }, []);
 
   /** The station a source names, looked up for the bar after a restore or a take-over. */
-  const syncStationFromSource = useCallback((source) => {
-    if (!isRadioSource(source)) {
-      setRadioStation(null);
-      return;
-    }
-    getStation(source.source_id)
-      .then((station) => setRadioStation(station || null))
-      .catch(() => setRadioStation(null));
-  }, []);
+  const syncStationFromSource = useCallback(
+    (source, queueTracks = []) => {
+      const generation = ++stationSyncRef.current;
+      if (!isRadioSource(source)) {
+        clearStation();
+        return;
+      }
+      // The queue the station handed out is the station's: its plays count.
+      stationTrackIdsRef.current = new Set(queueTracks.map((track) => String(track?.id)).filter((id) => id !== "null"));
+      getStation(source.source_id)
+        .then((station) => {
+          if (stationSyncRef.current !== generation) return;
+          setRadioStation(station || null);
+        })
+        .catch((error) => {
+          if (stationSyncRef.current !== generation) return;
+          // Gone on the server: the queue plays on, as a queue.
+          if (error?.status === 404 || error?.status === 410) {
+            sourceRef.current = QUEUE_SOURCE;
+            clearStation();
+          }
+        });
+    },
+    [clearStation],
+  );
+
+  /** The station stops: what is queued plays on, nothing more arrives. */
+  const stopStation = useCallback(() => {
+    if (isRadioSource(sourceRef.current)) sourceRef.current = QUEUE_SOURCE;
+    clearStation();
+  }, [clearStation]);
+
+  /** A batch came back: its reasons, its tracks, and one notice if it reached wide. */
+  const absorbBatch = useCallback(
+    (batch, stationId) => {
+      const reasons = reasonsByTrackId(batch.tracks);
+      setRadioReasons((previous) => {
+        const next = new Map(previous);
+        reasons.forEach((reason, id) => next.set(id, reason));
+        return next;
+      });
+      (batch.tracks || []).forEach((track) => {
+        if (track?.id != null) stationTrackIdsRef.current.add(String(track.id));
+      });
+      if (batch.station) setRadioStation(batch.station);
+      if (batch.thin && reachNoticedRef.current !== stationId) {
+        reachNoticedRef.current = stationId;
+        notify(reachNotice(batch.reach, stationSeedName(batch.station)));
+      }
+    },
+    [notify],
+  );
+
+  /**
+   * The station's next batch, behind what is queued — or, for "Fresh batch",
+   * in place of what is up next. One request at a time; a request that
+   * lands after the station has been left is dropped. Resolves to how many
+   * tracks joined the queue.
+   */
+  const refillStation = useCallback(
+    ({ replaceUpcoming = false } = {}) => {
+      const source = sourceRef.current;
+      if (!isRadioSource(source)) return Promise.resolve(0);
+      if (refillRef.current && !replaceUpcoming) return refillRef.current;
+      const stationId = source.source_id;
+      const { queue: current, queueIndex: index } = stateRef.current;
+      const held = replaceUpcoming ? current.slice(0, index + 1) : current;
+      const heldIds = new Set(held.map((track) => track?.id).filter((id) => id != null));
+
+      const run = (async () => {
+        try {
+          const batch = await getStationNext(stationId, { excludeIds: [...heldIds] });
+          // Something else started in the meantime: not this queue's batch.
+          if (!isRadioSource(sourceRef.current) || sourceRef.current.source_id !== stationId) return 0;
+          const tracks = stationBatchCandidates(batch.tracks, { excludeIds: heldIds });
+          absorbBatch(batch, stationId);
+          if (!tracks.length) return 0;
+          dispatch(replaceUpcoming ? { type: "REPLACE_UPCOMING", tracks } : { type: "APPEND_TRACKS", tracks });
+          return tracks.length;
+        } catch (error) {
+          if (error?.status === 410 || error?.status === 404) {
+            notify(STATION_GONE_NOTICE);
+            stopStation();
+            announceStationsChanged();
+            return 0;
+          }
+          notify("Couldn't reach your server for the station's next tracks.");
+          return 0;
+        } finally {
+          if (refillRef.current === run) refillRef.current = null;
+        }
+      })();
+      if (!replaceUpcoming) refillRef.current = run;
+      return run;
+    },
+    [absorbBatch, notify, stopStation],
+  );
 
   // Who holds the music, for the error path below: the handoff hook mounts
   // further down, so it is read through a ref kept current each render.
@@ -99,6 +257,19 @@ export function PlayerProvider({ children }) {
       if (error.kind === "media-error" && holderNameRef.current) {
         notify(`Playing on ${holderNameRef.current}. Press play here to bring it to this browser.`);
         return;
+      }
+      // A station's tracks are the server's choice, unvetted: one that will
+      // not play is skipped, up to a few in a row, rather than ending the
+      // station on it.
+      if (error.kind === "media-error" && isRadioSource(sourceRef.current)) {
+        const { queue: current, queueIndex: index, currentTrack: track } = stateRef.current;
+        skippedErrorsRef.current += 1;
+        if (skippedErrorsRef.current <= MAX_SKIPPED_ERRORS && index >= 0 && index < current.length - 1) {
+          notify(`Skipped ${track?.title ? `"${track.title}"` : "a track"}: it couldn't be played.`);
+          dispatch({ type: "NEXT" });
+          setIsPlaying(true);
+          return;
+        }
       }
       notify(error.message);
     },
@@ -185,7 +356,7 @@ export function PlayerProvider({ children }) {
           source_type: saved.sourceType ?? DEFAULT_SOURCE.source_type,
           source_id: saved.sourceId ?? null,
         };
-        syncStationFromSource(sourceRef.current);
+        syncStationFromSource(sourceRef.current, restoredQueue);
 
         dispatch({
           type: "RESTORE",
@@ -288,14 +459,11 @@ export function PlayerProvider({ children }) {
       sourceRef.current = source;
       await claimBeforePlay({ trackId: track.id, position: 0, playing: true });
       // Anything but the station's own batches ends the station.
-      if (!isRadioSource(source)) {
-        setRadioStation(null);
-        radioReasonsRef.current = new Map();
-      }
+      if (!isRadioSource(source)) clearStation();
       dispatch({ type: "PLAY_TRACK", track, sourceTracks });
       setIsPlaying(true);
     },
-    [currentTrack, events, audioRef, claimBeforePlay],
+    [currentTrack, events, audioRef, claimBeforePlay, clearStation],
   );
 
   const playTracks = useCallback(
@@ -304,71 +472,87 @@ export function PlayerProvider({ children }) {
 
       sourceRef.current = source;
       await claimBeforePlay({ trackId: tracksToPlay[0]?.id ?? null, position: 0, playing: true });
-      if (!isRadioSource(source)) {
-        setRadioStation(null);
-        radioReasonsRef.current = new Map();
-      }
+      if (!isRadioSource(source)) clearStation();
       dispatch({ type: "PLAY_TRACKS", tracks: tracksToPlay });
       setIsPlaying(true);
     },
-    [claimBeforePlay],
+    [claimBeforePlay, clearStation],
+  );
+
+  /** A station starts: its state is fresh, and the first batch is the queue. */
+  const beginStation = useCallback(
+    (station) => {
+      clearStation();
+      skippedErrorsRef.current = 0;
+      setRadioStation(station);
+    },
+    [clearStation],
   );
 
   /**
    * Play a station from its first batch, in the station's order: track
    * radio opens with the seed, and the blend is the server's to decide.
+   * Resolves to the station, or false — and says why.
    */
   const playStation = useCallback(
     async (station) => {
       if (!station?.id) return false;
-      // Where the station was left, if it played in the last ten days: that
-      // continues, from the track the listener got to, without asking the
-      // recommender again. An older server has no lineup and answers 404.
-      let batch = null;
       try {
-        const lineup = await getStationLineup(station.id);
-        if (lineup.resumable && lineup.tracks.length) batch = lineup;
-      } catch {
-        batch = null;
-      }
-      if (!batch) batch = await getStationNext(station.id);
-      const tracks = stationBatchCandidates(batch.tracks);
-      if (!tracks.length) {
-        notify("Nothing in your library to build that station from yet.");
+        // Where the station was left, if it played in the last ten days: that
+        // continues, from the track the listener got to, without asking the
+        // recommender again. An older server has no lineup and answers 404.
+        let batch = null;
+        try {
+          const lineup = await getStationLineup(station.id);
+          if (lineup.resumable && lineup.tracks.length) batch = lineup;
+        } catch (error) {
+          if (error?.status === 410) throw error;
+          batch = null;
+        }
+        if (!batch) batch = await getStationNext(station.id);
+        const tracks = stationBatchCandidates(batch.tracks);
+        if (!tracks.length) {
+          notify("Nothing in your library to build that station from yet.");
+          return false;
+        }
+        const played = batch.station || station;
+        beginStation(played);
+        absorbBatch(batch, station.id);
+        await playTracks(tracks, radioSource(station.id));
+        announceStationsChanged();
+        return played;
+      } catch (error) {
+        if (error?.status === 410) {
+          notify(STATION_GONE_NOTICE);
+          announceStationsChanged();
+        } else if (error?.status === 404) {
+          notify("That station is gone.");
+          announceStationsChanged();
+        } else {
+          notify(error?.message || "Couldn't reach your server to start the station.");
+        }
         return false;
       }
-      radioReasonsRef.current = reasonsByTrackId(batch.tracks);
-      const played = batch.station || station;
-      setRadioStation(played);
-      await playTracks(tracks, radioSource(station.id));
-      if (batch.thin) notify(THIN_STATION_NOTICE);
-      return played;
     },
-    [notify, playTracks],
+    [notify, playTracks, beginStation, absorbBatch],
   );
 
-  /** "Fresh batch" on the station's page: the next twenty, behind what is queued. */
+  /** "Fresh batch" on the station's page: what is up next is replaced. Resolves to how many arrived. */
   const fetchStationBatch = useCallback(async () => {
-    const source = sourceRef.current;
-    if (!isRadioSource(source)) return false;
-    const held = new Set(queue.map((track) => track?.id));
-    const batch = await getStationNext(source.source_id, { excludeIds: [...held] });
-    const rest = stationBatchCandidates(batch.tracks, { excludeIds: held });
-    if (!rest.length) {
-      notify(EXHAUSTED_STATION_NOTICE);
-      return false;
-    }
-    reasonsByTrackId(batch.tracks).forEach((reason, id) => radioReasonsRef.current.set(id, reason));
-    dispatch({ type: "EXTEND_QUEUE", tracks: [...state.originalQueue, ...rest] });
-    if (batch.thin) notify(THIN_STATION_NOTICE);
-    return true;
-  }, [queue, state.originalQueue, notify]);
+    const added = await refillStation({ replaceUpcoming: true });
+    if (!added && isRadioSource(sourceRef.current)) notify(EXHAUSTED_STATION_NOTICE);
+    return added;
+  }, [refillStation, notify]);
 
   /** "Start radio" from a track menu, an album page or an artist page. */
   const startRadio = useCallback(
     async (seedFrom) => {
       const seed = stationSeedFor(seedFrom || {});
       if (!seed) return false;
+      if (!radioAvailable) {
+        notify(RADIO_UNAVAILABLE_NOTICE);
+        return false;
+      }
       try {
         const station = await createStation(seed);
 
@@ -377,17 +561,18 @@ export function PlayerProvider({ children }) {
         // the station answers, so the server's moment is not heard.
         if (seed.seed_type === "track" && seedFrom.track?.id) {
           const seedTrack = seedFrom.track;
-          radioReasonsRef.current = new Map([[String(seedTrack.id), "The track you started from"]]);
-          setRadioStation(station);
+          beginStation(station);
+          setRadioReasons(new Map([[String(seedTrack.id), "The track you started from"]]));
+          stationTrackIdsRef.current.add(String(seedTrack.id));
           // Asked for while the seed starts, not after.
           const batchPromise = getStationNext(station.id, { excludeIds: [seedTrack.id] });
           await playTracks([seedTrack], radioSource(station.id));
           const batch = await batchPromise;
           if (!isRadioSource(sourceRef.current) || sourceRef.current.source_id !== station.id) return station;
           const rest = stationBatchCandidates(batch.tracks, { excludeIds: new Set([seedTrack.id]) });
-          reasonsByTrackId(batch.tracks).forEach((reason, id) => radioReasonsRef.current.set(id, reason));
-          if (rest.length) dispatch({ type: "EXTEND_QUEUE", tracks: [seedTrack, ...rest] });
-          if (batch.thin) notify(THIN_STATION_NOTICE);
+          absorbBatch(batch, station.id);
+          if (rest.length) dispatch({ type: "APPEND_TRACKS", tracks: rest });
+          announceStationsChanged();
           return station;
         }
 
@@ -401,14 +586,26 @@ export function PlayerProvider({ children }) {
         return false;
       }
     },
-    [notify, playStation, playTracks],
+    [notify, playStation, playTracks, radioAvailable, beginStation, absorbBatch],
   );
 
-  // The station remembers what it played, so the next batch moves on.
-  useEffect(() => {
-    if (currentTrackId == null || !isRadioSource(sourceRef.current)) return;
-    reportStationPlays(sourceRef.current.source_id, [currentTrackId]).catch(() => {});
-  }, [currentTrackId]);
+  /** A station is deleted, here and on the server. */
+  const deleteStationById = useCallback(
+    async (stationId) => {
+      try {
+        await deleteStation(stationId);
+      } catch (error) {
+        if (error?.status !== 404) {
+          notify(error?.message || "Couldn't remove that station.");
+          return false;
+        }
+      }
+      if (isRadioSource(sourceRef.current) && sourceRef.current.source_id === stationId) stopStation();
+      announceStationsChanged();
+      return true;
+    },
+    [notify, stopStation],
+  );
 
   const togglePlay = useCallback(async () => {
     if (!currentTrack) return;
@@ -424,10 +621,36 @@ export function PlayerProvider({ children }) {
 
   const pause = useCallback(() => setIsPlaying(false), []);
 
+  /** Past the end of the queue on a station: the next batch, then on to it. */
+  const advancePastEnd = useCallback(
+    async ({ keepPlaying }) => {
+      // The count the refill reports is the truth about the queue: the
+      // append it dispatched may not have rendered yet when this resumes,
+      // so the ref alone could still say the queue ends here.
+      const added = await refillStation();
+      const { queue: current, queueIndex: index } = stateRef.current;
+      if (added > 0 || (index >= 0 && index < current.length - 1)) {
+        dispatch({ type: "NEXT" });
+        if (keepPlaying) setIsPlaying(true);
+        return true;
+      }
+      if (isRadioSource(sourceRef.current)) notify(EXHAUSTED_STATION_NOTICE);
+      setIsPlaying(false);
+      return false;
+    },
+    [refillStation, notify],
+  );
+
   const next = useCallback(() => {
-    // The reducer ignores Next at the end of the list; say so, or a Next that
-    // does nothing reads as a player that has stopped working.
     if (queue.length > 0 && queueIndex >= queue.length - 1) {
+      // A station does not end at the end of a batch: it is asked for more.
+      if (isRadioSource(sourceRef.current)) {
+        if (currentTrack && !audioRef.current?.ended) events.skipped(currentTrack);
+        advancePastEnd({ keepPlaying: isPlaying });
+        return;
+      }
+      // The reducer ignores Next at the end of the list; say so, or a Next that
+      // does nothing reads as a player that has stopped working.
       notify("That was the last track in the list.");
       return;
     }
@@ -437,7 +660,7 @@ export function PlayerProvider({ children }) {
     }
 
     dispatch({ type: "NEXT" });
-  }, [currentTrack, events, audioRef, queue.length, queueIndex, notify]);
+  }, [currentTrack, events, audioRef, queue.length, queueIndex, notify, advancePastEnd, isPlaying]);
 
   const previous = useCallback(() => {
     const position = audioRef.current?.currentTime ?? 0;
@@ -469,9 +692,54 @@ export function PlayerProvider({ children }) {
   const replaceTrack = useCallback((track) => dispatch({ type: "REPLACE_TRACK", track }), []);
 
   const clearPlayback = useCallback(() => {
+    stopStation();
+    sourceRef.current = DEFAULT_SOURCE;
     dispatch({ type: "CLEAR" });
     setIsPlaying(false);
-  }, []);
+  }, [stopStation]);
+
+  /**
+   * What the listener says about a track on the playing station: "more"
+   * (it joins the seeds), "less" (it leaves the station, and the queue),
+   * "less_artist" (the artist leaves the neighbours, and the queue). Said
+   * twice, it is taken back. Resolves to whether it was saved.
+   */
+  const giveStationFeedback = useCallback(
+    async (track, kind) => {
+      const source = sourceRef.current;
+      const stationId = radioStation?.id ?? (isRadioSource(source) ? source.source_id : null);
+      if (!stationId || track?.id == null) return false;
+      if (!radioFeedbackAvailable) {
+        notify(RADIO_UNAVAILABLE_NOTICE);
+        return false;
+      }
+      const said = feedbackState(radioStation?.feedback, track);
+      const takingBack = (kind === "more" && said.more) || (kind === "less" && said.less) || (kind === "less_artist" && said.lessArtist);
+      try {
+        const feedback = takingBack
+          ? await takeBackStationFeedback(stationId, track.id, kind)
+          : await postStationFeedback(stationId, track.id, kind);
+        setRadioStation((previous) => (previous && previous.id === stationId ? { ...previous, feedback } : previous));
+        if (takingBack) return true;
+        if (kind === "less") {
+          dispatch({ type: "REMOVE_UPCOMING", trackIds: [track.id] });
+          if (stateRef.current.currentTrack?.id === track.id) next();
+          notify(`"${track.title}" won't play on this station again.`);
+        } else if (kind === "less_artist") {
+          dispatch({ type: "REMOVE_UPCOMING", artists: [track.artist] });
+          if (track.artist && stateRef.current.currentTrack?.artist === track.artist) next();
+          notify(`Less of ${track.artist} on this station.`);
+        } else {
+          notify(`More like "${track.title}" on this station.`);
+        }
+        return true;
+      } catch (error) {
+        notify(error?.status === 409 ? "That artist is the station." : error?.message || "Couldn't save that.");
+        return false;
+      }
+    },
+    [radioStation, radioFeedbackAvailable, notify, next],
+  );
 
   const toggleMute = useCallback(() => setIsMuted((previous) => !previous), []);
 
@@ -525,28 +793,11 @@ export function PlayerProvider({ children }) {
     }
 
     // Stop at the end of the queue rather than wrapping around, unless a
-    // station is playing: then the station is asked for its next batch.
+    // station is playing: then the station is asked for its next batch —
+    // usually already in hand, asked for a few tracks ago.
     if (queueIndex === -1 || queueIndex >= queue.length - 1) {
-      const source = sourceRef.current;
-      if (isRadioSource(source)) {
-        const held = new Set(queue.map((track) => track?.id));
-        getStationNext(source.source_id, { excludeIds: [...held] })
-          .then((batch) => {
-            const tracks = stationBatchCandidates(batch.tracks, { excludeIds: held });
-            if (!tracks.length) {
-              notify(EXHAUSTED_STATION_NOTICE);
-              setIsPlaying(false);
-              return;
-            }
-            reasonsByTrackId(batch.tracks).forEach((reason, id) => radioReasonsRef.current.set(id, reason));
-            if (batch.thin) notify(THIN_STATION_NOTICE);
-            dispatch({ type: "PLAY_TRACKS", tracks });
-            setIsPlaying(true);
-          })
-          .catch(() => {
-            notify("Couldn't reach your server for the station's next tracks.");
-            setIsPlaying(false);
-          });
+      if (isRadioSource(sourceRef.current)) {
+        advancePastEnd({ keepPlaying: true });
         return;
       }
       setIsPlaying(false);
@@ -555,7 +806,7 @@ export function PlayerProvider({ children }) {
 
     dispatch({ type: "NEXT" });
     setIsPlaying(true);
-  }, [currentTrack, events, isLoop, queueIndex, queue, seek, audioRef, notify]);
+  }, [currentTrack, events, isLoop, queueIndex, queue, seek, audioRef, advancePastEnd]);
 
   // The element fires `pause` before `ended` at the end of a track. Taking
   // that pause as the user's flipped isPlaying false and back, which sent a
@@ -568,9 +819,22 @@ export function PlayerProvider({ children }) {
 
   const handlePlayEvent = useCallback(() => {
     setIsPlaying(true);
+    skippedErrorsRef.current = 0;
 
     if (currentTrack) {
       events.playStarted(currentTrack);
+      // The station remembers what it played, so the next batch moves on:
+      // reported when the track is actually heard, once, and only for the
+      // station's own tracks — not on a reload that restores a station
+      // paused, and not for a track added to the queue by hand.
+      const source = sourceRef.current;
+      if (isRadioSource(source) && stationTrackIdsRef.current.has(String(currentTrack.id))) {
+        const key = `${source.source_id}:${currentTrack.id}`;
+        if (reportedPlayRef.current !== key) {
+          reportedPlayRef.current = key;
+          reportStationPlays(source.source_id, [currentTrack.id]).catch(() => {});
+        }
+      }
     }
   }, [currentTrack, events]);
 
@@ -654,7 +918,7 @@ export function PlayerProvider({ children }) {
         if (!startTrack) return;
 
         sourceRef.current = { source_type: serverState.source_type ?? null, source_id: serverState.source_id ?? null };
-        syncStationFromSource(sourceRef.current);
+        syncStationFromSource(sourceRef.current, tracks);
         dispatch({
           type: "RESTORE",
           queue: tracks,
@@ -741,6 +1005,21 @@ export function PlayerProvider({ children }) {
   const handoffPlayingElsewhere =
     handoff.available && !handoff.isActiveHere && Boolean(handoff.activeDeviceId) && !handoff.stale;
   holderNameRef.current = handoffPlayingElsewhere ? handoff.activeName || "another device" : null;
+  const followingRef = useRef(false);
+  followingRef.current = handoffPlayingElsewhere;
+
+  // A station is asked for more a few tracks before the queue runs out, so
+  // the next batch is in hand when the last track ends — in this browser,
+  // not in a tab that is only following the device that holds the music.
+  useEffect(() => {
+    if (!isRadioSource(sourceRef.current) || followingRef.current) return;
+    if (queueIndex < 0 || !queue.length) return;
+    if (queue.length - 1 - queueIndex > REFILL_AHEAD) return;
+    const key = `${sourceRef.current.source_id}:${queue.length}`;
+    if (refillAskedForRef.current === key) return;
+    refillAskedForRef.current = key;
+    refillStation();
+  }, [queue, queueIndex, refillStation]);
 
   const { claim: handoffClaim, reportPosition: handoffReport, isActiveHere: handoffActiveHere, leaseKnown } = handoff;
   handoffClaimRef.current = handoffClaim;
@@ -848,6 +1127,8 @@ export function PlayerProvider({ children }) {
     deviceId: handoff.me?.deviceId ?? null,
   });
 
+  const radioReason = radioReasons.get(String(currentTrackId)) || null;
+
   const value = useMemo(
     () => ({
       currentTrack,
@@ -885,12 +1166,17 @@ export function PlayerProvider({ children }) {
       handoffPlayingElsewhere,
       remoteTrack,
       awaitingGesture,
+      radioAvailable,
+      radioFeedbackAvailable,
       radioStation,
-      radioReason: radioReasonsRef.current.get(String(currentTrackId)) || null,
-      radioReasons: Object.fromEntries(radioReasonsRef.current),
+      radioReason,
+      radioReasons,
       startRadio,
       playStation,
       fetchStationBatch,
+      stopStation,
+      deleteStationById,
+      giveStationFeedback,
     }),
     [
       currentTrack,
@@ -928,11 +1214,17 @@ export function PlayerProvider({ children }) {
       handoffPlayingElsewhere,
       remoteTrack,
       awaitingGesture,
+      radioAvailable,
+      radioFeedbackAvailable,
       radioStation,
-      currentTrackId,
+      radioReason,
+      radioReasons,
       startRadio,
       playStation,
       fetchStationBatch,
+      stopStation,
+      deleteStationById,
+      giveStationFeedback,
     ],
   );
 

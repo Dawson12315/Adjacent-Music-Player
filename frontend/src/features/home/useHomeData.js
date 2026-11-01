@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { getForYou } from "../../services/homeService";
+import { STATIONS_CHANGED_EVENT } from "../player/radio";
 import { getStations } from "../../services/radioService";
 import * as statsService from "../../services/statsService";
 
@@ -78,6 +79,24 @@ export function useHomeData() {
 
     return () => controller.abort();
   }, [forYouRefresh]);
+
+  // A station deleted, stopped as gone, or started anew: the rail follows.
+  useEffect(() => {
+    const controller = new AbortController();
+    const reload = () =>
+      getStations({ signal: controller.signal })
+        .then((rows) => {
+          if (!controller.signal.aborted) {
+            setData((previous) => ({ ...previous, stations: Array.isArray(rows) ? rows : [] }));
+          }
+        })
+        .catch(() => {});
+    window.addEventListener(STATIONS_CHANGED_EVENT, reload);
+    return () => {
+      controller.abort();
+      window.removeEventListener(STATIONS_CHANGED_EVENT, reload);
+    };
+  }, []);
 
   const refreshForYou = () => setForYouRefresh((value) => value + 1);
 

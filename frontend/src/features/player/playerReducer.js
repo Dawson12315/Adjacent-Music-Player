@@ -102,6 +102,64 @@ export function playerReducer(state, action) {
       };
     }
 
+    /**
+     * More of the same list, behind what is queued: a station's next batch.
+     * Appended in the order given whatever the shuffle setting, because a
+     * station's order is the station's to decide; tracks already in the
+     * queue are left out.
+     */
+    case "APPEND_TRACKS": {
+      const have = new Set(state.queue.map((track) => track.id));
+      const fresh = (Array.isArray(action.tracks) ? action.tracks : []).filter((track) => {
+        if (track?.id == null || have.has(track.id)) return false;
+        have.add(track.id);
+        return true;
+      });
+      if (!fresh.length) return state;
+      return {
+        ...state,
+        queue: [...state.queue, ...fresh],
+        originalQueue: [...state.originalQueue, ...fresh],
+      };
+    }
+
+    /**
+     * What is up next is replaced; what has played and what is playing stay.
+     * "Fresh batch" on a station.
+     */
+    case "REPLACE_UPCOMING": {
+      const tracks = Array.isArray(action.tracks) ? action.tracks : [];
+      const played = state.queue.slice(0, state.queueIndex + 1);
+      const keep = new Set(played.map((track) => track.id));
+      const fresh = tracks.filter((track) => track?.id != null && !keep.has(track.id));
+      if (!fresh.length) return state;
+      return {
+        ...state,
+        queue: [...played, ...fresh],
+        originalQueue: [...played, ...fresh],
+      };
+    }
+
+    /**
+     * Upcoming tracks the listener said no to leave the queue: by id, or by
+     * artist. What has played and what is playing stay where they are.
+     */
+    case "REMOVE_UPCOMING": {
+      const ids = new Set((action.trackIds || []).map(String));
+      const artists = new Set((action.artists || []).filter(Boolean).map((name) => String(name).toLowerCase()));
+      const doomed = (track, position) =>
+        position > state.queueIndex &&
+        (ids.has(String(track?.id)) || artists.has(String(track?.artist || "").toLowerCase()));
+      const queue = state.queue.filter((track, position) => !doomed(track, position));
+      if (queue.length === state.queue.length) return state;
+      const gone = new Set(state.queue.filter(doomed).map((track) => track.id));
+      return {
+        ...state,
+        queue,
+        originalQueue: state.originalQueue.filter((track) => !gone.has(track.id)),
+      };
+    }
+
     /** Play a whole list from the top, used by "play playlist". */
     case "PLAY_TRACKS": {
       const { tracks } = action;

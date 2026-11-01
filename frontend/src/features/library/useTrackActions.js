@@ -18,7 +18,7 @@ import * as playlistsService from "../../services/playlistsService";
  */
 export function useTrackActions() {
   const { playlists, albumArtworkMap, openTrackEditor } = useLibrary();
-  const { addToQueue, startRadio } = usePlayer();
+  const { addToQueue, startRadio, radioAvailable } = usePlayer();
   const { notify } = useNotifications();
   const navigate = useNavigate();
 
@@ -59,7 +59,7 @@ export function useTrackActions() {
     [playlists, notify, closeMenu],
   );
 
-  const handleStartRadio = useCallback(
+  const startRadioFromRow = useCallback(
     (track) => {
       closeMenu();
       // The station's page opens once the station exists.
@@ -69,6 +69,8 @@ export function useTrackActions() {
     },
     [startRadio, closeMenu, navigate],
   );
+  // Absent on a server without radio, so the row menu does not offer it.
+  const handleStartRadio = radioAvailable ? startRadioFromRow : undefined;
 
   const handleEdit = useCallback(
     (track) => {

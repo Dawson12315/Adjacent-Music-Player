@@ -36,6 +36,9 @@ export function buildStationPath(stationId) {
   return `/radio/${stationId}`;
 }
 
+/** Every station the listener has, newest first. */
+export const STATIONS_PATH = "/radio";
+
 /**
  * Parsed from the pathname rather than from `useParams`, because route params only
  * accumulate downwards: a layout component rendering the sidebar and header sits above
@@ -75,7 +78,9 @@ function parseLocation(pathname) {
     case "genres":
       return name ? { activeView: "tracks", selectedGenre: name } : { activeView: "genres" };
     case "radio":
-      return { activeView: "station", selectedStationId: name ? Number(name) : null };
+      return name
+        ? { activeView: "station", selectedStationId: Number(name) }
+        : { activeView: "stations" };
     default:
       return { activeView: "home" };
   }

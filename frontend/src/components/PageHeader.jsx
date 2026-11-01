@@ -26,7 +26,7 @@ export function PageHeader() {
   const { artists, albums, genres, playlists, playlistTracks, trackCount, albumArtworkMap, artistArtworkMap } =
     useLibrary();
   const { meta } = usePageMeta();
-  const { playTracks, startRadio } = usePlayer();
+  const { playTracks, startRadio, radioAvailable } = usePlayer();
   const navigate = useNavigate();
   const {
     activeView,
@@ -213,7 +213,7 @@ export function PageHeader() {
               </button>
             )}
 
-            {(selectedAlbum || selectedArtist) && feedTracks.length > 0 && (
+            {(selectedAlbum || selectedArtist) && feedTracks.length > 0 && radioAvailable && (
               <button
                 className="btn btn--ghost btn--sm"
                 type="button"

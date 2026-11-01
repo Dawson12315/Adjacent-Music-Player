@@ -515,3 +515,21 @@
   text-transform: uppercase;
   white-space: nowrap;
 }
+
+/* The station chip and the two marks beside it; the reason rides in the chip, truncated. */
+.player-bar__station-group { display: inline-flex; align-items: center; gap: 4px; min-width: 0; flex: 0 1 auto; }
+.player-bar__station { min-width: 0; max-width: 320px; }
+.player-bar__station-name { flex: none; }
+.player-bar__station-reason {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: inherit;
+  font-size: var(--text-2xs);
+}
+.player-bar__station-reason::before { content: "·"; margin: 0 4px 0 2px; color: var(--text-muted); }
+.station-say--bar { width: 22px; height: 22px; }

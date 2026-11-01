@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const tracks = [
   { id: 3, title: "Second Light", artist: "Fen", album: "Low Country" },
@@ -8,25 +8,45 @@ const tracks = [
   { id: 6, title: "Opening", artist: "Modular Cassette", album: "Copper Wire" },
 ];
 
-const player = {
-  radioStation: { id: 4, name: "Fen radio", seed_type: "artist", artwork_path: null },
-  radioReasons: { 3: "From Fen", 9: "Fits your ambient taste", 6: "Played around Fen in your sessions" },
-  queue: tracks,
-  queueIndex: 0,
-  currentTrack: tracks[0],
-  isPlaying: true,
-  togglePlay: vi.fn(),
-  next: vi.fn(),
-  jumpTo: vi.fn(),
-  fetchStationBatch: vi.fn(() => Promise.resolve(true)),
-  playStation: vi.fn(() => Promise.resolve(true)),
-};
+const { player, radioService } = vi.hoisted(() => ({
+  player: {
+    radioStation: {
+      id: 4,
+      name: "Fen radio",
+      seed_type: "artist",
+      artwork_path: null,
+      feedback: { more_track_ids: [9], less_track_ids: [], less_artists: ["Modular Cassette"] },
+    },
+    radioReasons: new Map([
+      ["3", "From Fen"],
+      ["9", "Close to Fen, and you play The Tessellations"],
+      ["6", "Back around to Fen"],
+    ]),
+    radioFeedbackAvailable: true,
+    queue: [],
+    queueIndex: 0,
+    currentTrack: null,
+    isPlaying: true,
+    isLoop: false,
+    togglePlay: vi.fn(),
+    next: vi.fn(),
+    jumpTo: vi.fn(),
+    fetchStationBatch: vi.fn(() => Promise.resolve(20)),
+    playStation: vi.fn(() => Promise.resolve(true)),
+    stopStation: vi.fn(),
+    deleteStationById: vi.fn(() => Promise.resolve(true)),
+    giveStationFeedback: vi.fn(() => Promise.resolve(true)),
+  },
+  radioService: {
+    getStation: vi.fn(() => Promise.resolve({ id: 7, name: "Blue Harbour radio", seed_type: "album" })),
+  },
+}));
+player.queue = tracks;
+player.currentTrack = tracks[0];
 
 vi.mock("../../contexts/PlayerContext", () => ({ usePlayer: () => player }));
 vi.mock("../../contexts/LibraryContext", () => ({ useLibrary: () => ({ albumArtworkMap: {} }) }));
-vi.mock("../../services/radioService", () => ({
-  getStation: vi.fn(() => Promise.resolve({ id: 7, name: "Blue Harbour radio", seed_type: "album" })),
-}));
+vi.mock("../../services/radioService", () => radioService);
 
 import { StationView } from "./StationView";
 
@@ -35,10 +55,17 @@ function renderAt(path) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/radio/:stationId" element={<StationView />} />
+        <Route path="/radio" element={<p>all stations</p>} />
       </Routes>
     </MemoryRouter>,
   );
 }
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  player.queueIndex = 0;
+  player.isLoop = false;
+});
 
 describe("the station page", () => {
   it("shows the playing station, its place in the batch, and every track with its reason", () => {
@@ -46,8 +73,9 @@ describe("the station page", () => {
     expect(screen.getAllByText("Fen radio").length).toBeGreaterThan(0);
     expect(screen.getByText("Artist radio · 1 of 3 · more arrives as it plays")).toBeInTheDocument();
     expect(screen.getByText("From Fen")).toBeInTheDocument();
-    expect(screen.getByText("Fits your ambient taste")).toBeInTheDocument();
-    expect(screen.getByText("Played around Fen in your sessions")).toBeInTheDocument();
+    expect(screen.getByText("Close to Fen, and you play The Tessellations")).toBeInTheDocument();
+    // A reason that reached past the seed's corner is set apart.
+    expect(screen.getByText("Back around to Fen")).toHaveClass("track-row__reason--wide");
 
     fireEvent.click(screen.getByRole("button", { name: "Play Opening" }));
     expect(player.jumpTo).toHaveBeenCalledWith(2);
@@ -59,11 +87,59 @@ describe("the station page", () => {
     expect(player.fetchStationBatch).toHaveBeenCalled();
   });
 
+  it("says when repeat means nothing more arrives, and unfolds what has played", () => {
+    player.queueIndex = 2;
+    player.isLoop = true;
+    renderAt("/radio/4");
+    expect(screen.getByText("Artist radio · 3 of 3 · repeat is on, so nothing more arrives")).toBeInTheDocument();
+    expect(screen.queryByText("Second Light")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "2 tracks played on this station" }));
+    expect(screen.getByText("Second Light")).toBeInTheDocument();
+  });
+
+  it("lets the listener say more, not this one, and less of an artist — and shows what was said", () => {
+    renderAt("/radio/4");
+    fireEvent.click(screen.getByRole("button", { name: "More like Second Light" }));
+    expect(player.giveStationFeedback).toHaveBeenCalledWith(tracks[0], "more");
+    fireEvent.click(screen.getByRole("button", { name: "Not Long Way Round on this station" }));
+    expect(player.giveStationFeedback).toHaveBeenCalledWith(tracks[1], "less");
+    fireEvent.click(screen.getByRole("button", { name: "Less of The Tessellations on this station" }));
+    expect(player.giveStationFeedback).toHaveBeenCalledWith(tracks[1], "less_artist");
+    // Already said: lit, and pressed.
+    expect(screen.getByRole("button", { name: "More like Long Way Round" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Less of Modular Cassette on this station" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("stops the station, and removes it after a second click", async () => {
+    renderAt("/radio/4");
+    fireEvent.click(screen.getByRole("button", { name: "Stop station" }));
+    expect(player.stopStation).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(player.deleteStationById).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Fen radio" }));
+    await waitFor(() => expect(player.deleteStationById).toHaveBeenCalledWith(4));
+    expect(await screen.findByText("all stations")).toBeInTheDocument();
+  });
+
   it("offers to play a station that is not the one playing", async () => {
     renderAt("/radio/7");
     expect(await screen.findByRole("heading", { level: 1, name: "Blue Harbour radio" })).toBeInTheDocument();
     expect(screen.getByText("Play the station to see what it lines up.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Play this station" }));
     expect(player.playStation).toHaveBeenCalledWith(expect.objectContaining({ id: 7 }));
+  });
+
+  it("tells a gone station from a server that did not answer, and offers to try again", async () => {
+    radioService.getStation.mockRejectedValueOnce(Object.assign(new Error("gone"), { status: 404 }));
+    const { unmount } = renderAt("/radio/8");
+    expect(await screen.findByText("That station is gone")).toBeInTheDocument();
+    unmount();
+
+    radioService.getStation.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 500 }));
+    renderAt("/radio/8");
+    expect(await screen.findByText("Couldn't load this station")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Blue Harbour radio" })).toBeInTheDocument();
   });
 });

@@ -9,6 +9,7 @@ const PRIMARY_LINKS = [
   { to: "/artists", icon: "artists", label: "Artists" },
   { to: "/albums", icon: "albums", label: "Albums" },
   { to: "/genres", icon: "genres", label: "Genres" },
+  { to: "/radio", icon: "radio", label: "Radio" },
 ];
 
 const SECONDARY_LINKS = [

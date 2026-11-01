@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 
 import { Artwork } from "../../components/Artwork";
 import { Icon } from "../../components/Icon";
+import { feedbackState } from "./radio";
 import { PlayerProgress } from "./PlayerProgress";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { usePlayer } from "../../contexts/PlayerContext";
@@ -39,6 +40,8 @@ export function PlayerBar() {
     awaitingGesture,
     radioStation,
     radioReason,
+    radioFeedbackAvailable,
+    giveStationFeedback,
   } = usePlayer();
 
   const [handoffOpen, setHandoffOpen] = useState(false);
@@ -77,6 +80,7 @@ export function PlayerBar() {
   const shownTrack = handoffPlayingElsewhere ? remoteTrack || currentTrack : currentTrack;
   const artwork = shownTrack ? resolveAlbumArtwork(shownTrack.album, albumArtworkMap, recordArtist(shownTrack)) : null;
   const playLabel = awaitingGesture ? "Tap to play here" : displayPlaying ? "Pause" : "Play";
+  const said = feedbackState(radioStation?.feedback, currentTrack);
 
   return (
     <footer className="player-bar">
@@ -97,14 +101,41 @@ export function PlayerBar() {
                 )}
                 <span className="player-bar__title">{shownTrack.title}</span>
                 {radioStation?.name && !handoffPlayingElsewhere && (
-                  <Link
-                    className="player-bar__station"
-                    to={buildStationPath(radioStation.id)}
-                    title={radioReason || radioStation.name}
-                  >
-                    <Icon name="radio" size={11} />
-                    {radioStation.name}
-                  </Link>
+                  <span className="player-bar__station-group">
+                    <Link
+                      className="player-bar__station"
+                      to={buildStationPath(radioStation.id)}
+                      title={radioReason ? `${radioStation.name} · ${radioReason}` : radioStation.name}
+                    >
+                      <Icon name="radio" size={11} />
+                      <span className="player-bar__station-name">{radioStation.name}</span>
+                      {radioReason && <span className="player-bar__station-reason">{radioReason}</span>}
+                    </Link>
+                    {radioFeedbackAvailable && giveStationFeedback && currentTrack && (
+                      <>
+                        <button
+                          className={`station-say station-say--bar ${said.more ? "station-say--on" : ""}`}
+                          type="button"
+                          title={said.more ? "Taken as a seed. Click to take it back." : "More like this on the station"}
+                          aria-label={`More like ${currentTrack.title}`}
+                          aria-pressed={said.more}
+                          onClick={() => giveStationFeedback(currentTrack, "more")}
+                        >
+                          <Icon name="thumbUp" size={12} />
+                        </button>
+                        <button
+                          className={`station-say station-say--bar ${said.less ? "station-say--on" : ""}`}
+                          type="button"
+                          title={said.less ? "Kept off this station. Click to take it back." : "Not this one on the station"}
+                          aria-label={`Not ${currentTrack.title} on this station`}
+                          aria-pressed={said.less}
+                          onClick={() => giveStationFeedback(currentTrack, "less")}
+                        >
+                          <Icon name="thumbDown" size={12} />
+                        </button>
+                      </>
+                    )}
+                  </span>
                 )}
               </div>
               <span
