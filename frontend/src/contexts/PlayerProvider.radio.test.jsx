@@ -168,6 +168,8 @@ describe("a station in the browser", () => {
     expect(api.radioReasons.get("1")).toBe("The track you started from");
     expect(api.radioReasons.get("2")).toBe("Close to Fen");
     expect(mocks.radio.getStationNext).toHaveBeenCalledWith(4, { excludeIds: [1] });
+    // One batch at the start: the look-ahead rides on the one in flight.
+    expect(mocks.radio.getStationNext).toHaveBeenCalledTimes(1);
   });
 
   it("asks for the next batch a few tracks before the end, excluding everything it holds", async () => {
@@ -217,9 +219,16 @@ describe("a station in the browser", () => {
     mocks.saved.sourceType = "radio";
     mocks.saved.sourceId = 4;
     mocks.tracksById.mockResolvedValue([t(1), t(2), t(3)]);
+    mocks.radio.getStationLineup.mockResolvedValue({
+      station,
+      tracks: [{ ...t(1), reason: "The track you started from" }, { ...t(2), reason: "Close to Fen" }],
+      resumable: true,
+    });
     await mount();
     await waitFor(() => expect(screen.getByTestId("station").textContent).toBe("Fen radio"));
     expect(mocks.radio.reportStationPlays).not.toHaveBeenCalled();
+    // The reasons come back with the lineup.
+    await waitFor(() => expect(api.radioReasons.get("2")).toBe("Close to Fen"));
 
     fireEvent.play(screen.getByTestId("audio"));
     fireEvent.play(screen.getByTestId("audio"));

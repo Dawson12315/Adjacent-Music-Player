@@ -152,6 +152,15 @@ export function PlayerProvider({ children }) {
         .then((station) => {
           if (stationSyncRef.current !== generation) return;
           setRadioStation(station || null);
+          // The reasons live in the session; the station's lineup has them
+          // for what is still queued, so the page is not bare after a reload.
+          return getStationLineup(source.source_id)
+            .then((lineup) => {
+              if (stationSyncRef.current !== generation) return;
+              const reasons = reasonsByTrackId(lineup.tracks);
+              if (reasons.size) setRadioReasons((previous) => new Map([...reasons, ...previous]));
+            })
+            .catch(() => {});
         })
         .catch((error) => {
           if (stationSyncRef.current !== generation) return;
@@ -564,14 +573,22 @@ export function PlayerProvider({ children }) {
           beginStation(station);
           setRadioReasons(new Map([[String(seedTrack.id), "The track you started from"]]));
           stationTrackIdsRef.current.add(String(seedTrack.id));
-          // Asked for while the seed starts, not after.
+          // Asked for while the seed starts, not after. It is also the refill
+          // in flight: a queue of one track is "near its end", and the
+          // look-ahead would otherwise ask for a second batch on top.
           const batchPromise = getStationNext(station.id, { excludeIds: [seedTrack.id] });
-          await playTracks([seedTrack], radioSource(station.id));
-          const batch = await batchPromise;
-          if (!isRadioSource(sourceRef.current) || sourceRef.current.source_id !== station.id) return station;
-          const rest = stationBatchCandidates(batch.tracks, { excludeIds: new Set([seedTrack.id]) });
-          absorbBatch(batch, station.id);
-          if (rest.length) dispatch({ type: "APPEND_TRACKS", tracks: rest });
+          const inFlight = batchPromise.then(() => 0, () => 0);
+          refillRef.current = inFlight;
+          try {
+            await playTracks([seedTrack], radioSource(station.id));
+            const batch = await batchPromise;
+            if (!isRadioSource(sourceRef.current) || sourceRef.current.source_id !== station.id) return station;
+            const rest = stationBatchCandidates(batch.tracks, { excludeIds: new Set([seedTrack.id]) });
+            absorbBatch(batch, station.id);
+            if (rest.length) dispatch({ type: "APPEND_TRACKS", tracks: rest });
+          } finally {
+            if (refillRef.current === inFlight) refillRef.current = null;
+          }
           announceStationsChanged();
           return station;
         }
