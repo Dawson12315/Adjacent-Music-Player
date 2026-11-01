@@ -158,6 +158,11 @@ export function PlayerProvider({ children }) {
             .then((lineup) => {
               if (stationSyncRef.current !== generation) return;
               const reasons = reasonsByTrackId(lineup.tracks);
+              // The seed of track radio plays from the client's own hand and
+              // is never in the lineup; it keeps its line too.
+              if (station?.seed_type === "track" && station.seed_track_id != null) {
+                reasons.set(String(station.seed_track_id), "The track you started from");
+              }
               if (reasons.size) setRadioReasons((previous) => new Map([...reasons, ...previous]));
             })
             .catch(() => {});

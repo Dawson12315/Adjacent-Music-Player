@@ -119,7 +119,13 @@ function Probe() {
   );
 }
 
-const station = { id: 4, name: "Fen radio", seed_type: "track", feedback: { more_track_ids: [], less_track_ids: [], less_artists: [] } };
+const station = {
+  id: 4,
+  name: "Fen radio",
+  seed_type: "track",
+  seed_track_id: 1,
+  feedback: { more_track_ids: [], less_track_ids: [], less_artists: [] },
+};
 
 function batch(ids, extra = {}) {
   return { station, tracks: ids.map((id) => ({ ...t(id), reason: `Close to Fen` })), thin: false, reach: null, ...extra };
@@ -227,8 +233,9 @@ describe("a station in the browser", () => {
     await mount();
     await waitFor(() => expect(screen.getByTestId("station").textContent).toBe("Fen radio"));
     expect(mocks.radio.reportStationPlays).not.toHaveBeenCalled();
-    // The reasons come back with the lineup.
+    // The reasons come back with the lineup; the seed keeps its own line.
     await waitFor(() => expect(api.radioReasons.get("2")).toBe("Close to Fen"));
+    expect(api.radioReasons.get("1")).toBe("The track you started from");
 
     fireEvent.play(screen.getByTestId("audio"));
     fireEvent.play(screen.getByTestId("audio"));
