@@ -16,7 +16,7 @@ mutagen==1.47.0
 packaging==26.1
 passlib[bcrypt]==1.7.4
 psycopg[binary]==3.3.5
-pyasn1==0.6.4
+pyasn1==0.6.5
 pycparser==3.0
 pydantic==2.12.5
 pydantic-settings==2.11.0
