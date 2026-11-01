@@ -29,7 +29,7 @@ def session_days() -> int:
 
 # Bumped whenever a client-facing route or field is added. Clients compare it
 # with the version they were built against.
-API_VERSION = 11
+API_VERSION = 12
 
 # The oldest mobile build this API still serves whole.
 MIN_CLIENT_VERSION = "1.0.31"
@@ -69,6 +69,10 @@ CAPABILITIES = [
     # or a ?device= query twin. A client that sends the device on its stream
     # requests gets hard one-device enforcement, not just the courtesy pause.
     "stream-lease",
+    # Stations seeded from a track, an album or an artist under /radio, with
+    # a lineup that resumes, "more like this" / "not this one" / "less of
+    # this artist" feedback, and batches that say how far they reached.
+    "radio",
 ]
 
 _FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None

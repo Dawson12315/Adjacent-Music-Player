@@ -16,6 +16,7 @@ from app.services.recommendations.genre_utils import (
 )
 from app.services.recommendations.ranking import rank_candidates
 from app.services.recommendations.retrieval import retrieve_candidates
+from app.services.recommendations.rec_cache import get_or_build
 from app.services.recommendations.user_taste import build_user_taste_profile
 from app.services.recommendations.utils import build_track_response
 
@@ -54,6 +55,7 @@ def _serialize_playlist_profile(
 
 # A playlist this long, this much of one genre, may hear a neighbour: see
 # `genre_restriction_relaxed` below.
+USER_TASTE_TTL_SECONDS = 180
 RELAX_GENRE_MIN_TRACKS = 20
 RELAX_GENRE_DOMINANT_SHARE = 0.80
 
@@ -448,7 +450,14 @@ def get_playlist_recommendations_from_track_ids(
     )
 
     # Built once per request; bounded personalization applied during ranking.
-    user_taste = build_user_taste_profile(db, user_id)
+    # The profile walks every track the listener has played; a listener with
+    # thousands pays for that once per few minutes, not once per batch. Each
+    # play drops the entry (see listening_service).
+    user_taste = (
+        get_or_build(f"user_taste:{user_id}", lambda: build_user_taste_profile(db, user_id), ttl_seconds=USER_TASTE_TTL_SECONDS)
+        if user_id is not None
+        else None
+    )
 
     global_scored_candidates, global_debug_by_track_id, global_retrieved_candidates = (
         _retrieve_and_rank_candidates(

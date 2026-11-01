@@ -1,4 +1,5 @@
 import re
+import re
 from functools import lru_cache
 
 from app.models.track import Track
@@ -341,11 +342,37 @@ FAMILY_KEYWORD_RULES = [
 ]
 
 
+# Tags that say nothing about how a track sounds. A tagger's "Miscellaneous",
+# a decade, a Last.fm "seen live": left in, each becomes a genre family of
+# its own, and a seed carrying only that tag is walled off from the rest of
+# the library. Treated as no tag at all.
+NON_GENRE_TAGS = {
+    "miscellaneous", "misc", "other", "others", "unknown", "none", "n/a", "na", "null",
+    "0", "genre", "no genre", "default", "general", "various", "unclassified",
+    "uncategorized", "uncategorised", "undefined", "untitled", "top 40",
+    "male vocalist", "male vocalists", "female vocalist", "female vocalists",
+    "seen live", "favorites", "favourites", "favorite", "favourite", "favorite songs",
+    "awesome", "love", "loved", "good", "cool", "best", "beautiful", "my music", "check out",
+    "spotify", "all", "music",
+}
+_DECADE_TAG = re.compile(r"^(?:\d{4}|\d{2}|\d{4}s|\d{2}s|\d{4}'s|\d{2}'s)$")
+
+
+def is_non_genre_tag(value: str | None) -> bool:
+    """Whether a tag carries no genre: a placeholder, a decade, a rating."""
+    if not value:
+        return True
+    normalized = normalize_genre_name(str(value))
+    if not normalized or normalized in NON_GENRE_TAGS:
+        return True
+    return bool(_DECADE_TAG.match(normalized))
+
+
 def get_track_genres(track: Track) -> list[str]:
     """
     Returns all genres associated with a track.
     Prefers normalized track_genres relationship,
-    falls back to raw track.genre.
+    falls back to raw track.genre. Tags that are not genres are left out.
     """
     if track.track_genres:
         seen = set()
@@ -356,7 +383,7 @@ def get_track_genres(track: Track) -> list[str]:
                 continue
 
             genre = item.genre.strip()
-            if not genre:
+            if not genre or is_non_genre_tag(genre):
                 continue
 
             normalized = normalize_genre_name(genre)
@@ -369,7 +396,7 @@ def get_track_genres(track: Track) -> list[str]:
         if genres:
             return genres
 
-    if track.genre and track.genre.strip():
+    if track.genre and track.genre.strip() and not is_non_genre_tag(track.genre):
         return [track.genre.strip()]
 
     return []

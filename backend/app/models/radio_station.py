@@ -60,3 +60,23 @@ class RadioStationPlay(Base):
     __table_args__ = (
         Index("ix_radio_station_plays_station", "station_id", "played_at"),
     )
+
+
+class RadioStationFeedback(Base):
+    """What the listener said about a track on a station: more like this
+    (the track joins the seeds), not this one (it stays off the station),
+    or less of its artist (their tracks leave the neighbours)."""
+
+    __tablename__ = "radio_station_feedback"
+
+    id = Column(Integer, primary_key=True)
+    station_id = Column(Integer, nullable=False)
+    track_id = Column(Integer, nullable=True)
+    kind = Column(String(16), nullable=False)
+    artist_key = Column(String, nullable=True)
+    artist_name = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_radio_station_feedback_station", "station_id", "kind"),
+    )

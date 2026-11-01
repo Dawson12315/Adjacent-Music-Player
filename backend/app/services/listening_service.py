@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.listening_event import ListeningEvent
 from app.models.track import Track
 from app.models.track_user_stats import TrackUserStats
+from app.services.recommendations.rec_cache import invalidate
 from app.schemas.listening import ListeningEventCreate
 
 
@@ -158,5 +159,6 @@ def record_listening_event(
 
     db.commit()
     db.refresh(event)
+    invalidate(f"user_taste:{user_id}")
 
     return event

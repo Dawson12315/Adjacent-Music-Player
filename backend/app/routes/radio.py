@@ -8,6 +8,8 @@ from app.models.track import Track
 from app.models.user import User
 from app.routes.tracks import build_track_responses_for_ids
 from app.schemas.radio import (
+    RadioFeedbackRequest,
+    RadioFeedbackResponse,
     RadioLineupResponse,
     RadioNextResponse,
     RadioPlayedRequest,
@@ -20,6 +22,10 @@ from app.services.track_responses import get_artwork_maps, record_artist, resolv
 from app.utils.artist_normalization import normalize_artist_name
 
 router = APIRouter()
+
+# A client holds at most a few hundred tracks; more than this in the exclude
+# list is a bug upstream, and the newest are the ones that matter.
+EXCLUDE_IDS_MAX = 1000
 
 
 def _station_or_404(db: Session, station_id: int, user_id: int) -> RadioStation:
@@ -56,7 +62,16 @@ def _artwork_for(db: Session, station: RadioStation) -> str | None:
     return artist_map.get(normalize_artist_name(station.seed_artist))
 
 
-def _station_response(db: Session, station: RadioStation) -> RadioStationResponse:
+def _feedback_response(db: Session, station: RadioStation) -> RadioFeedbackResponse:
+    feedback = radio.station_feedback(db, station)
+    return RadioFeedbackResponse(
+        more_track_ids=list(feedback["more"]),
+        less_track_ids=sorted(feedback["less"]),
+        less_artists=sorted(feedback["less_artists"].values(), key=str.lower),
+    )
+
+
+def _station_response(db: Session, station: RadioStation, *, with_feedback: bool = False) -> RadioStationResponse:
     return RadioStationResponse(
         id=station.id,
         seed_type=station.seed_type,
@@ -68,6 +83,7 @@ def _station_response(db: Session, station: RadioStation) -> RadioStationRespons
         artwork_path=_artwork_for(db, station),
         created_at=station.created_at,
         last_played_at=station.last_played_at,
+        feedback=_feedback_response(db, station) if with_feedback else None,
     )
 
 
@@ -79,7 +95,7 @@ def _parse_ids(text: str | None) -> list[int]:
         part = part.strip()
         if part.isdigit():
             ids.append(int(part))
-    return ids
+    return ids[-EXCLUDE_IDS_MAX:]
 
 
 @router.post("/radio/stations", response_model=RadioStationResponse, tags=["radio"])
@@ -93,7 +109,7 @@ def create_station(
     station = radio.get_or_create_station(db, current_user.id, payload)
     if station is None:
         raise HTTPException(status_code=404, detail="Nothing in the library to seed a station from")
-    return _station_response(db, station)
+    return _station_response(db, station, with_feedback=True)
 
 
 @router.get("/radio/stations", response_model=list[RadioStationResponse], tags=["radio"])
@@ -112,7 +128,7 @@ def get_station(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _station_response(db, _station_or_404(db, station_id, current_user.id))
+    return _station_response(db, _station_or_404(db, station_id, current_user.id), with_feedback=True)
 
 
 @router.get("/radio/stations/{station_id}/next", response_model=RadioNextResponse, tags=["radio"])
@@ -125,14 +141,25 @@ def next_tracks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """The next batch. 410 once the seed is no longer in the library: the
+    client should drop the station."""
     station = _station_or_404(db, station_id, current_user.id)
-    pairs, thin = radio.next_batch(
-        db, station, current_user.id, limit=limit, exclude_track_ids=_parse_ids(exclude_track_ids)
-    )
-    # Handed out, so remembered: coming back to the station continues this.
+    try:
+        pairs, thin, reach = radio.next_batch(
+            db, station, current_user.id, limit=limit, exclude_track_ids=_parse_ids(exclude_track_ids)
+        )
+    except radio.SeedGone:
+        raise HTTPException(status_code=410, detail="The station's seed is no longer in the library")
+    # Handed out, so remembered: coming back to the station continues this,
+    # and the next batch does not repeat it.
     if pairs:
         radio.extend_lineup(db, station, pairs)
-    return RadioNextResponse(station=_station_response(db, station), tracks=_radio_tracks(db, pairs), thin=thin)
+    return RadioNextResponse(
+        station=_station_response(db, station, with_feedback=True),
+        tracks=_radio_tracks(db, pairs),
+        thin=thin,
+        reach=reach,
+    )
 
 
 def _radio_tracks(db: Session, pairs) -> list[RadioTrackResponse]:
@@ -157,13 +184,13 @@ def station_lineup(
 ):
     """Where the station was left: its lineup from the track the listener
     got to, onward, so a client can continue it without asking the
-    recommender. Empty when the station has never played, or its lineup is
-    older than ten days."""
+    recommender. Empty when the station has never played, or it has been
+    ten days since it last did."""
     station = _station_or_404(db, station_id, current_user.id)
     pairs = radio.remaining_lineup(station)
     tracks = _radio_tracks(db, pairs)
     return RadioLineupResponse(
-        station=_station_response(db, station),
+        station=_station_response(db, station, with_feedback=True),
         tracks=tracks,
         resumable=bool(tracks),
         saved_at=station.lineup_saved_at if tracks else None,
@@ -178,10 +205,48 @@ def report_played(
     current_user: User = Depends(get_current_user),
 ):
     """The client says what the station played; those stay out of the next
-    two hundred, and the station moves to the top of the recent list."""
+    two hundred, and the station moves to the top of the recent list.
+    `remembered` counts distinct tracks."""
     station = _station_or_404(db, station_id, current_user.id)
     radio.record_plays(db, station, payload.track_ids)
     return {"ok": True, "remembered": len(radio.remembered_track_ids(db, station))}
+
+
+@router.post("/radio/stations/{station_id}/feedback", response_model=RadioFeedbackResponse, tags=["radio"])
+def give_feedback(
+    station_id: int,
+    payload: RadioFeedbackRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """More like this (the track joins the station's seeds), not this one
+    (it stays off the station), or less of this artist (their tracks leave
+    the neighbours). 409 for "less of" the station's own artist."""
+    station = _station_or_404(db, station_id, current_user.id)
+    track = db.query(Track).filter(Track.id == payload.track_id).first()
+    if track is None:
+        raise HTTPException(status_code=404, detail="Track not found")
+    if payload.kind == radio.FEEDBACK_LESS_ARTIST and radio.artist_is_own(station, track.artist):
+        raise HTTPException(status_code=409, detail="That artist is the station")
+    radio.set_feedback(db, station, payload.kind, track)
+    return _feedback_response(db, station)
+
+
+@router.delete("/radio/stations/{station_id}/feedback", response_model=RadioFeedbackResponse, tags=["radio"])
+def take_back_feedback(
+    station_id: int,
+    track_id: int,
+    kind: str = Query(..., pattern="^(more|less|less_artist)$"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The listener takes it back."""
+    station = _station_or_404(db, station_id, current_user.id)
+    track = db.query(Track).filter(Track.id == track_id).first()
+    if track is None:
+        raise HTTPException(status_code=404, detail="Track not found")
+    radio.clear_feedback(db, station, kind, track)
+    return _feedback_response(db, station)
 
 
 @router.delete("/radio/stations/{station_id}", tags=["radio"])

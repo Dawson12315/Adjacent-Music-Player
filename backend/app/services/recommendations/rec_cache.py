@@ -20,7 +20,7 @@ _guard = threading.Lock()
 _cache: dict[str, tuple[float, Any]] = {}
 
 
-def get_or_build(key: str, builder: Callable[[], Any]) -> Any:
+def get_or_build(key: str, builder: Callable[[], Any], ttl_seconds: float | None = None) -> Any:
     now = time.monotonic()
 
     with _guard:
@@ -31,9 +31,15 @@ def get_or_build(key: str, builder: Callable[[], Any]) -> Any:
     value = builder()
 
     with _guard:
-        _cache[key] = (now + _CACHE_TTL_SECONDS, value)
+        _cache[key] = (now + (ttl_seconds if ttl_seconds is not None else _CACHE_TTL_SECONDS), value)
 
     return value
+
+
+def invalidate(key: str) -> None:
+    """Drop one entry: for caches shaped by one listener rather than the library."""
+    with _guard:
+        _cache.pop(key, None)
 
 
 def invalidate_library_caches() -> None:

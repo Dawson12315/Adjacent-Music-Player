@@ -28,6 +28,23 @@ class RadioStationCreate(BaseModel):
         return text or None
 
 
+FeedbackKind = Literal["more", "less", "less_artist"]
+
+
+class RadioFeedbackResponse(BaseModel):
+    """What the listener has said about a station: tracks that joined the
+    seeds, tracks kept off it, artists kept out of its neighbours."""
+
+    more_track_ids: list[int] = Field(default_factory=list)
+    less_track_ids: list[int] = Field(default_factory=list)
+    less_artists: list[str] = Field(default_factory=list)
+
+
+class RadioFeedbackRequest(BaseModel):
+    track_id: int
+    kind: FeedbackKind
+
+
 class RadioStationResponse(BaseModel):
     id: int
     seed_type: str
@@ -39,6 +56,8 @@ class RadioStationResponse(BaseModel):
     artwork_path: Optional[str] = None
     created_at: datetime
     last_played_at: datetime
+    # Present on the single-station routes; the recent list leaves it out.
+    feedback: Optional[RadioFeedbackResponse] = None
 
 
 class RadioTrackResponse(TrackResponse):
@@ -49,9 +68,14 @@ class RadioTrackResponse(TrackResponse):
 class RadioNextResponse(BaseModel):
     station: RadioStationResponse
     tracks: list[RadioTrackResponse]
-    # The library could not fill the batch even after relaxing the station's
-    # memory: the client may say so, and should expect repeats soon.
+    # The seeds' corner of the library could not fill the batch: the station
+    # reached wider for the rest. The client may say so, once.
     thin: bool = False
+    # How far it reached, widest step: "genre" (the seeds' genres), "artist"
+    # (the seed artist's other genres), "listener" (what you play most),
+    # "library" (anywhere), "again" (round again, memory set aside). None
+    # when the batch came from the recommender and the seed's own material.
+    reach: Optional[str] = None
 
 
 class RadioLineupResponse(BaseModel):

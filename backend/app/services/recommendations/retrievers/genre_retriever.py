@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.track import Track
 from app.models.track_genre import TrackGenre
-from app.services.recommendations.genre_utils import map_genre_to_family
+from app.services.recommendations.genre_utils import map_genre_to_family, is_non_genre_tag
 from app.services.recommendations.rec_cache import get_or_build
 from app.services.recommendations.types import RetrievedCandidate
 
@@ -30,7 +30,7 @@ def get_genre_family_map(db: Session) -> dict[str, str]:
             if row[0]
         )
 
-        return {genre: map_genre_to_family(genre) for genre in genre_values}
+        return {genre: map_genre_to_family(genre) for genre in genre_values if not is_non_genre_tag(genre)}
 
     return get_or_build("genre_family_map", build)
 
