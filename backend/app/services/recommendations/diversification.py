@@ -11,7 +11,16 @@ def diversify_tracks(
     max_results=20,
     refresh: int = 0,
     playlist_id: int | None = None,
+    diversify_families: bool = True,
+    artist_cap: int | None = None,
 ):
+    """`artist_cap` overrides how many of one artist's tracks may be picked
+    (a station asks for its own neighbour cap, since its neighbourhood may
+    be three artists deep). `diversify_families` is the playlist's family mix: a cap per genre
+    family and a penalty for repeating one. A radio station turns it off —
+    a station is one neighbourhood on purpose, and the cap was what let a
+    listener's favourites from another family into a house station once
+    five house tracks had been picked."""
     family_counts = playlist_profile.get("family_counts", Counter())
     is_multi_cluster = bool(playlist_profile.get("is_multi_cluster", False))
 
@@ -30,9 +39,11 @@ def diversify_tracks(
     # Relaxed (a long one-genre playlist): the family cap of an ordinary
     # playlist, so the off-genre picks the ranking let through have room.
     relaxed = bool(playlist_profile.get("genre_restriction_relaxed", False))
-    base_max_artist_repeat = 2 if focused_playlist else 1
+    base_max_artist_repeat = artist_cap if artist_cap is not None else (2 if focused_playlist else 1)
     base_max_album_repeat = 1
     base_max_family_repeat = 5 if focused_playlist and not relaxed else 3
+    if not diversify_families:
+        base_max_family_repeat = None
 
     rng = random.Random(f"diversify:{playlist_id}:{refresh}")
 
@@ -194,7 +205,8 @@ def diversify_tracks(
                     family_repeat_penalty = selected_family_counts[family] * (
                         1.0 if focused_playlist else 1.5
                     )
-                    diversity_penalty += family_repeat_penalty
+                    if diversify_families:
+                        diversity_penalty += family_repeat_penalty
 
                     desired_ratio = (
                         family_counts[family] / total_family_weight

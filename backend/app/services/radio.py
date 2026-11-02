@@ -73,6 +73,16 @@ OWN_BACKFILL = 2
 # How many neighbour slots one artist may take in a batch. The listener's
 # favourite artists stay prominent; they do not become the whole station.
 NEIGHBOUR_ARTIST_CAP = 3
+# How far back the station looks when deciding an artist has had its turn:
+# the last two batches. An artist with three rows there gets two this
+# batch, with six gets one, never none — a corner of three artists still
+# plays, it just rotates. Without this the map's nearest-first order hands
+# the same five artists out every batch for an hour.
+RECENT_ARTIST_WINDOW = 40
+# How near in the map a track must be for the station to call it "Near …",
+# and to be worth reaching for before the genre families are.
+NEAR_COSINE = 0.45
+NEAR_REACH_COSINE = 0.35
 # How many of the artist's tracks seed the recommender: enough to carry the
 # vibe, few enough that a huge catalogue does not swamp the channels.
 ARTIST_SEED_SAMPLE = 40
@@ -95,6 +105,7 @@ FEEDBACK_LESS_ARTIST = "less_artist"
 FEEDBACK_KINDS = (FEEDBACK_MORE, FEEDBACK_LESS, FEEDBACK_LESS_ARTIST)
 
 # How far a batch had to reach, widest step last.
+REACH_NEAR = "near"
 REACH_GENRE = "genre"
 REACH_ARTIST = "artist"
 REACH_LISTENER = "listener"
@@ -574,6 +585,9 @@ def _recommend(db, seed_ids, user_id, excluded, limit, refresh=0):
         include_recent_additions=False,
         allow_genre_relaxation=True,
         exclude_from_retrieval=True,
+        diversify_families=False,
+        map_strength=1.0,
+        artist_cap=NEIGHBOUR_ARTIST_CAP,
     )
     if not isinstance(answer, dict):
         return []
@@ -599,6 +613,8 @@ def _neighbour_reason(candidate: dict, own_name: str) -> str:
     families = debug.get("shared_families") or []
     if (sources.get("lastfm_track") or 0) > 0 or (sources.get("lastfm_artist") or 0) > 0:
         return f"Similar to {own_name}"
+    if (sources.get("vector") or 0) >= NEAR_COSINE:
+        return f"Near {own_name}"
     if (sources.get("cooccurrence") or 0) > 0:
         return f"Often played around {own_name}"
     if (sources.get("behavior") or 0) > 0:
@@ -700,6 +716,39 @@ def _spread_artists(rows: list[tuple[int, str | None]], artist_of: dict[int, str
     return rows
 
 
+def _near_ids(db: Session, seed_ids: list[int], want: int, keep_out: set[int]) -> list[int]:
+    """The nearest tracks to the seeds in the map, nearest first, that the
+    station has not already got; empty when there is no map yet."""
+    from app.services.recommendations.vector_map import get_vector_index
+
+    index = get_vector_index(db)
+    if index is None:
+        return []
+    query = index.query_from(seed_ids)
+    if query is None:
+        return []
+    return [track_id for track_id, cosine in index.nearest(query, want, exclude=keep_out) if cosine >= NEAR_REACH_COSINE]
+
+
+def _by_nearness(db: Session, seed_ids: list[int], pool_ids: list[int]) -> tuple[list[int], bool]:
+    """A pool sorted nearest-to-the-seeds first by the map (unplaced tracks
+    last, shuffled), and whether the map had a say. With no map the pool is
+    returned as it came, to be sampled at random."""
+    from app.services.recommendations.vector_map import get_vector_index
+
+    index = get_vector_index(db)
+    if index is None or not pool_ids:
+        return pool_ids, False
+    query = index.query_from(seed_ids)
+    if query is None:
+        return pool_ids, False
+    fit = index.fit(pool_ids, query)
+    placed = sorted((track_id for track_id in pool_ids if track_id in fit), key=lambda track_id: -fit[track_id])
+    unplaced = [track_id for track_id in pool_ids if track_id not in fit]
+    random.shuffle(unplaced)
+    return placed + unplaced, True
+
+
 def _widen(
     db: Session,
     pool_ids: list[int],
@@ -707,15 +756,20 @@ def _widen(
     less_artists: set[str],
     per_artist: Counter,
     need: int,
+    ordered: bool = False,
+    cap_for=None,
 ) -> list[tuple[int, str]]:
-    """Up to `need` tracks drawn at random from a pool, keeping the artist
-    caps. Returns (track_id, artist) pairs."""
+    """Up to `need` tracks drawn from a pool, keeping the artist caps —
+    at random, or in the pool's own order when it is already ranked (the
+    map's nearest first). Returns (track_id, artist) pairs."""
     if need <= 0:
         return []
     pool = [track_id for track_id in pool_ids if track_id not in keep_out]
     if not pool:
         return []
-    sample = random.sample(pool, min(len(pool), need * 4))
+    # An ordered pool is read from the front — far enough that the artist
+    # caps can skip past a run of one artist's nearest tracks.
+    sample = pool[: need * 12] if ordered else random.sample(pool, min(len(pool), need * 4))
     artists = dict(db.query(Track.id, Track.artist).filter(Track.id.in_(sample)).all())
     chosen: list[tuple[int, str]] = []
     for track_id in sample:
@@ -723,7 +777,7 @@ def _widen(
         key = normalize_artist_name(artist)
         if key and key in less_artists:
             continue
-        if key and per_artist[key] >= NEIGHBOUR_ARTIST_CAP:
+        if key and per_artist[key] >= (cap_for(key) if cap_for else NEIGHBOUR_ARTIST_CAP):
             continue
         if key:
             per_artist[key] += 1
@@ -776,6 +830,18 @@ def next_batch(
 
     own_ids = {track.id for track in material.own}
     material_seed_ids = {track.id for track in material.seeds}
+
+    # Artists heard in the last two batches take a smaller turn this time.
+    recent_ids = handed_out[-RECENT_ARTIST_WINDOW:]
+    recent_artists: Counter = Counter()
+    if recent_ids:
+        for artist in db.query(Track.artist).filter(Track.id.in_(recent_ids)):
+            key = normalize_artist_name(artist[0] or "")
+            if key:
+                recent_artists[key] += 1
+
+    def cap_for(key: str) -> int:
+        return NEIGHBOUR_ARTIST_CAP - min(NEIGHBOUR_ARTIST_CAP - 1, recent_artists[key] // NEIGHBOUR_ARTIST_CAP)
     artist_of: dict[int, str] = {track.id: normalize_artist_name(track.artist or "") for track in material.own}
     for seed in seeds:
         artist_of[seed.id] = normalize_artist_name(seed.artist or "")
@@ -793,7 +859,10 @@ def next_batch(
             # a seed for the recommender's sake only and may come round
             # again once the memory lets it.
             excluded |= material_seed_ids
-        candidates = _recommend(db, seed_ids, user_id, excluded, CANDIDATE_POOL, refresh=len(lineup_rows))
+        # The recommender is asked for neighbours only: own material has its
+        # share below, and with the map in place the seed's own catalogue
+        # would otherwise be the nearest thing and fill the pool.
+        candidates = _recommend(db, seed_ids, user_id, excluded | own_ids, CANDIDATE_POOL, refresh=len(lineup_rows))
 
         chosen_own: list[tuple[int, str | None]] = []
         neighbours: list[tuple[int, str | None]] = []
@@ -811,7 +880,7 @@ def next_batch(
             key = normalize_artist_name(candidate.get("artist") or "")
             if key and key in less_artists:
                 continue
-            if key and per_artist[key] >= NEIGHBOUR_ARTIST_CAP:
+            if key and per_artist[key] >= cap_for(key):
                 continue
             if key:
                 per_artist[key] += 1
@@ -853,20 +922,30 @@ def next_batch(
     if len(batch) < limit:
         thin = True
         seed_families = _families_of(seeds)
+        # The map first: the nearest tracks the station has not played, in
+        # order of nearness. Only past those does the station fall back to
+        # the genre families, which are the same idea at far lower
+        # resolution.
         steps = [
-            (REACH_GENRE, lambda: _ids_in_families(db, seed_families), f"Shares a genre with {own_name}"),
+            (REACH_NEAR, lambda: _near_ids(db, seed_ids, (limit - len(batch)) * 12, excluded | have | own_ids), f"Near {own_name}", True),
+            (REACH_GENRE, lambda: _ids_in_families(db, seed_families), f"Shares a genre with {own_name}", False),
             (
                 REACH_ARTIST,
                 lambda: _ids_in_families(db, _families_of(material.own) - seed_families),
                 f"Further afield from {own_name}",
+                False,
             ),
-            (REACH_LISTENER, lambda: _ids_in_families(db, _listener_families(db, user_id) - seed_families), "From what you play most"),
-            (REACH_LIBRARY, lambda: _library_ids(db), "Somewhere else in your library"),
+            (REACH_LISTENER, lambda: _ids_in_families(db, _listener_families(db, user_id) - seed_families), "From what you play most", False),
+            (REACH_LIBRARY, lambda: _library_ids(db), "Somewhere else in your library", False),
         ]
-        for name, load, reason in steps:
+        for name, load, reason, ordered in steps:
             if len(batch) >= limit:
                 break
-            picked = _widen(db, load(), excluded | have, less_artists, per_artist, limit - len(batch))
+            pool = load()
+            if not ordered:
+                # Within a family pool, nearest first when the map can say.
+                pool, ordered = _by_nearness(db, seed_ids, pool)
+            picked = _widen(db, pool, excluded | have, less_artists, per_artist, limit - len(batch), ordered=ordered, cap_for=cap_for)
             for track_id, artist in picked:
                 batch.append((track_id, reason))
                 have.add(track_id)
@@ -879,10 +958,18 @@ def next_batch(
         # again, keeping out only what the client is still holding and what
         # the listener said no to.
         keep_out = client_excluded | less | have
-        for load in (lambda: _ids_in_families(db, _families_of(seeds)), lambda: _library_ids(db)):
+        rounds = (
+            (lambda: _near_ids(db, seed_ids, (limit - len(batch)) * 12, keep_out | own_ids), True),
+            (lambda: _ids_in_families(db, _families_of(seeds)), False),
+            (lambda: _library_ids(db), False),
+        )
+        for load, ordered in rounds:
             if len(batch) >= limit:
                 break
-            picked = _widen(db, load(), keep_out, less_artists, Counter(), limit - len(batch))
+            pool = load()
+            if not ordered:
+                pool, ordered = _by_nearness(db, seed_ids, pool)
+            picked = _widen(db, pool, keep_out, less_artists, Counter(), limit - len(batch), ordered=ordered, cap_for=cap_for)
             for track_id, artist in picked:
                 batch.append((track_id, f"Back around to {own_name}"))
                 have.add(track_id)

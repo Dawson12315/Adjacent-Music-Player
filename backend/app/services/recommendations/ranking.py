@@ -19,11 +19,23 @@ CHANNEL_WEIGHTS = {
     "lastfm_artist": 1.5,
     "lastfm_track": 2.5,
     "recent": 0.5,
+    "vector": 2.0,
 }
 
 # On the normalized 0–1 scale: a candidate in the top 40% of Last.fm artist
 # matches counts as strongly aligned.
 STRONG_LASTFM_ARTIST_NORM_THRESHOLD = 0.60
+
+# The map's raw cosine to the seeds. Near enough to count as aligned with
+# them; near enough to stand in for a shared family at the focused gate;
+# far enough that a favourite of the listener's is damped like any other
+# unaligned candidate even when it shares a family label.
+VECTOR_ALIGNED_COSINE = 0.45
+VECTOR_STRONG_COSINE = 0.60
+VECTOR_FAR_COSINE = 0.25
+# With a map present the family label is a coarse version of the same
+# information, so it speaks more quietly.
+GENRE_WEIGHT_WITH_MAP = 0.6
 
 
 def rank_normalize(values_by_track: dict[int, float]) -> dict[int, float]:
@@ -70,6 +82,7 @@ def rank_candidates(
     refresh: int = 0,
     playlist_id: int | None = None,
     user_taste: dict | None = None,
+    map_strength: float = 0.5,
 ):
     scored_candidates = []
     debug_by_track_id = {}
@@ -88,6 +101,8 @@ def rank_candidates(
     relaxed = bool(playlist_profile.get("genre_restriction_relaxed"))
 
     normalized_channels = normalize_channels(retrieved_candidates)
+    has_map = "vector" in normalized_channels
+    genre_weight = CHANNEL_WEIGHTS["genre"] * (GENRE_WEIGHT_WITH_MAP if has_map else 1.0)
 
     # The day is part of the seed: the client's counter restarts at 1 on every
     # page load, and with a fixed seed the first reshuffle after a reload was
@@ -108,6 +123,7 @@ def rank_candidates(
             playlist_artist_counts=playlist_artist_counts,
             playlist_album_counts=playlist_album_counts,
             retrieved_source_scores=retrieval_sources,
+            map_strength=map_strength,
         )
 
         normalized = {
@@ -119,13 +135,19 @@ def rank_candidates(
             normalized["lastfm_artist"] >= STRONG_LASTFM_ARTIST_NORM_THRESHOLD
             and retrieval_sources.get("lastfm_artist", 0.0) > 0
         )
+        vector_fit = retrieval_sources.get("vector")
+        on_map = vector_fit is not None
+        vector_aligned = on_map and vector_fit >= VECTOR_ALIGNED_COSINE
+        vector_strong = on_map and vector_fit >= VECTOR_STRONG_COSINE
+        vector_far = on_map and vector_fit < VECTOR_FAR_COSINE
 
         content_fit_score = (
-            normalized["genre"] * CHANNEL_WEIGHTS["genre"]
+            normalized["genre"] * genre_weight
             + normalized["cooccurrence"] * CHANNEL_WEIGHTS["cooccurrence"]
             + normalized["lastfm_artist"] * CHANNEL_WEIGHTS["lastfm_artist"]
             + normalized["lastfm_track"] * CHANNEL_WEIGHTS["lastfm_track"]
             + normalized["recent"] * CHANNEL_WEIGHTS["recent"]
+            + (normalized["vector"] * CHANNEL_WEIGHTS["vector"] if vector_aligned else 0.0)
         )
 
         user_affinity_score = normalized["behavior"] * CHANNEL_WEIGHTS["behavior"]
@@ -149,6 +171,7 @@ def rank_candidates(
             or has_genre_signal
             or has_lastfm_artist_signal
             or has_lastfm_track_signal
+            or vector_aligned
         )
 
         candidate_debug["base_score"] = base_score
@@ -161,13 +184,15 @@ def rank_candidates(
         candidate_debug["unique_family_count"] = unique_family_count
         candidate_debug["is_multi_cluster"] = is_multi_cluster
         candidate_debug["strong_lastfm_artist_alignment"] = strong_lastfm_artist_alignment
+        candidate_debug["vector_fit"] = vector_fit
+        candidate_debug["vector_aligned"] = vector_aligned
         candidate_debug["taste_bonus"] = taste_bonus
         candidate_debug["skip_penalty"] = skip_penalty
 
         if focused_playlist and not metadata_sparse and not has_shared_family and not relaxed:
-            if strong_lastfm_artist_alignment or has_lastfm_track_signal:
+            if strong_lastfm_artist_alignment or has_lastfm_track_signal or vector_strong:
                 candidate_debug.setdefault("reasons", []).append(
-                    "focused_playlist_lastfm_alignment_override"
+                    "focused_playlist_map_alignment_override" if vector_strong else "focused_playlist_lastfm_alignment_override"
                 )
                 content_fit_score *= 0.65
             else:
@@ -196,7 +221,7 @@ def rank_candidates(
                 if user_affinity_score > 0:
                     user_affinity_score *= 0.05
 
-                if strong_lastfm_artist_alignment or has_lastfm_track_signal:
+                if strong_lastfm_artist_alignment or has_lastfm_track_signal or vector_strong:
                     candidate_debug.setdefault("reasons", []).append(
                         "focused_playlist_lastfm_soft_penalty"
                     )
@@ -218,6 +243,14 @@ def rank_candidates(
                         candidate_debug.setdefault("reasons", []).append(
                             "behavior_without_alignment_penalty"
                         )
+
+        # The map's one hard word on favourites: a track the listener plays
+        # a lot but which sits nowhere near the seeds is damped whatever
+        # family label it carries. This is how R&B stopped arriving on a
+        # house station for a listener who plays R&B.
+        if vector_far and user_affinity_score > 0:
+            user_affinity_score *= 0.25
+            candidate_debug.setdefault("reasons", []).append("far_from_seeds_in_map")
 
         if metadata_sparse and has_cooccurrence:
             content_fit_score += 1.0

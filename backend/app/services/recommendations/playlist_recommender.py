@@ -209,6 +209,7 @@ def _retrieve_and_rank_candidates(
     include_recent_additions: bool = False,
     excluded_track_ids: list[int] | None = None,
     exclude_liked_behavior: bool = False,
+    map_strength: float = 0.5,
 ):
     retrieved_candidates = retrieve_candidates(
         db=db,
@@ -253,6 +254,7 @@ def _retrieve_and_rank_candidates(
         refresh=refresh,
         playlist_id=playlist_id,
         user_taste=user_taste,
+        map_strength=map_strength,
     )
 
     return scored_candidates, debug_by_track_id, retrieved_candidates
@@ -418,6 +420,9 @@ def get_playlist_recommendations_from_track_ids(
     allow_genre_relaxation: bool = False,
     exclude_from_retrieval: bool = False,
     exclude_liked_behavior: bool = False,
+    diversify_families: bool = True,
+    map_strength: float = 0.5,
+    artist_cap: int | None = None,
 ):
     """Suggestions for a list of seed tracks.
 
@@ -472,6 +477,7 @@ def get_playlist_recommendations_from_track_ids(
             include_recent_additions=include_recent_additions,
             excluded_track_ids=exclude_track_ids if exclude_from_retrieval else None,
             exclude_liked_behavior=exclude_liked_behavior,
+            map_strength=map_strength,
         )
     )
 
@@ -499,6 +505,7 @@ def get_playlist_recommendations_from_track_ids(
                     user_taste=user_taste,
                     excluded_track_ids=exclude_track_ids if exclude_from_retrieval else None,
                     exclude_liked_behavior=exclude_liked_behavior,
+                    map_strength=map_strength,
                 )
             )
 
@@ -599,6 +606,8 @@ def get_playlist_recommendations_from_track_ids(
         max_results=limit,
         refresh=refresh,
         playlist_id=playlist_id,
+        diversify_families=diversify_families,
+        artist_cap=artist_cap,
     )
 
     if (

@@ -29,7 +29,7 @@ def session_days() -> int:
 
 # Bumped whenever a client-facing route or field is added. Clients compare it
 # with the version they were built against.
-API_VERSION = 13
+API_VERSION = 14
 
 # The oldest mobile build this API still serves whole.
 MIN_CLIENT_VERSION = "1.0.31"
@@ -77,6 +77,7 @@ CAPABILITIES = [
     # on PATCH /auth/me/preferences and in /auth/me), one of the ids in
     # services/themes.py, so every device wears the same look.
     "themes",
+    "vector-map",
 ]
 
 _FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None

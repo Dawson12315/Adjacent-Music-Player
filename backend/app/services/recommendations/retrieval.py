@@ -18,6 +18,9 @@ from app.services.recommendations.retrievers.lastfm_track_retriever import (
 from app.services.recommendations.retrievers.recent_additions_retriever import (
     retrieve_recent_addition_candidates,
 )
+from app.services.recommendations.retrievers.vector_retriever import (
+    retrieve_vector_candidates,
+)
 from app.services.recommendations.types import RetrievedCandidate
 
 # How much a press of "refresh" may move a candidate's retrieval total, as a
@@ -26,6 +29,13 @@ from app.services.recommendations.types import RetrievedCandidate
 # this a refresh only ever reshuffled the genre and Last.fm artist channels
 # and the same candidates sat at the top of the pool. Zero when refresh is 0.
 REFRESH_RETRIEVAL_JITTER = 0.15
+# Candidates at least this near the seeds in the map keep a protected seat,
+# nearest first; and when the pool is trimmed, a cosine counts for this
+# many points beside the other channels' raw sums, or a track the map puts
+# at 0.96 would lose its place to one three genre tags found.
+VECTOR_PROTECT_COSINE = 0.45
+VECTOR_PROTECTED_SEATS = 150
+VECTOR_TRIM_WEIGHT = 5.0
 
 
 def merge_retrieved_candidates(*candidate_maps, excluded_track_ids=None):
@@ -49,6 +59,18 @@ def merge_retrieved_candidates(*candidate_maps, excluded_track_ids=None):
     return merged
 
 
+def annotate_vector_fit(merged: dict, index, query) -> None:
+    """Give every merged candidate the map's opinion of it, not only the
+    ones the map proposed: the cosine to the seeds' position, clipped at
+    zero. Ranking reads it to tell a favourite near the seed from one far
+    away, and the radio reads it for its reason text."""
+    if index is None or query is None:
+        return
+    wanted = [track_id for track_id, candidate in merged.items() if "vector" not in candidate.source_scores]
+    for track_id, cosine in index.fit(wanted, query).items():
+        merged[track_id].add_score("vector", max(0.0, cosine))
+
+
 def retrieve_candidates(
     db,
     playlist_track_ids,
@@ -60,7 +82,16 @@ def retrieve_candidates(
     include_recent_additions: bool = False,
     excluded_track_ids: list[int] | None = None,
     exclude_liked_behavior: bool = False,
+    vector_query=None,
 ):
+    vector_candidates, vector_query, vector_index = retrieve_vector_candidates(
+        db=db,
+        playlist_track_ids=playlist_track_ids,
+        limit=min(max(limit, 200), 400),
+        excluded_track_ids=excluded_track_ids,
+        query_vector=vector_query,
+    )
+
     genre_candidates = retrieve_genre_candidates(
         db=db,
         playlist_track_ids=playlist_track_ids,
@@ -114,6 +145,7 @@ def retrieve_candidates(
         )
 
     merged = merge_retrieved_candidates(
+        vector_candidates,
         genre_candidates,
         cooccurrence_candidates,
         behavior_candidates,
@@ -122,6 +154,7 @@ def retrieve_candidates(
         recent_candidates,
         excluded_track_ids=excluded_track_ids,
     )
+    annotate_vector_fit(merged, vector_index, vector_query)
 
     if refresh > 0:
         jitter_rng = random.Random(f"retrieve:{playlist_id}:{refresh}")
@@ -132,17 +165,26 @@ def retrieve_candidates(
     else:
         jitter = {}
 
-    sorted_candidates = sorted(
-        merged.items(),
-        key=lambda item: item[1].total_retrieval_score * jitter.get(item[0], 1.0),
-        reverse=True,
-    )
+    def trim_key(item):
+        track_id, candidate = item
+        nearness = candidate.source_scores.get("vector", 0.0) * VECTOR_TRIM_WEIGHT
+        return (candidate.total_retrieval_score + nearness) * jitter.get(track_id, 1.0)
+
+    sorted_candidates = sorted(merged.items(), key=trim_key, reverse=True)
 
     protected_lastfm_track = [
         item
         for item in sorted_candidates
         if "lastfm_track" in item[1].source_scores
     ][:100]
+
+    # The map's own nearest hundred always reach the ranking; a retrieval
+    # total dominated by the other channels must not push them out.
+    protected_vector = sorted(
+        (item for item in sorted_candidates if item[1].source_scores.get("vector", 0.0) >= VECTOR_PROTECT_COSINE),
+        key=lambda item: item[1].source_scores["vector"],
+        reverse=True,
+    )[:VECTOR_PROTECTED_SEATS]
 
     protected_lastfm = [
         item
@@ -161,6 +203,7 @@ def retrieve_candidates(
 
     for track_id, candidate in (
         protected_lastfm_track
+        + protected_vector
         + protected_lastfm
         + protected_behavior
         + sorted_candidates

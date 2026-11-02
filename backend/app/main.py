@@ -302,12 +302,24 @@ def on_startup():
     start_scheduler()
 
     _rebuild_cooccurrence_if_empty()
+    _rebuild_vector_map_if_empty()
 
     # Reclaims stale transcode cache entries (old naming schemes, purged
     # tracks) in the background; skips itself if the library is unmounted.
     from app.services.stream_cache_maintenance import start_stream_cache_sweep_background
 
     start_stream_cache_sweep_background()
+
+
+def _rebuild_vector_map_if_empty():
+    """Self-heal: the map is derived data; empty beside a library means the
+    build never ran (a server updated to this version, for one)."""
+    try:
+        from app.services.recommendations.vector_map import rebuild_vector_map_if_empty
+
+        rebuild_vector_map_if_empty()
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).warning("Could not start the vector map build", exc_info=True)
 
 
 def _rebuild_cooccurrence_if_empty():

@@ -155,6 +155,12 @@ def _sync_scheduler_jobs():
         db.close()
 
 
+def _run_vector_map_rebuild_job():
+    from app.services.recommendations.vector_map import rebuild_vector_map_standalone
+
+    rebuild_vector_map_standalone()
+
+
 def _run_cooccurrence_rebuild_job():
     from app.services.recommendations.cooccurrence_builder import (
         rebuild_track_cooccurrence_standalone,
@@ -212,6 +218,19 @@ def start_scheduler():
         hour=3,
         minute=45,
         id="scheduled_cooccurrence_rebuild",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # Not settings-gated: the map is derived from tags, Last.fm similarity
+    # and co-occurrence, so it is rebuilt after the co-occurrence rebuild.
+    _scheduler.add_job(
+        _run_vector_map_rebuild_job,
+        trigger="cron",
+        hour=4,
+        minute=30,
+        id="scheduled_vector_map_rebuild",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

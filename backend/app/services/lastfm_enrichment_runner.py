@@ -32,6 +32,13 @@ def run_lastfm_enrichment_with_lock() -> bool:
         try:
             logger.info("Running Last.fm enrichment...")
             run_lastfm_enrichment()
+            # New tags and similarity rows move things on the map.
+            try:
+                from app.services.recommendations.vector_map import start_vector_rebuild_background
+
+                start_vector_rebuild_background()
+            except Exception:  # noqa: BLE001
+                logger.warning("Could not start the vector map rebuild after enrichment", exc_info=True)
             return True
         except Exception as error:
             logger.warning(f"Last.fm enrichment error: {error}")

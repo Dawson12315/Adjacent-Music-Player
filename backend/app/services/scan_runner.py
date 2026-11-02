@@ -116,6 +116,12 @@ def _run_scan(limit: int):
     finally:
         _update_progress(is_running=False, finished_at=time.time())
         invalidate_library_caches()
+        try:
+            from app.services.recommendations.vector_map import start_vector_rebuild_background
+
+            start_vector_rebuild_background()
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not start the vector map rebuild after the scan", exc_info=True)
 
         db = SessionLocal()
         try:

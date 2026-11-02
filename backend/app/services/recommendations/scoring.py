@@ -4,6 +4,18 @@ from app.models.track import Track
 
 
 STRONG_LASTFM_ARTIST_BRIDGE_THRESHOLD = 1.20
+# Raw cosine in the map at which a candidate with no shared family is
+# bridged anyway: the map saying "near" outranks the label saying "other".
+VECTOR_BRIDGE_COSINE = 0.50
+# When the map knows a candidate, the family label is a coarse version of
+# the same information and speaks accordingly: at or above ALIGNED the
+# candidate earns a bonus that grows with nearness; below FAR the shared-
+# family score is cut to FAR_FACTOR of itself (with `map_strength` 1.0 —
+# the radio; playlists ask for half, and keep more of their old shape).
+VECTOR_ALIGNED_COSINE = 0.45
+VECTOR_FAR_COSINE = 0.25
+MAP_FAR_FACTOR = 0.3
+MAP_BONUS_SCALE = 1.5
 
 
 def score_candidate(
@@ -14,6 +26,7 @@ def score_candidate(
     playlist_artist_counts: dict,
     playlist_album_counts: dict,
     retrieved_source_scores: dict | None = None,
+    map_strength: float = 0.5,
 ) -> Tuple[float, dict]:
     score = 0.0
     reasons: list[str] = []
@@ -29,6 +42,8 @@ def score_candidate(
     strong_lastfm_artist_bridge = (
         lastfm_artist_score >= STRONG_LASTFM_ARTIST_BRIDGE_THRESHOLD
     )
+    vector_fit = retrieved_source_scores.get("vector")
+    vector_bridge = vector_fit is not None and float(vector_fit) >= VECTOR_BRIDGE_COSINE
 
     # --- FAMILY SCORING ---
     family_score = 0.0
@@ -37,7 +52,29 @@ def score_candidate(
         family_score += boost
         reasons.append(f"shared_family:{family}(+{boost:.2f})")
 
-    score += family_score
+    # --- THE MAP'S WORD ON THE LABEL ---
+    # One family's worth, at the profile's own scale, is what nearness is
+    # measured in: a near candidate gains up to one and a half of it, a far
+    # one keeps a fraction of its label score however many families it
+    # shares. This is what stops a seed track tagged house, pop and R&B
+    # from handing its station every R&B track with a "dance" tag.
+    map_bonus = 0.0
+    map_factor = 1.0
+    if vector_fit is not None and map_strength > 0:
+        fit = float(vector_fit)
+        family_unit = 2.5 + 0.9 * float(max(family_counts.values(), default=0))
+        if fit >= VECTOR_ALIGNED_COSINE:
+            map_bonus = fit * family_unit * MAP_BONUS_SCALE * map_strength
+            reasons.append(f"map_near_bonus:+{map_bonus:.2f}")
+        else:
+            nearness = max(0.0, (fit - VECTOR_FAR_COSINE) / (VECTOR_ALIGNED_COSINE - VECTOR_FAR_COSINE))
+            floor = 1.0 - (1.0 - MAP_FAR_FACTOR) * map_strength
+            map_factor = floor + (1.0 - floor) * nearness
+            if family_score > 0 and map_factor < 1.0:
+                reasons.append(f"map_far_family_factor:x{map_factor:.2f}")
+        family_score *= map_factor
+
+    score += family_score + map_bonus
 
     # --- COOCCURRENCE ---
     # Magnitude now flows exclusively through the rank-normalized channel
@@ -87,6 +124,10 @@ def score_candidate(
             bridge_bonus = 2.75
             score += bridge_bonus
             reasons.append(f"lastfm_track_bridge_bonus:+{bridge_bonus:.2f}")
+        elif vector_bridge:
+            bridge_bonus = 2.5
+            score += bridge_bonus
+            reasons.append(f"vector_bridge_bonus:+{bridge_bonus:.2f}")
 
     # --- NO ALIGNMENT PENALTY ---
     no_alignment_penalty = 0.0
@@ -95,6 +136,7 @@ def score_candidate(
         and co_score <= 0
         and not strong_lastfm_artist_bridge
         and lastfm_track_score <= 0
+        and not vector_bridge
     ):
         no_alignment_penalty = 2.5
         score -= no_alignment_penalty
@@ -110,6 +152,10 @@ def score_candidate(
         "lastfm_artist_score": lastfm_artist_score,
         "lastfm_track_score": lastfm_track_score,
         "strong_lastfm_artist_bridge": strong_lastfm_artist_bridge,
+        "vector_fit": vector_fit,
+        "vector_bridge": vector_bridge,
+        "map_bonus": map_bonus,
+        "map_factor": map_factor,
         "family_score": family_score,
         "cooccurrence_count": co_score,
         "cooccurrence_boost": co_boost,
