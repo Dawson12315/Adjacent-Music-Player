@@ -14,6 +14,7 @@ TEMP_PASSWORD_TTL_HOURS = 48
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
+from app.services.themes import DEFAULT_THEME
 from app.services.timezones import normalize_zone_name
 from app.config import settings
 from app.db import get_db
@@ -402,13 +403,25 @@ def update_preferences(
     current password, which is right for a username or password and wrong
     for a time zone. Allowed to an account still owing a password, too.
     """
-    if payload.timezone is None or not payload.timezone.strip():
-        current_user.timezone = None
-    else:
-        zone = normalize_zone_name(payload.timezone)
-        if zone is None:
-            raise HTTPException(status_code=422, detail=f"Unknown time zone: {payload.timezone}")
-        current_user.timezone = zone
+    sent = payload.model_fields_set
+
+    if "timezone" in sent:
+        if payload.timezone is None or not payload.timezone.strip():
+            current_user.timezone = None
+        else:
+            zone = normalize_zone_name(payload.timezone)
+            if zone is None:
+                raise HTTPException(status_code=422, detail=f"Unknown time zone: {payload.timezone}")
+            current_user.timezone = zone
+
+    # The look the account wears: checked against the server's list by the
+    # schema, so an unknown theme is a 422 before it gets here.
+    if "theme" in sent:
+        current_user.theme = None if payload.theme in (None, DEFAULT_THEME) else payload.theme
+    if "theme_seasonal" in sent:
+        current_user.theme_seasonal = bool(payload.theme_seasonal)
+    if "theme_southern" in sent:
+        current_user.theme_southern = bool(payload.theme_southern)
 
     db.commit()
     db.refresh(current_user)

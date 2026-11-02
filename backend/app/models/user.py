@@ -39,3 +39,9 @@ class User(Base):
     # stands in, then the server's own. Added nullable so sync_model_columns
     # applies it on both engines without a hand migration.
     timezone = Column(String(64), nullable=True)
+    # The look the listener chose (see services/themes.py), whether the
+    # seasons may take over from it, and whether the seasons run as in the
+    # southern hemisphere. Null means the default: Adjacent, nothing automatic.
+    theme = Column(String(32), nullable=True)
+    theme_seasonal = Column(Boolean, nullable=True)
+    theme_southern = Column(Boolean, nullable=True)

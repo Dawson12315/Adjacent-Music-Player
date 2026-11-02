@@ -29,7 +29,7 @@ def session_days() -> int:
 
 # Bumped whenever a client-facing route or field is added. Clients compare it
 # with the version they were built against.
-API_VERSION = 12
+API_VERSION = 13
 
 # The oldest mobile build this API still serves whole.
 MIN_CLIENT_VERSION = "1.0.31"
@@ -73,6 +73,10 @@ CAPABILITIES = [
     # a lineup that resumes, "more like this" / "not this one" / "less of
     # this artist" feedback, and batches that say how far they reached.
     "radio",
+    # The account carries a theme (`theme`, `theme_seasonal`, `theme_southern`
+    # on PATCH /auth/me/preferences and in /auth/me), one of the ids in
+    # services/themes.py, so every device wears the same look.
+    "themes",
 ]
 
 _FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
