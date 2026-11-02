@@ -1,5 +1,7 @@
-import { memo } from "react";
+import { memo, useContext } from "react";
 
+import { ThemeContext } from "../contexts/ThemeContext";
+import { DEFAULT_THEME } from "../theme/themes";
 import { DuckMark } from "./DuckMark";
 
 /**
@@ -17,6 +19,10 @@ export const Artwork = memo(function Artwork({
   size,
 }) {
   const classes = ["art", className].filter(Boolean).join(" ");
+  // A worn theme puts the duck on its own accent, where yellow has less edge
+  // than on the default blue; a thin line keeps the bird legible at cover size.
+  const theming = useContext(ThemeContext);
+  const outlined = Boolean(theming?.theme && theming.theme.id !== DEFAULT_THEME);
 
   if (!artwork) {
     return <div className={classes} aria-hidden="true" />;
@@ -25,7 +31,7 @@ export const Artwork = memo(function Artwork({
   if (artwork.type === "duck") {
     return (
       <div className={`${classes} art--duck`} style={{ background: "var(--blue-600)" }}>
-        <DuckMark title={artwork.alt || "Ducking Good"} />
+        <DuckMark title={artwork.alt || "Ducking Good"} outline={outlined} />
       </div>
     );
   }

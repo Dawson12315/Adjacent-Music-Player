@@ -18,7 +18,7 @@
  * The record. Near-black with a little blue in it rather than pure black, which against
  * the blue tile reads as a hole punched in the icon.
  */
-import { useContext } from "react";
+import { createElement, useContext } from "react";
 
 import { ThemeContext } from "../contexts/ThemeContext";
 
@@ -98,11 +98,32 @@ const DRESSES = {
   ),
 };
 
+/** The duck itself: tail flick, body, head, beak — in its own coordinates. */
+const DUCK_SHAPES = [
+  ["path", { d: "M3.4 20.6 L1 17.4 L5.2 17.9 Z", fill: "var(--yellow)" }],
+  ["path", { d: "M4 20.8c0-3.5 4-6 9-6s9 2.5 9 6-4 6-9 6-9-2.5-9-6Z", fill: "var(--yellow)" }],
+  ["circle", { cx: "19.2", cy: "12.4", r: "5.9", fill: "var(--yellow)" }],
+  ["path", { d: "M24.4 10.9 L30.4 12.6 L24.4 14.6 Z", fill: "var(--orange)" }],
+];
+
+/**
+ * How wide the outline is, in the duck's units: at a 44px cover that is
+ * well under a pixel showing on each side — a pencil line, not a border.
+ */
+const OUTLINE_WIDTH = 1.4;
+
 /**
  * `dress` names what the duck wears (see DRESSES); left out, it is whatever
  * the theme says, which is nothing on a year-round theme.
+ *
+ * `outline` draws a very thin dark line around the bird. Ducking Good's
+ * cover asks for it when a theme is worn: yellow on Ember's orange or
+ * Summer's sky has far less edge than yellow on the default blue, and the
+ * cover is small. The line is a stroked copy of the silhouette underneath
+ * the real one, so it only ever shows outside the duck — the three shapes'
+ * overlaps stay seamless.
  */
-export function DuckMark({ tile = false, className, title = "Adjacent", dress }) {
+export function DuckMark({ tile = false, className, title = "Adjacent", dress, outline = false }) {
   const theme = useContext(ThemeContext);
   const worn = dress === undefined ? theme?.dress ?? null : dress;
   const overlay = worn ? DRESSES[worn] || null : null;
@@ -150,15 +171,19 @@ export function DuckMark({ tile = false, className, title = "Adjacent", dress })
           tile ? "translate(5.638 5.611) scale(0.66)" : "translate(3.8 3.4) scale(0.78)"
         }
       >
-        {/* Tail flick, then body, then head — one silhouette from three shapes. */}
-        <path d="M3.4 20.6 L1 17.4 L5.2 17.9 Z" fill="var(--yellow)" />
-        <path
-          d="M4 20.8c0-3.5 4-6 9-6s9 2.5 9 6-4 6-9 6-9-2.5-9-6Z"
-          fill="var(--yellow)"
-        />
-        <circle cx="19.2" cy="12.4" r="5.9" fill="var(--yellow)" />
-
-        <path d="M24.4 10.9 L30.4 12.6 L24.4 14.6 Z" fill="var(--orange)" />
+        {outline && (
+          <g
+            data-outline=""
+            fill={WAX}
+            stroke={WAX}
+            strokeWidth={OUTLINE_WIDTH}
+            strokeLinejoin="round"
+          >
+            {DUCK_SHAPES.map(([shape, attrs], index) => createElement(shape, { ...attrs, key: index, fill: WAX }))}
+          </g>
+        )}
+        {/* Tail flick, then body, then head — one silhouette from three shapes — then the beak. */}
+        {DUCK_SHAPES.map(([shape, attrs], index) => createElement(shape, { ...attrs, key: index }))}
         {/* Punched through to whatever sits behind: the record when there is one, the
             page ground when the duck stands alone. */}
         <circle cx="20.6" cy="11" r="1.25" fill={tile ? WAX : "var(--field)"} />
