@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { getGreeting, useHomeData } from "./useHomeData";
+import { dayLineFor } from "../../theme/themes";
 import { Artwork } from "../../components/Artwork";
 import { DuckMark } from "../../components/DuckMark";
 import { Icon } from "../../components/Icon";
@@ -25,6 +26,8 @@ export function HomeView() {
   const { currentUser } = useAuth();
   const { playlists, albumArtworkMap, artists, albums, trackCount } = useLibrary();
   const { playTrack, playStation, deleteStationById } = usePlayer();
+  // "Happy Halloween." on the day itself, never for a whole season.
+  const dayLine = dayLineFor();
   const [busyStationId, setBusyStationId] = useState(null);
   const navigate = useNavigate();
   const home = useHomeData();
@@ -50,6 +53,7 @@ export function HomeView() {
           <p>
             {currentUser?.username ? `Welcome back, ${currentUser.username}.` : "Welcome back."}{" "}
             {trackCount > 0 && `${trackCount.toLocaleString()} tracks waiting.`}
+            {dayLine && <span className="home__day-line"> {dayLine}</span>}
           </p>
         </div>
       </div>

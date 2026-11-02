@@ -59,8 +59,18 @@ export async function updateAccount({
 }
 
 /** A preference, not a credential: no password asked. `null` follows the browser. */
-export async function updatePreferences({ timezone }) {
-  return apiClient.patch("/api/auth/me/preferences", { timezone: timezone || null });
+/**
+ * A preference, not a credential: the time zone Insights counts in, the
+ * theme the account wears (`theme`, `theme_seasonal`, `theme_southern`).
+ * Only the keys given are sent; the server changes only what it is sent.
+ */
+export async function updatePreferences(preferences = {}) {
+  const body = {};
+  if ("timezone" in preferences) body.timezone = preferences.timezone || null;
+  if ("theme" in preferences) body.theme = preferences.theme || null;
+  if ("theme_seasonal" in preferences) body.theme_seasonal = Boolean(preferences.theme_seasonal);
+  if ("theme_southern" in preferences) body.theme_southern = Boolean(preferences.theme_southern);
+  return apiClient.patch("/api/auth/me/preferences", body);
 }
 
 export async function generateRecoveryCodes() {

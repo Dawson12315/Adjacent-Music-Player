@@ -1277,3 +1277,25 @@
 .station-page__played:hover { color: var(--text-primary, #fff); }
 .station-page__history { margin-bottom: var(--space-5); opacity: 0.8; }
 .stations-page .page-header__title { display: flex; align-items: center; gap: var(--space-2); }
+
+/* ================================================================== *
+ * Settings → Appearance: the theme swatches and the two switches.
+ * ================================================================== */
+.theme-group { margin-top: var(--space-4); }
+.theme-group__label { display: block; font-family: var(--font-mono); font-size: var(--text-3xs); letter-spacing: var(--tracking-caps); text-transform: uppercase; color: var(--text-muted); margin-bottom: var(--space-2); }
+.theme-swatches { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.theme-swatch { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 84px; padding: var(--space-2) var(--space-1); border-radius: var(--radius-md); border: 1px solid transparent; background: none; color: var(--text-secondary); font: inherit; cursor: pointer; transition: var(--transition-colors); }
+.theme-swatch:hover:not(:disabled) { background: var(--wash); color: var(--text); }
+.theme-swatch:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+.theme-swatch--on { border-color: var(--border-strong); background: var(--wash); color: var(--text); }
+.theme-swatch__dot { position: relative; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+.theme-swatch--on .theme-swatch__dot::after { content: ""; position: absolute; inset: -7px; border-radius: 50%; border: 2px solid var(--text); }
+.theme-swatch__duck { width: 24px; height: 24px; display: block; }
+.theme-swatch__name { font-size: var(--text-xs); font-weight: var(--weight-semibold); }
+.theme-swatch__when { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; color: var(--text-muted); white-space: nowrap; }
+.theme-row { display: flex; align-items: flex-start; gap: var(--space-3); margin-top: var(--space-5); }
+.theme-row .switch { flex: none; margin-top: 2px; }
+.theme-row__title { font-weight: var(--weight-semibold); font-size: var(--text-sm); }
+.theme-row__text { color: var(--text-secondary); font-size: var(--text-xs); line-height: var(--leading-normal); max-width: 60ch; }
+.theme-wearing { margin-top: var(--space-5); padding-top: var(--space-3); border-top: 1px solid var(--border-subtle); color: var(--text-muted); font-size: var(--text-xs); }
+.home__day-line { color: var(--blue-300); }

@@ -23,6 +23,17 @@
     />
 
     <title>Adjacent</title>
+    <!--
+      The theme the account last wore, applied before the first paint so a
+      themed app does not flash blue while /auth/me is on its way. The
+      provider corrects it once the account answers.
+    -->
+    <script>
+      try {
+        var worn = localStorage.getItem("adjacent.theme");
+        if (worn && worn !== "adjacent" && /^[a-z]+$/.test(worn)) document.documentElement.dataset.theme = worn;
+      } catch (e) {}
+    </script>
     <script src="/config.js"></script>
   </head>
   <body>

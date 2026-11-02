@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { AccountPanel } from "./AccountPanel";
+import { AppearancePanel } from "./AppearancePanel";
 import { LastfmPanel } from "./LastfmPanel";
 import { ServerPanel } from "./ServerPanel";
 import { ThisBrowserPanel } from "./ThisBrowserPanel";
@@ -117,6 +118,8 @@ export function SettingsView() {
   return (
     <div className="settings-page">
       <AccountPanel />
+
+      <AppearancePanel />
 
       <ServerPanel />
 

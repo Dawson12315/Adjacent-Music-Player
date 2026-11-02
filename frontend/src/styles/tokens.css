@@ -228,3 +228,111 @@
   --art-9:  linear-gradient(140deg, #B5761F, #FFC93C);
   --art-10: linear-gradient(140deg, #8A6B22, #D6B24A);
 }
+
+/*
+ * Themes
+ * ------
+ * Twelve looks beside the default. Each block redefines only the accent (the
+ * `--blue-*` steps, which every control reads), the grounds' hue bias and the
+ * ten artwork gradients. Nothing else moves: Duck Yellow, the text colours,
+ * the status colours, the type and the space are the same under every theme,
+ * and the app stays dark. The catalogue — names, dates, the duck's dress — is
+ * src/theme/themes.js; `data-theme` on <html> picks the block.
+ *
+ * None of these reaches into the green arc, and src/theme/noGreen.test.js
+ * refuses a block that does.
+ */
+:root[data-theme="ultraviolet"] {
+  --blue-100: #E6DEFF; --blue-300: #B9A6FF; --blue: #8A6BFF; --blue-600: #6F4FE6; --blue-700: #593CC0;
+  --blue-wash: rgba(138, 107, 255, 0.08); --blue-wash-strong: rgba(138, 107, 255, 0.16); --blue-border: rgba(138, 107, 255, 0.32); --blue-glow: rgba(138, 107, 255, 0.22);
+  --shadow-glow-blue: 0 8px 28px rgba(138, 107, 255, 0.22);
+  --field: #0B0A12; --field-raised: #11101B; --surface: #171525; --surface-hover: #1D1B30; --surface-active: #23213A; --surface-inset: #0E0D16;
+  --art-1: linear-gradient(140deg, #3B4BC8, #6E7BFF); --art-2: linear-gradient(140deg, #4F3FBE, #8A6BFF); --art-3: linear-gradient(140deg, #6A3BAE, #A76BF0); --art-4: linear-gradient(140deg, #7F3FA8, #B97BF5); --art-5: linear-gradient(140deg, #8B3A86, #C86BC0); --art-6: linear-gradient(140deg, #9B3C78, #D97AB0); --art-7: linear-gradient(140deg, #A63C63, #E0748F); --art-8: linear-gradient(140deg, #8A3A6B, #C070A8); --art-9: linear-gradient(140deg, #5A3FB0, #9A80FF); --art-10: linear-gradient(140deg, #4A4AC8, #8090FF);
+}
+:root[data-theme="rosewood"] {
+  --blue-100: #FFDCE6; --blue-300: #FF9DB8; --blue: #FF5C8A; --blue-600: #E6406E; --blue-700: #BF3058;
+  --blue-wash: rgba(255, 92, 138, 0.08); --blue-wash-strong: rgba(255, 92, 138, 0.16); --blue-border: rgba(255, 92, 138, 0.32); --blue-glow: rgba(255, 92, 138, 0.22);
+  --shadow-glow-blue: 0 8px 28px rgba(255, 92, 138, 0.22);
+  --field: #120A0D; --field-raised: #1B1014; --surface: #24161C; --surface-hover: #2D1C23; --surface-active: #35222B; --surface-inset: #150C10;
+  --art-1: linear-gradient(140deg, #A63C63, #E0748F); --art-2: linear-gradient(140deg, #B8405A, #F07C96); --art-3: linear-gradient(140deg, #8B3A86, #C86BC0); --art-4: linear-gradient(140deg, #7A3A70, #B46AB0); --art-5: linear-gradient(140deg, #B85338, #F0916B); --art-6: linear-gradient(140deg, #C2485C, #FF8AA0); --art-7: linear-gradient(140deg, #6A3BAE, #A76BF0); --art-8: linear-gradient(140deg, #9A2F55, #D06084); --art-9: linear-gradient(140deg, #B5761F, #FFC93C); --art-10: linear-gradient(140deg, #A04050, #E07A8A);
+}
+:root[data-theme="ember"] {
+  --blue-100: #FFE0D1; --blue-300: #FFB08A; --blue: #FF7A45; --blue-600: #E85F2C; --blue-700: #C04A1E;
+  --blue-wash: rgba(255, 122, 69, 0.08); --blue-wash-strong: rgba(255, 122, 69, 0.16); --blue-border: rgba(255, 122, 69, 0.32); --blue-glow: rgba(255, 122, 69, 0.22);
+  --shadow-glow-blue: 0 8px 28px rgba(255, 122, 69, 0.22);
+  --field: #120D0A; --field-raised: #1B1410; --surface: #241A15; --surface-hover: #2D211B; --surface-active: #352821; --surface-inset: #150F0C;
+  --art-1: linear-gradient(140deg, #B85338, #F0916B); --art-2: linear-gradient(140deg, #C4602E, #FF9A5C); --art-3: linear-gradient(140deg, #B5761F, #FFC93C); --art-4: linear-gradient(140deg, #A64A3A, #E8826A); --art-5: linear-gradient(140deg, #8A6B22, #D6B24A); --art-6: linear-gradient(140deg, #A63C63, #E0748F); --art-7: linear-gradient(140deg, #B04A2A, #F08A60); --art-8: linear-gradient(140deg, #8B3A86, #C86BC0); --art-9: linear-gradient(140deg, #9C5A20, #E8A040); --art-10: linear-gradient(140deg, #7A3A70, #B46AB0);
+}
+:root[data-theme="graphite"] {
+  --blue-100: #FFFFFF; --blue-300: #F2F4F8; --blue: #E8ECF5; --blue-600: #C9CFDB; --blue-700: #A8B0C0;
+  --blue-wash: rgba(232, 236, 245, 0.07); --blue-wash-strong: rgba(232, 236, 245, 0.14); --blue-border: rgba(232, 236, 245, 0.30); --blue-glow: rgba(232, 236, 245, 0.16);
+  --shadow-glow-blue: 0 8px 28px rgba(232, 236, 245, 0.14);
+  --field: #0A0B0E; --field-raised: #101217; --surface: #161920; --surface-hover: #1C2028; --surface-active: #222731; --surface-inset: #0D0F13;
+  --art-1: linear-gradient(140deg, #3A4254, #6B7590); --art-2: linear-gradient(140deg, #2F3A52, #5C6E95); --art-3: linear-gradient(140deg, #4A4660, #7F7AA0); --art-4: linear-gradient(140deg, #3E4A5E, #6E809A); --art-5: linear-gradient(140deg, #55495A, #8A7E90); --art-6: linear-gradient(140deg, #4B5068, #7D84A5); --art-7: linear-gradient(140deg, #5A4A52, #8E7A86); --art-8: linear-gradient(140deg, #4C5560, #7F8A98); --art-9: linear-gradient(140deg, #5C5440, #9A8E6E); --art-10: linear-gradient(140deg, #3C3E58, #6C6E95);
+}
+:root[data-theme="spring"] {
+  --blue-100: #FFE0EC; --blue-300: #FFB3CC; --blue: #F07CB0; --blue-600: #D9609A; --blue-700: #B84A80;
+  --blue-wash: rgba(240, 124, 176, 0.08); --blue-wash-strong: rgba(240, 124, 176, 0.16); --blue-border: rgba(240, 124, 176, 0.32); --blue-glow: rgba(240, 124, 176, 0.22);
+  --shadow-glow-blue: 0 8px 28px rgba(240, 124, 176, 0.22);
+  --field: #0E0A12; --field-raised: #161020; --surface: #1E1628; --surface-hover: #261E32; --surface-active: #2E253C; --surface-inset: #110D16;
+  --art-1: linear-gradient(140deg, #C86BC0, #F0A0E0); --art-2: linear-gradient(140deg, #A76BF0, #D0B0FF); --art-3: linear-gradient(140deg, #6E7BFF, #A0C8FF); --art-4: linear-gradient(140deg, #4E8CFF, #8ED0FF); --art-5: linear-gradient(140deg, #E0748F, #FFB0C0); --art-6: linear-gradient(140deg, #B97BF5, #E0C0FF); --art-7: linear-gradient(140deg, #D6B24A, #FFE08A); --art-8: linear-gradient(140deg, #8A6BFF, #C8B0FF); --art-9: linear-gradient(140deg, #2F7CFF, #7FB4FF); --art-10: linear-gradient(140deg, #F0916B, #FFC0A0);
+}
+:root[data-theme="summer"] {
+  --blue-100: #DCEFFF; --blue-300: #8FCBFF; --blue: #3FA7FF; --blue-600: #2688E0; --blue-700: #1C6DB8;
+  --blue-wash: rgba(63, 167, 255, 0.08); --blue-wash-strong: rgba(63, 167, 255, 0.16); --blue-border: rgba(63, 167, 255, 0.32); --blue-glow: rgba(63, 167, 255, 0.22);
+  --shadow-glow-blue: 0 8px 28px rgba(63, 167, 255, 0.22);
+  --field: #0A0D14; --field-raised: #10141D; --surface: #161B26; --surface-hover: #1C2230; --surface-active: #222939; --surface-inset: #0D1018;
+  --art-1: linear-gradient(140deg, #F0916B, #FFB080); --art-2: linear-gradient(140deg, #E8B43C, #FFE08A); --art-3: linear-gradient(140deg, #2F7CFF, #3FA7FF); --art-4: linear-gradient(140deg, #4E8CFF, #7FC8FF); --art-5: linear-gradient(140deg, #E0748F, #FF9AA8); --art-6: linear-gradient(140deg, #B5761F, #FFD166); --art-7: linear-gradient(140deg, #1B4FD8, #2F9CFF); --art-8: linear-gradient(140deg, #A63C63, #E08090); --art-9: linear-gradient(140deg, #F08A60, #FFB890); --art-10: linear-gradient(140deg, #3B4BC8, #6FA0FF);
+}
+:root[data-theme="autumn"] {
+  --blue-100: #FFE2CC; --blue-300: #FFB07A; --blue: #E8742E; --blue-600: #CC5F1F; --blue-700: #A84C17;
+  --blue-wash: rgba(232, 116, 46, 0.08); --blue-wash-strong: rgba(232, 116, 46, 0.16); --blue-border: rgba(232, 116, 46, 0.32); --blue-glow: rgba(232, 116, 46, 0.22);
+  --shadow-glow-blue: 0 8px 28px rgba(232, 116, 46, 0.22);
+  --field: #110C09; --field-raised: #1A1410; --surface: #231A14; --surface-hover: #2C2119; --surface-active: #34281F; --surface-inset: #140E0A;
+  --art-1: linear-gradient(140deg, #B85338, #F0916B); --art-2: linear-gradient(140deg, #B04A2A, #E8824A); --art-3: linear-gradient(140deg, #B5761F, #FFC93C); --art-4: linear-gradient(140deg, #9C5A20, #E8A040); --art-5: linear-gradient(140deg, #8B3A86, #C86BC0); --art-6: linear-gradient(140deg, #A63C63, #E0748F); --art-7: linear-gradient(140deg, #8A6B22, #D6B24A); --art-8: linear-gradient(140deg, #7A3A70, #B46AB0); --art-9: linear-gradient(140deg, #A64A3A, #E8826A); --art-10: linear-gradient(140deg, #6A3BAE, #A76BF0);
+}
+:root[data-theme="halloween"] {
+  --blue-100: #FFE0C8; --blue-300: #FFAE70; --blue: #FF7A1A; --blue-600: #E06410; --blue-700: #B84F0C;
+  --blue-wash: rgba(255, 122, 26, 0.08); --blue-wash-strong: rgba(255, 122, 26, 0.16); --blue-border: rgba(255, 122, 26, 0.32); --blue-glow: rgba(255, 122, 26, 0.24);
+  --shadow-glow-blue: 0 8px 28px rgba(255, 122, 26, 0.24);
+  --field: #0C0813; --field-raised: #140F1E; --surface: #1B1528; --surface-hover: #241C34; --surface-active: #2C233F; --surface-inset: #0F0B17;
+  --art-1: linear-gradient(140deg, #4F3FBE, #8A6BFF); --art-2: linear-gradient(140deg, #6A3BAE, #A76BF0); --art-3: linear-gradient(140deg, #3B2A6A, #6E55B0); --art-4: linear-gradient(140deg, #B85338, #FF7A1A); --art-5: linear-gradient(140deg, #C4602E, #FF9A3C); --art-6: linear-gradient(140deg, #8B3A86, #C86BC0); --art-7: linear-gradient(140deg, #7A1F3A, #B8405A); --art-8: linear-gradient(140deg, #2A1F4A, #5A4A90); --art-9: linear-gradient(140deg, #A63C63, #E0748F); --art-10: linear-gradient(140deg, #5A3A20, #A06A20);
+}
+:root[data-theme="winter"] {
+  --blue-100: #E6F0FF; --blue-300: #B6D2FF; --blue: #7FB4FF; --blue-600: #5A96F0; --blue-700: #3F7AD0;
+  --blue-wash: rgba(127, 180, 255, 0.08); --blue-wash-strong: rgba(127, 180, 255, 0.16); --blue-border: rgba(127, 180, 255, 0.32); --blue-glow: rgba(127, 180, 255, 0.20);
+  --shadow-glow-blue: 0 8px 28px rgba(127, 180, 255, 0.20);
+  --field: #090C12; --field-raised: #0F131B; --surface: #151A25; --surface-hover: #1B2130; --surface-active: #21283A; --surface-inset: #0C1017;
+  --art-1: linear-gradient(140deg, #1B4FD8, #5A96F0); --art-2: linear-gradient(140deg, #2F6BC8, #7FB4FF); --art-3: linear-gradient(140deg, #3B4BC8, #6E7BFF); --art-4: linear-gradient(140deg, #4F5A88, #8FA0C8); --art-5: linear-gradient(140deg, #556070, #9AA8BE); --art-6: linear-gradient(140deg, #4F3FBE, #8A6BFF); --art-7: linear-gradient(140deg, #2F4F7F, #6F9AC8); --art-8: linear-gradient(140deg, #6A6E90, #A8B0D0); --art-9: linear-gradient(140deg, #3A5A9A, #7FA8E0); --art-10: linear-gradient(140deg, #46507A, #8890B8);
+}
+:root[data-theme="festive"] {
+  --blue-100: #FFDCE1; --blue-300: #FF8FA0; --blue: #E8415A; --blue-600: #C92F46; --blue-700: #A32438;
+  --blue-wash: rgba(232, 65, 90, 0.08); --blue-wash-strong: rgba(232, 65, 90, 0.16); --blue-border: rgba(232, 65, 90, 0.32); --blue-glow: rgba(232, 65, 90, 0.22);
+  --shadow-glow-blue: 0 8px 28px rgba(232, 65, 90, 0.22);
+  --field: #120A0C; --field-raised: #1B1013; --surface: #24161A; --surface-hover: #2D1C21; --surface-active: #352229; --surface-inset: #150C0F;
+  --art-1: linear-gradient(140deg, #9A1F33, #E8415A); --art-2: linear-gradient(140deg, #B5761F, #FFC93C); --art-3: linear-gradient(140deg, #8A6B22, #D6B24A); --art-4: linear-gradient(140deg, #7A1F3A, #B8405A); --art-5: linear-gradient(140deg, #8B3A86, #C86BC0); --art-6: linear-gradient(140deg, #A63C63, #E0748F); --art-7: linear-gradient(140deg, #B85338, #F0916B); --art-8: linear-gradient(140deg, #6A3BAE, #A76BF0); --art-9: linear-gradient(140deg, #9C5A20, #E8A040); --art-10: linear-gradient(140deg, #5A3A50, #9A7A90);
+}
+:root[data-theme="newyear"] {
+  --blue-100: #FFF1C8; --blue-300: #FFE08A; --blue: #FFD166; --blue-600: #E8B43C; --blue-700: #C8962A;
+  --blue-wash: rgba(255, 209, 102, 0.08); --blue-wash-strong: rgba(255, 209, 102, 0.16); --blue-border: rgba(255, 209, 102, 0.32); --blue-glow: rgba(255, 209, 102, 0.22);
+  --shadow-glow-blue: 0 8px 28px rgba(255, 209, 102, 0.22);
+  --field: #080A14; --field-raised: #0E111E; --surface: #141828; --surface-hover: #1A1F33; --surface-active: #20263E; --surface-inset: #0A0D18;
+  --art-1: linear-gradient(140deg, #1B2F6A, #3B5BC8); --art-2: linear-gradient(140deg, #B5761F, #FFD166); --art-3: linear-gradient(140deg, #4F5A88, #8FA0C8); --art-4: linear-gradient(140deg, #3B4BC8, #6E7BFF); --art-5: linear-gradient(140deg, #8A6B22, #D6B24A); --art-6: linear-gradient(140deg, #4F3FBE, #8A6BFF); --art-7: linear-gradient(140deg, #2A2F5A, #5A6AB0); --art-8: linear-gradient(140deg, #B85338, #F0916B); --art-9: linear-gradient(140deg, #6A6E90, #A8B0D0); --art-10: linear-gradient(140deg, #6A3BAE, #A76BF0);
+}
+:root[data-theme="valentine"] {
+  --blue-100: #FFDCE4; --blue-300: #FF9AB4; --blue: #FF4F79; --blue-600: #E63A64; --blue-700: #BF2C50;
+  --blue-wash: rgba(255, 79, 121, 0.08); --blue-wash-strong: rgba(255, 79, 121, 0.16); --blue-border: rgba(255, 79, 121, 0.32); --blue-glow: rgba(255, 79, 121, 0.22);
+  --shadow-glow-blue: 0 8px 28px rgba(255, 79, 121, 0.22);
+  --field: #120A0E; --field-raised: #1B1016; --surface: #24161E; --surface-hover: #2D1C26; --surface-active: #35222E; --surface-inset: #150C11;
+  --art-1: linear-gradient(140deg, #A63C63, #E0748F); --art-2: linear-gradient(140deg, #C2485C, #FF8AA0); --art-3: linear-gradient(140deg, #B8405A, #F07C96); --art-4: linear-gradient(140deg, #8B3A86, #C86BC0); --art-5: linear-gradient(140deg, #9A2F55, #D06084); --art-6: linear-gradient(140deg, #7A3A70, #B46AB0); --art-7: linear-gradient(140deg, #D05A6A, #FFA0A8); --art-8: linear-gradient(140deg, #6A3BAE, #A76BF0); --art-9: linear-gradient(140deg, #B04050, #E87A8A); --art-10: linear-gradient(140deg, #A04A78, #D890C0);
+}
+
+/* A theme changing under the listener cross-fades; a theme on launch does not. */
+:root[data-theme-fading] body,
+:root[data-theme-fading] body * {
+  transition: background-color 350ms ease, border-color 350ms ease, color 350ms ease, box-shadow 350ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme-fading] body,
+  :root[data-theme-fading] body * { transition: none; }
+}

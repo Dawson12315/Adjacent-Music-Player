@@ -10,6 +10,7 @@ import { NotificationProvider } from "./contexts/NotificationProvider";
 import { PageMetaProvider } from "./contexts/PageMetaProvider";
 import { PlayerProvider } from "./contexts/PlayerProvider";
 import { ScanProvider } from "./contexts/ScanProvider";
+import { ThemeProvider } from "./contexts/ThemeProvider";
 import { AuthScreen } from "./features/auth/AuthScreen";
 import { SetPasswordScreen } from "./features/auth/SetPasswordScreen";
 import { DuckMark } from "./components/DuckMark";
@@ -129,7 +130,9 @@ export default function App() {
     <BrowserRouter>
       <NotificationProvider>
         <AuthProvider>
-          <AuthenticatedApp />
+          <ThemeProvider>
+            <AuthenticatedApp />
+          </ThemeProvider>
         </AuthProvider>
       </NotificationProvider>
     </BrowserRouter>
