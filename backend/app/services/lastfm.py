@@ -71,9 +71,21 @@ def _request_lastfm(params: dict) -> Dict:
         return {"success": False, "tags": []}
 
     tags = data.get("toptags", {}).get("tag", [])
+    counts: Dict[str, int] = {}
+    for tag in tags:
+        name = tag.get("name")
+        if not name:
+            continue
+        try:
+            counts[name] = max(counts.get(name, 0), int(tag.get("count") or 0))
+        except (TypeError, ValueError):
+            counts[name] = counts.get(name, 0)
     return {
         "success": True,
         "tags": [tag.get("name") for tag in tags if tag.get("name")],
+        # Last.fm's 0–100 weight per tag, kept so a tag at 100 and one at 2
+        # stop being the same row.
+        "tag_counts": counts,
     }
 
 
@@ -92,6 +104,10 @@ def _request_lastfm_similar_artists(params: dict) -> Dict[str, Any]:
     except ValueError:
         logger.warning("Last.fm similar artist lookup failed: response was not valid JSON")
         return {"success": False, "artists": [], "error": "invalid_json"}
+
+    if response.status_code == 429 or data.get("error") == 29:
+        logger.warning("Last.fm rate limit reached: %s", data.get("message"))
+        return {"success": False, "artists": [], "error": "rate_limited", "rate_limited": True}
 
     if "error" in data:
         logger.warning(f"Last.fm API error {data.get('error')}: {data.get('message')}")

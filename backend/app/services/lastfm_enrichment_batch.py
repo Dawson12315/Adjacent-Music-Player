@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 import logging
 import time
-from typing import Dict
+from typing import Dict, List, Optional
 
 from app.db import SessionLocal
 from app.models.track import Track
@@ -17,6 +17,9 @@ from app.services.lastfm_enrichment_progress import (
     update_progress,
 )
 from app.services.lastfm_track_similarity import ingest_similar_tracks_for_track
+from app.models.artist_lastfm_check import ArtistLastfmCheck
+from app.models.artist_lastfm_similarity import ArtistLastfmSimilarity
+from app.models.track_genre import TrackGenre
 from app.utils.artist_normalization import normalize_artist_name
 from app.services.job_locking import JobHeartbeat
 
@@ -96,6 +99,177 @@ def _stop_summary(
     return summary
 
 
+# Similar artists are asked for per artist, once, and an artist Last.fm had
+# nothing for is asked again after this long.
+ARTIST_RETRY_AFTER = timedelta(days=30)
+# Tracks enriched before tag weights were recorded are asked again, this
+# many per nightly run, after everything new has been done — about ten
+# minutes at the rate limit, so it never crowds out real enrichment.
+WEIGHT_BACKFILL_PER_RUN = 500
+
+
+def _rate_limited(result: Dict) -> bool:
+    if result.get("rate_limited"):
+        return True
+    for key in ("reason", "error"):
+        value = str(result.get(key) or "").casefold()
+        if value == "rate_limited" or "rate limit" in value:
+            return True
+    return False
+
+
+def _library_artist_names(db) -> Dict[str, str]:
+    """Every credited artist in the library: normalised key → a display name."""
+    names: Dict[str, str] = {}
+    for (name,) in db.query(TrackArtist.artist_name).distinct():
+        key = normalize_artist_name(name or "")
+        if key and key not in names:
+            names[key] = name
+    for (name,) in db.query(Track.artist).filter(Track.artist.isnot(None)).distinct():
+        key = normalize_artist_name(name or "")
+        if key and key not in names:
+            names[key] = name
+    return names
+
+
+def artists_needing_similarity(db, now: Optional[datetime] = None) -> List[tuple]:
+    """(key, name) for every library artist with no similar-artist rows and no
+    recent answer from Last.fm, so one run covers the whole library's artists
+    rather than only those of the tracks it happened to enrich."""
+    now = now or datetime.utcnow()
+    have = {key for (key,) in db.query(ArtistLastfmSimilarity.source_artist_key).distinct()}
+    checked = {row.artist_key: row.checked_at for row in db.query(ArtistLastfmCheck).all()}
+    todo = []
+    for key, name in _library_artist_names(db).items():
+        if key in have:
+            continue
+        last = checked.get(key)
+        if last is not None and last > now - ARTIST_RETRY_AFTER:
+            continue
+        todo.append((key, name))
+    return sorted(todo)
+
+
+def _record_artist_check(db, key: str, name: str, similar_count: int) -> None:
+    row = db.get(ArtistLastfmCheck, key)
+    if row is None:
+        row = ArtistLastfmCheck(artist_key=key, artist_name=name)
+        db.add(row)
+    row.artist_name = name
+    row.checked_at = datetime.utcnow()
+    row.similar_count = int(similar_count or 0)
+    db.commit()
+
+
+def run_artist_similarity_phase(db, heartbeat=None, stop=should_stop) -> Dict:
+    """Similar artists for every artist in the library, before the track walk.
+
+    The track walk only reached an artist through an unenriched track, so a
+    library enriched before similarity existed — or one whose walk is still
+    weeks from finishing — had neighbours for a handful of artists. This is
+    one call per artist, about ten minutes for five hundred.
+    """
+    todo = artists_needing_similarity(db)
+    ingested = skipped = 0
+    consecutive = 0
+    backoff = RATE_LIMIT_BACKOFF_SECONDS
+    stopped = None
+    for key, name in todo:
+        if heartbeat is not None:
+            heartbeat.tick()
+        if stop():
+            stopped = "stopped"
+            break
+        try:
+            result = ingest_similar_artists_for_artist(db=db, artist_name=name, limit=SIMILAR_ARTIST_LIMIT)
+        except Exception as error:  # noqa: BLE001
+            db.rollback()
+            result = {"success": False, "reason": "lastfm_artist_similarity_failed", "error": str(error)}
+        if result.get("reason") == "missing_api_key":
+            stopped = "missing_api_key"
+            break
+        if _rate_limited(result):
+            consecutive += 1
+            skipped += 1
+            if consecutive >= RATE_LIMIT_GIVE_UP_AFTER:
+                logger.warning("Last.fm keeps rate-limiting the artist phase; stopping after %s in a row", consecutive)
+                stopped = "rate_limited"
+                break
+            time.sleep(backoff)
+            backoff = min(backoff * 2, RATE_LIMIT_BACKOFF_MAX_SECONDS)
+            continue
+        consecutive = 0
+        backoff = RATE_LIMIT_BACKOFF_SECONDS
+        _record_artist_check(db, key, name, result.get("stored_count", 0) if result.get("success") else 0)
+        if result.get("success"):
+            ingested += 1
+        else:
+            skipped += 1
+    return {"artists_considered": len(todo), "artists_ingested": ingested, "artists_skipped": skipped, "stopped": stopped}
+
+
+def tracks_needing_tag_weights(db, limit: int = WEIGHT_BACKFILL_PER_RUN) -> List[Track]:
+    unlabelled = db.query(TrackGenre.track_id).filter(TrackGenre.source.is_(None))
+    return (
+        db.query(Track)
+        .filter(
+            Track.lastfm_tags_enriched.is_(True),
+            Track.musicbrainz_recording_id.isnot(None),
+            Track.id.in_(unlabelled),
+        )
+        .order_by(Track.id.asc())
+        .limit(limit)
+        .all()
+    )
+
+
+def run_tag_weight_backfill(db, heartbeat=None, stop=should_stop, limit: int = WEIGHT_BACKFILL_PER_RUN) -> Dict:
+    """Weights for tags written before weights were recorded.
+
+    Asks Last.fm again for a bounded number of already-enriched tracks; the
+    enrichment fills in weights for the tags it recognises, and whatever is
+    left unlabelled is marked legacy so the track is not asked again.
+    """
+    tracks = tracks_needing_tag_weights(db, limit)
+    weighted = skipped = 0
+    consecutive = 0
+    backoff = RATE_LIMIT_BACKOFF_SECONDS
+    stopped = None
+    for track in tracks:
+        if heartbeat is not None:
+            heartbeat.tick()
+        if stop():
+            stopped = "stopped"
+            break
+        try:
+            result = enrich_track_lastfm_tags(db, track.id)
+        except Exception as error:  # noqa: BLE001
+            db.rollback()
+            result = {"success": False, "reason": "lastfm_tag_enrichment_failed", "error": str(error)}
+        if result.get("reason") == "missing_api_key":
+            stopped = "missing_api_key"
+            break
+        if _rate_limited(result):
+            consecutive += 1
+            if consecutive >= RATE_LIMIT_GIVE_UP_AFTER:
+                stopped = "rate_limited"
+                break
+            time.sleep(backoff)
+            backoff = min(backoff * 2, RATE_LIMIT_BACKOFF_MAX_SECONDS)
+            continue
+        consecutive = 0
+        backoff = RATE_LIMIT_BACKOFF_SECONDS
+        db.query(TrackGenre).filter(TrackGenre.track_id == track.id, TrackGenre.source.is_(None)).update(
+            {"source": "legacy"}, synchronize_session=False
+        )
+        db.commit()
+        if result.get("success"):
+            weighted += 1
+        else:
+            skipped += 1
+    return {"tracks_considered": len(tracks), "tracks_weighted": weighted, "tracks_skipped": skipped, "stopped": stopped}
+
+
 def run_lastfm_enrichment() -> Dict:
     db = SessionLocal()
 
@@ -130,8 +304,27 @@ def run_lastfm_enrichment() -> Dict:
     retry_before = datetime.utcnow() - RETRY_FAILED_AFTER
     consecutive_rate_limits = 0
     backoff_seconds = RATE_LIMIT_BACKOFF_SECONDS
+    artist_phase: Dict = {}
+    weight_backfill: Dict = {}
 
     try:
+        # Artists first: the whole library's similar-artist graph is a few
+        # hundred calls, and the map and radio lean on it more than on any
+        # one track's tags.
+        artist_phase = run_artist_similarity_phase(db, heartbeat)
+        logger.info("[lastfm artist phase] %s", artist_phase)
+        if artist_phase.get("stopped") in ("rate_limited", "missing_api_key"):
+            summary = _stop_summary(0, 0, 0, 0, artist_phase.get("artists_ingested", 0), artist_phase.get("artists_skipped", 0), 0, 0)
+            summary["artist_phase"] = artist_phase
+            return summary
+        attempted_artist_keys.update(
+            key for key, in db.query(ArtistLastfmCheck.artist_key).filter(
+                ArtistLastfmCheck.checked_at > datetime.utcnow() - ARTIST_RETRY_AFTER
+            )
+        )
+        total_artist_similarity_ingested += artist_phase.get("artists_ingested", 0)
+        total_artist_similarity_skipped += artist_phase.get("artists_skipped", 0)
+
         while True:
             tracks = (
                 db.query(Track)
@@ -292,7 +485,6 @@ def run_lastfm_enrichment() -> Dict:
                         continue
 
                     if normalized_artist_key in attempted_artist_keys:
-                        total_artist_similarity_skipped += 1
                         continue
 
                     attempted_artist_keys.add(normalized_artist_key)
@@ -313,6 +505,7 @@ def run_lastfm_enrichment() -> Dict:
 
                     if similarity_result["success"]:
                         total_artist_similarity_ingested += 1
+                        _record_artist_check(db, normalized_artist_key, artist_name, similarity_result.get("stored_count", 0))
                         logger.info(
                             f"[lastfm artist similarity] "
                             f"artist={artist_name} | "
@@ -351,8 +544,15 @@ def run_lastfm_enrichment() -> Dict:
 
             time.sleep(BATCH_DELAY_SECONDS)
 
+        # Everything new is done: spend a bounded slice on weights for the
+        # tags written before weights were recorded.
+        weight_backfill = run_tag_weight_backfill(db, heartbeat)
+        logger.info("[lastfm weight backfill] %s", weight_backfill)
+
         summary = {
             "stopped": False,
+            "artist_phase": artist_phase,
+            "weight_backfill": weight_backfill,
             "batches_processed": batch_number,
             "total_checked": total_checked,
             "total_processed": total_processed,

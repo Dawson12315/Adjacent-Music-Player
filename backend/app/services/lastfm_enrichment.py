@@ -92,6 +92,7 @@ def enrich_track_lastfm_tags(db, track_id: int) -> Dict:
         }
 
     raw_tags = lastfm_result["tags"]
+    tag_counts = dict(lastfm_result.get("tag_counts") or {})
 
     if not raw_tags:
         album_result = get_album_top_tags(
@@ -110,6 +111,7 @@ def enrich_track_lastfm_tags(db, track_id: int) -> Dict:
 
         if album_result["tags"]:
             raw_tags = album_result["tags"]
+            tag_counts = dict(album_result.get("tag_counts") or {})
             lastfm_source = "album"
 
     if not raw_tags:
@@ -128,6 +130,7 @@ def enrich_track_lastfm_tags(db, track_id: int) -> Dict:
 
         raw_tags = artist_result["tags"]
         if raw_tags:
+            tag_counts = dict(artist_result.get("tag_counts") or {})
             lastfm_source = "artist"
 
     cleaned_tags = clean_lastfm_genre_tags(
@@ -137,8 +140,28 @@ def enrich_track_lastfm_tags(db, track_id: int) -> Dict:
         album_title=track.album,
     )
 
+    # Each cleaned tag's weight is the Last.fm count of the raw tag(s) it
+    # came from; cleaning can fold two raw tags into one name, so take the
+    # larger. A tag the filter rejects never reaches the table.
+    weights: Dict[str, int] = {}
+    for raw_tag in raw_tags:
+        for name in clean_lastfm_genre_tags(
+            [raw_tag], artist_names=artist_names, track_title=track.title, album_title=track.album
+        ):
+            key = name.casefold()
+            weights[key] = max(weights.get(key, 0), int(tag_counts.get(raw_tag, 0) or 0))
+
     existing_rows = db.query(TrackGenre).filter(TrackGenre.track_id == track.id).all()
     existing_keys = {row.genre.casefold() for row in existing_rows if row.genre}
+
+    # Rows written before weights were recorded learn theirs now, which is
+    # also how the nightly backfill works: asking again for a track fills
+    # in what its tags weigh.
+    for row in existing_rows:
+        key = (row.genre or "").casefold()
+        if key in weights and (row.weight is None or row.source is None):
+            row.weight = weights[key]
+            row.source = "lastfm"
 
     added_genres: List[str] = []
 
@@ -150,6 +173,8 @@ def enrich_track_lastfm_tags(db, track_id: int) -> Dict:
             TrackGenre(
                 track_id=track.id,
                 genre=genre_name,
+                weight=weights.get(genre_name.casefold()),
+                source="lastfm",
             )
         )
         existing_keys.add(genre_name.casefold())
@@ -166,5 +191,6 @@ def enrich_track_lastfm_tags(db, track_id: int) -> Dict:
         "raw_tags": raw_tags,
         "cleaned_tags": cleaned_tags,
         "added_genres": added_genres,
+        "tag_weights": weights,
         "lastfm_source": lastfm_source
     }

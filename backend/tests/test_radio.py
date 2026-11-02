@@ -583,3 +583,52 @@ def test_tags_that_are_not_genres_are_left_out():
         assert is_non_genre_tag(tag), tag
     for tag in ("Rock", "Hip-Hop", "Alternative R&B", "vaporwave", "Country", "Soundtrack"):
         assert not is_non_genre_tag(tag), tag
+
+
+# ------------------------------------------------------- feedback, pass 01
+
+
+def test_a_thumbed_up_track_is_a_seed_but_not_banished(client, db_session_factory, radio_library, monkeypatch):
+    """On a track station the seed stays out of the body; a thumbed-up track
+    was only ever a seed for the recommender's sake and may come round again."""
+    import app.services.radio as radio
+    from app.models.radio_station import RadioStation
+
+    seed = _make_track(db_session_factory, "/lib/radio-fresh-more.flac", title="Fresh More", artist=ARTIST, album="Radio EP", track_number=9)
+    _credit(db_session_factory, [seed], ARTIST, genre=GENRE)
+    station = _station(client, seed_type="track", seed_track_id=seed)
+    liked = radio_library["elsewhere"][0]  # not in the opening lineup, so only the seed rule could keep it out
+    assert client.post(f"/api/radio/stations/{station['id']}/feedback", json={"track_id": liked, "kind": "more"}).status_code == 200
+
+    captured = {}
+    original = radio._recommend
+
+    def spy(db, seed_ids, user_id, excluded, limit, refresh=0):
+        captured["seeds"] = list(seed_ids)
+        captured["excluded"] = set(excluded)
+        return original(db, seed_ids, user_id, excluded, limit, refresh=refresh)
+
+    monkeypatch.setattr(radio, "_recommend", spy)
+    db = db_session_factory()
+    try:
+        row = db.query(RadioStation).filter(RadioStation.id == station["id"]).one()
+        radio.next_batch(db, row, radio_library["user_id"])
+    finally:
+        db.close()
+    assert liked in captured["seeds"]
+    assert seed in captured["excluded"] and liked not in captured["excluded"]
+
+
+def test_less_of_the_seeds_own_artist_on_a_track_station_keeps_their_catalogue_out(client, db_session_factory, radio_library):
+    seed = _make_track(db_session_factory, "/lib/radio-fresh-less.flac", title="Fresh Less", artist=ARTIST, album="Radio EP", track_number=10)
+    _credit(db_session_factory, [seed], ARTIST, genre=GENRE)
+    station = _station(client, seed_type="track", seed_track_id=seed)
+    first = _next(client, station["id"])["tracks"]
+    assert first[0]["id"] == seed
+    own = next(track for track in first[1:] if track["artist"] == ARTIST)
+    said = client.post(f"/api/radio/stations/{station['id']}/feedback", json={"track_id": own["id"], "kind": "less_artist"})
+    assert said.status_code == 200, said.text
+    for _ in range(3):
+        batch = _next(client, station["id"])["tracks"]
+        assert batch, "the station went silent"
+        assert ARTIST not in _artists(batch), _artists(batch)

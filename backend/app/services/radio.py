@@ -775,14 +775,24 @@ def next_batch(
     first_batch = not memory and not handed_out and not client_excluded
 
     own_ids = {track.id for track in material.own}
+    material_seed_ids = {track.id for track in material.seeds}
     artist_of: dict[int, str] = {track.id: normalize_artist_name(track.artist or "") for track in material.own}
     for seed in seeds:
         artist_of[seed.id] = normalize_artist_name(seed.artist or "")
 
+    def own_allowed(track_id: int) -> bool:
+        # "Less of this artist" reaches the seed's own material too — on a
+        # track station the listener may say it of the seed's own artist —
+        # but never the seed itself, which is the station.
+        return track_id in material_seed_ids or artist_of.get(track_id, "") not in less_artists
+
     def build(memory_ids: list[int], handed_ids: list[int]):
         excluded = set(memory_ids) | set(handed_ids) | client_excluded | less
         if station.seed_type == "track":
-            excluded |= set(seed_ids)
+            # The seed itself stays out of the body; a thumbed-up track is
+            # a seed for the recommender's sake only and may come round
+            # again once the memory lets it.
+            excluded |= material_seed_ids
         candidates = _recommend(db, seed_ids, user_id, excluded, CANDIDATE_POOL, refresh=len(lineup_rows))
 
         chosen_own: list[tuple[int, str | None]] = []
@@ -795,7 +805,8 @@ def next_batch(
                 continue
             seen.add(track_id)
             if track_id in own_ids:
-                chosen_own.append((track_id, material.own_label.get(track_id, f"From {own_name}")))
+                if own_allowed(track_id):
+                    chosen_own.append((track_id, material.own_label.get(track_id, f"From {own_name}")))
                 continue
             key = normalize_artist_name(candidate.get("artist") or "")
             if key and key in less_artists:
@@ -807,7 +818,7 @@ def next_batch(
             artist_of[track_id] = key
             neighbours.append((track_id, _neighbour_reason(candidate, own_name)))
         for track in material.own:
-            if track.id in seen or track.id in excluded:
+            if track.id in seen or track.id in excluded or not own_allowed(track.id):
                 continue
             seen.add(track.id)
             chosen_own.append((track.id, material.own_label.get(track.id, f"From {own_name}")))

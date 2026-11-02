@@ -12,6 +12,7 @@ from app.models.track_cooccurrence import TrackCooccurrence
 from app.models.listening_event import ListeningEvent
 from app.models.track_user_stats import TrackUserStats
 from app.models.artist_lastfm_similarity import ArtistLastfmSimilarity
+from app.models.artist_lastfm_check import ArtistLastfmCheck
 from app.models.track_lastfm_similarity import TrackLastfmSimilarity
 from app.models.album_artwork import AlbumArtwork
 from app.models.artist_artwork import ArtistArtwork
@@ -35,6 +36,7 @@ __all__ = [
     "ListeningEvent",
     "TrackUserStats",
     "ArtistLastfmSimilarity",
+    "ArtistLastfmCheck",
     "TrackLastfmSimilarity",
     "ArtistArtwork",
     "AlbumArtwork",

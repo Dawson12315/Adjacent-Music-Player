@@ -209,6 +209,7 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
                             TrackGenre(
                                 track_id=track.id,
                                 genre=genre_name,
+                                source="file",
                             )
                         )
                 written += 1
