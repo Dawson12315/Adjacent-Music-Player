@@ -59,7 +59,7 @@ def merge_retrieved_candidates(*candidate_maps, excluded_track_ids=None):
     return merged
 
 
-def annotate_vector_fit(merged: dict, index, query) -> None:
+def annotate_vector_fit(merged: dict, index, query, corrections=None) -> None:
     """Give every merged candidate the map's opinion of it, not only the
     ones the map proposed: the cosine to the seeds' position, clipped at
     zero. Ranking reads it to tell a favourite near the seed from one far
@@ -67,7 +67,7 @@ def annotate_vector_fit(merged: dict, index, query) -> None:
     if index is None or query is None:
         return
     wanted = [track_id for track_id, candidate in merged.items() if "vector" not in candidate.source_scores]
-    for track_id, cosine in index.fit(wanted, query).items():
+    for track_id, cosine in index.fit(wanted, query, corrections).items():
         merged[track_id].add_score("vector", max(0.0, cosine))
 
 
@@ -84,12 +84,19 @@ def retrieve_candidates(
     exclude_liked_behavior: bool = False,
     vector_query=None,
 ):
+    # This listener's standing corrections to the map (see radio_taste).
+    from app.services.radio_taste import corrections_for
+    from app.services.recommendations.vector_map import get_vector_index
+
+    corrections = corrections_for(db, user_id, get_vector_index(db)) if user_id is not None else None
+
     vector_candidates, vector_query, vector_index = retrieve_vector_candidates(
         db=db,
         playlist_track_ids=playlist_track_ids,
         limit=min(max(limit, 200), 400),
         excluded_track_ids=excluded_track_ids,
         query_vector=vector_query,
+        corrections=corrections,
     )
 
     genre_candidates = retrieve_genre_candidates(
@@ -154,7 +161,7 @@ def retrieve_candidates(
         recent_candidates,
         excluded_track_ids=excluded_track_ids,
     )
-    annotate_vector_fit(merged, vector_index, vector_query)
+    annotate_vector_fit(merged, vector_index, vector_query, corrections)
 
     if refresh > 0:
         jitter_rng = random.Random(f"retrieve:{playlist_id}:{refresh}")

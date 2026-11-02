@@ -210,6 +210,7 @@ def _retrieve_and_rank_candidates(
     excluded_track_ids: list[int] | None = None,
     exclude_liked_behavior: bool = False,
     map_strength: float = 0.5,
+    vector_query=None,
 ):
     retrieved_candidates = retrieve_candidates(
         db=db,
@@ -222,6 +223,7 @@ def _retrieve_and_rank_candidates(
         include_recent_additions=include_recent_additions,
         excluded_track_ids=excluded_track_ids,
         exclude_liked_behavior=exclude_liked_behavior,
+        vector_query=vector_query,
     )
 
     candidate_track_ids = list(retrieved_candidates.keys())
@@ -423,6 +425,7 @@ def get_playlist_recommendations_from_track_ids(
     diversify_families: bool = True,
     map_strength: float = 0.5,
     artist_cap: int | None = None,
+    vector_query=None,
 ):
     """Suggestions for a list of seed tracks.
 
@@ -478,6 +481,7 @@ def get_playlist_recommendations_from_track_ids(
             excluded_track_ids=exclude_track_ids if exclude_from_retrieval else None,
             exclude_liked_behavior=exclude_liked_behavior,
             map_strength=map_strength,
+            vector_query=vector_query,
         )
     )
 

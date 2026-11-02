@@ -444,6 +444,31 @@ class VectorIndex:
     artist_position: dict[str, int]
     dim: int
     track_artist: list[str]  # normalised artist key per placed track, aligned with ids
+    rows_by_artist: dict[str, np.ndarray] | None = None
+
+    def _rows_of(self, artist_key: str) -> np.ndarray:
+        if self.rows_by_artist is None:
+            grouped: dict[str, list[int]] = {}
+            for row, key in enumerate(self.track_artist):
+                if key:
+                    grouped.setdefault(key, []).append(row)
+            self.rows_by_artist = {key: np.asarray(rows, dtype=np.int64) for key, rows in grouped.items()}
+        return self.rows_by_artist.get(artist_key, np.zeros(0, dtype=np.int64))
+
+    def _scores(self, query: np.ndarray, corrections: dict | None = None) -> np.ndarray:
+        """Cosine of every placed track to the query, with this listener's
+        corrections applied to the artists they cover."""
+        scores = self.matrix @ query
+        if corrections:
+            for artist_key, delta in corrections.items():
+                rows = self._rows_of(artist_key)
+                if not len(rows):
+                    continue
+                moved = self.matrix[rows] + delta
+                norms = np.linalg.norm(moved, axis=1)
+                norms[norms == 0] = 1.0
+                scores[rows] = (moved @ query) / norms
+        return scores
 
     def vector_of(self, track_id: int) -> np.ndarray | None:
         row = self.position.get(int(track_id))
@@ -487,7 +512,12 @@ class VectorIndex:
         return (q / norm).astype(np.float32) if norm > 0 else query
 
     def nearest(
-        self, query: np.ndarray, limit: int, exclude: set[int] | None = None, per_artist: int | None = None
+        self,
+        query: np.ndarray,
+        limit: int,
+        exclude: set[int] | None = None,
+        per_artist: int | None = None,
+        corrections: dict | None = None,
     ) -> list[tuple[int, float]]:
         """(track_id, cosine) for the `limit` nearest placed tracks, best first.
 
@@ -495,9 +525,9 @@ class VectorIndex:
         neighbour's hundred tracks do not crowd out the rest of the
         neighbourhood: the answer then spans artists, nearest first.
         """
-        if limit <= 0 or not len(self.ids):
+        if limit <= 0 or not len(self.ids) or query is None:
             return []
-        scores = self.matrix @ query
+        scores = self._scores(query, corrections)
         exclude = exclude or set()
         want = min(len(scores), (limit * 8 if per_artist else limit) + len(exclude))
         if want >= len(scores):
@@ -522,13 +552,16 @@ class VectorIndex:
                 break
         return out
 
-    def fit(self, track_ids: Iterable[int], query: np.ndarray) -> dict[int, float]:
+    def fit(self, track_ids: Iterable[int], query: np.ndarray, corrections: dict | None = None) -> dict[int, float]:
         """Cosine to the query for whichever of these tracks are placed."""
         wanted = [int(t) for t in track_ids if int(t) in self.position]
-        if not wanted:
+        if not wanted or query is None:
             return {}
         rows = np.asarray([self.position[t] for t in wanted])
-        scores = self.matrix[rows] @ query
+        if corrections:
+            scores = self._scores(query, corrections)[rows]
+        else:
+            scores = self.matrix[rows] @ query
         return {t: float(s) for t, s in zip(wanted, scores)}
 
 

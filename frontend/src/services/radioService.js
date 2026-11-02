@@ -13,6 +13,7 @@ import { normalizeTrack } from "./normalize";
 
 export const RADIO_API_VERSION = 10;
 export const RADIO_FEEDBACK_API_VERSION = 12;
+export const RADIO_TASTE_API_VERSION = 15;
 
 function stationTracks(rows) {
   return (rows || []).map((track) => ({ ...normalizeTrack(track), reason: track.reason ?? null }));
@@ -96,4 +97,18 @@ export function takeBackStationFeedback(stationId, trackId, kind) {
 
 export function deleteStation(stationId) {
   return apiClient.delete(`/api/radio/stations/${stationId}`);
+}
+
+/**
+ * What the listener's thumbs have left on the account: how many artists
+ * they have nudged on the server's map, and the votes each way. 404 on a
+ * server older than API 15.
+ */
+export function getRadioTaste(options) {
+  return apiClient.get("/api/radio/taste", options);
+}
+
+/** Forget every nudge. The stations' own thumbs are untouched. */
+export function resetRadioTaste() {
+  return apiClient.delete("/api/radio/taste");
 }

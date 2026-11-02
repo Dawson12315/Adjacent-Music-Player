@@ -603,10 +603,10 @@ def test_a_thumbed_up_track_is_a_seed_but_not_banished(client, db_session_factor
     captured = {}
     original = radio._recommend
 
-    def spy(db, seed_ids, user_id, excluded, limit, refresh=0):
+    def spy(db, seed_ids, user_id, excluded, limit, refresh=0, **kw):
         captured["seeds"] = list(seed_ids)
         captured["excluded"] = set(excluded)
-        return original(db, seed_ids, user_id, excluded, limit, refresh=refresh)
+        return original(db, seed_ids, user_id, excluded, limit, refresh=refresh, **kw)
 
     monkeypatch.setattr(radio, "_recommend", spy)
     db = db_session_factory()

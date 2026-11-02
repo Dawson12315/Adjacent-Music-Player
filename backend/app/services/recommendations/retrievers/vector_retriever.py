@@ -24,6 +24,7 @@ def retrieve_vector_candidates(
     limit: int,
     excluded_track_ids=None,
     query_vector: np.ndarray | None = None,
+    corrections: dict | None = None,
 ) -> tuple[dict[int, RetrievedCandidate], np.ndarray | None, VectorIndex | None]:
     index = get_vector_index(db)
     if index is None:
@@ -33,7 +34,7 @@ def retrieve_vector_candidates(
         return {}, None, index
     exclude = set(int(t) for t in (excluded_track_ids or ())) | set(int(t) for t in playlist_track_ids)
     candidates: dict[int, RetrievedCandidate] = {}
-    for track_id, cosine in index.nearest(query, limit, exclude=exclude, per_artist=NEAREST_PER_ARTIST):
+    for track_id, cosine in index.nearest(query, limit, exclude=exclude, per_artist=NEAREST_PER_ARTIST, corrections=corrections):
         if cosine <= 0:
             break
         candidate = RetrievedCandidate(track_id=track_id)

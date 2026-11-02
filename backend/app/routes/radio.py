@@ -15,6 +15,7 @@ from app.schemas.radio import (
     RadioPlayedRequest,
     RadioStationCreate,
     RadioStationResponse,
+    RadioTasteResponse,
     RadioTrackResponse,
 )
 from app.services import radio
@@ -229,6 +230,7 @@ def give_feedback(
     if payload.kind == radio.FEEDBACK_LESS_ARTIST and radio.artist_is_own(station, track.artist):
         raise HTTPException(status_code=409, detail="That artist is the station")
     radio.set_feedback(db, station, payload.kind, track)
+    radio.note_vote(db, station, current_user.id, payload.kind, track)
     return _feedback_response(db, station)
 
 
@@ -247,6 +249,24 @@ def take_back_feedback(
         raise HTTPException(status_code=404, detail="Track not found")
     radio.clear_feedback(db, station, kind, track)
     return _feedback_response(db, station)
+
+
+@router.get("/radio/taste", response_model=RadioTasteResponse, tags=["radio"])
+def radio_taste(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """What the listener's thumbs have left on the account: how many artists
+    they have nudged on the map, and how many votes each way."""
+    from app.services import radio_taste
+
+    return RadioTasteResponse(**radio_taste.summary(db, current_user.id))
+
+
+@router.delete("/radio/taste", response_model=RadioTasteResponse, tags=["radio"])
+def reset_radio_taste(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Forget every nudge. Stations' own thumbs are untouched."""
+    from app.services import radio_taste
+
+    cleared = radio_taste.reset(db, current_user.id)
+    return RadioTasteResponse(artists=0, votes_up=0, votes_down=0, cleared=cleared)
 
 
 @router.delete("/radio/stations/{station_id}", tags=["radio"])

@@ -14,6 +14,7 @@ from app.models.track_user_stats import TrackUserStats
 from app.models.artist_lastfm_similarity import ArtistLastfmSimilarity
 from app.models.artist_lastfm_check import ArtistLastfmCheck
 from app.models.track_vector import ArtistVector, TrackVector
+from app.models.listener_artist_correction import ListenerArtistCorrection
 from app.models.track_lastfm_similarity import TrackLastfmSimilarity
 from app.models.album_artwork import AlbumArtwork
 from app.models.artist_artwork import ArtistArtwork
@@ -40,6 +41,7 @@ __all__ = [
     "ArtistLastfmCheck",
     "ArtistVector",
     "TrackVector",
+    "ListenerArtistCorrection",
     "TrackLastfmSimilarity",
     "ArtistArtwork",
     "AlbumArtwork",

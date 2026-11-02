@@ -571,7 +571,7 @@ def record_plays(db: Session, station: RadioStation, track_ids: list[int]) -> in
 # ---------------------------------------------------------------------- next
 
 
-def _recommend(db, seed_ids, user_id, excluded, limit, refresh=0):
+def _recommend(db, seed_ids, user_id, excluded, limit, refresh=0, vector_query=None):
     """Candidates from the recommender, in its order, as {id, artist, debug}."""
     answer = get_playlist_recommendations_from_track_ids(
         db=db,
@@ -588,6 +588,7 @@ def _recommend(db, seed_ids, user_id, excluded, limit, refresh=0):
         diversify_families=False,
         map_strength=1.0,
         artist_cap=NEIGHBOUR_ARTIST_CAP,
+        vector_query=vector_query,
     )
     if not isinstance(answer, dict):
         return []
@@ -716,33 +717,31 @@ def _spread_artists(rows: list[tuple[int, str | None]], artist_of: dict[int, str
     return rows
 
 
-def _near_ids(db: Session, seed_ids: list[int], want: int, keep_out: set[int]) -> list[int]:
-    """The nearest tracks to the seeds in the map, nearest first, that the
-    station has not already got; empty when there is no map yet."""
+def _near_ids(db: Session, query, want: int, keep_out: set[int], corrections=None) -> list[int]:
+    """The nearest tracks to the station's position in the map, nearest
+    first, that the station has not already got; empty when there is no map."""
     from app.services.recommendations.vector_map import get_vector_index
 
     index = get_vector_index(db)
-    if index is None:
+    if index is None or query is None:
         return []
-    query = index.query_from(seed_ids)
-    if query is None:
-        return []
-    return [track_id for track_id, cosine in index.nearest(query, want, exclude=keep_out) if cosine >= NEAR_REACH_COSINE]
+    return [
+        track_id
+        for track_id, cosine in index.nearest(query, want, exclude=keep_out, per_artist=NEIGHBOUR_ARTIST_CAP, corrections=corrections)
+        if cosine >= NEAR_REACH_COSINE
+    ]
 
 
-def _by_nearness(db: Session, seed_ids: list[int], pool_ids: list[int]) -> tuple[list[int], bool]:
-    """A pool sorted nearest-to-the-seeds first by the map (unplaced tracks
-    last, shuffled), and whether the map had a say. With no map the pool is
-    returned as it came, to be sampled at random."""
+def _by_nearness(db: Session, query, pool_ids: list[int], corrections=None) -> tuple[list[int], bool]:
+    """A pool sorted nearest-to-the-station first by the map (unplaced
+    tracks last, shuffled), and whether the map had a say. With no map the
+    pool is returned as it came, to be sampled at random."""
     from app.services.recommendations.vector_map import get_vector_index
 
     index = get_vector_index(db)
-    if index is None or not pool_ids:
+    if index is None or not pool_ids or query is None:
         return pool_ids, False
-    query = index.query_from(seed_ids)
-    if query is None:
-        return pool_ids, False
-    fit = index.fit(pool_ids, query)
+    fit = index.fit(pool_ids, query, corrections)
     placed = sorted((track_id for track_id in pool_ids if track_id in fit), key=lambda track_id: -fit[track_id])
     unplaced = [track_id for track_id in pool_ids if track_id not in fit]
     random.shuffle(unplaced)
@@ -785,6 +784,43 @@ def _widen(
         if len(chosen) >= need:
             break
     return chosen
+
+
+def station_position(db: Session, user_id: int, seed_ids: list[int], feedback: dict):
+    """(query, corrections): the station's steered position on the map and
+    this listener's standing corrections; (None, {}) without a map."""
+    from app.services.radio_taste import corrections_for, station_query
+    from app.services.recommendations.vector_map import get_vector_index
+
+    index = get_vector_index(db)
+    if index is None:
+        return None, {}
+    query = station_query(
+        index,
+        seed_ids,
+        more_ids=feedback.get("more", []),
+        less_ids=feedback.get("less", set()),
+        less_artist_keys=list(feedback.get("less_artists", {}).keys()),
+    )
+    return query, corrections_for(db, user_id, index)
+
+
+def note_vote(db: Session, station: RadioStation, user_id: int, kind: str, track: Track) -> None:
+    """What a thumb leaves behind on the account: a nudge to where this
+    listener keeps the artist, toward the station's seeds for "more", away
+    for the rest. Silent without a map."""
+    from app.services.radio_taste import record_vote
+    from app.services.recommendations.vector_map import get_vector_index
+
+    index = get_vector_index(db)
+    if index is None:
+        return
+    material = load_material(db, station, user_id)
+    if not material.seeds:
+        return
+    context = index.query_from([seed.id for seed in material.seeds])
+    key = normalize_artist_name(track.artist or "")
+    record_vote(db, index, user_id, key, track.artist, context, up=(kind == FEEDBACK_MORE))
 
 
 def next_batch(
@@ -842,6 +878,12 @@ def next_batch(
 
     def cap_for(key: str) -> int:
         return NEIGHBOUR_ARTIST_CAP - min(NEIGHBOUR_ARTIST_CAP - 1, recent_artists[key] // NEIGHBOUR_ARTIST_CAP)
+
+    # Where the station stands on the map: its seeds, leaned by the thumbs
+    # (see radio_taste.station_query), read by the recommender's map channel
+    # and by every rung of the ladder. This listener's standing corrections
+    # ride along so a corrected artist is judged from where they put it.
+    query, corrections = station_position(db, user_id, seed_ids, feedback)
     artist_of: dict[int, str] = {track.id: normalize_artist_name(track.artist or "") for track in material.own}
     for seed in seeds:
         artist_of[seed.id] = normalize_artist_name(seed.artist or "")
@@ -862,7 +904,7 @@ def next_batch(
         # The recommender is asked for neighbours only: own material has its
         # share below, and with the map in place the seed's own catalogue
         # would otherwise be the nearest thing and fill the pool.
-        candidates = _recommend(db, seed_ids, user_id, excluded | own_ids, CANDIDATE_POOL, refresh=len(lineup_rows))
+        candidates = _recommend(db, seed_ids, user_id, excluded | own_ids, CANDIDATE_POOL, refresh=len(lineup_rows), vector_query=query)
 
         chosen_own: list[tuple[int, str | None]] = []
         neighbours: list[tuple[int, str | None]] = []
@@ -927,7 +969,7 @@ def next_batch(
         # the genre families, which are the same idea at far lower
         # resolution.
         steps = [
-            (REACH_NEAR, lambda: _near_ids(db, seed_ids, (limit - len(batch)) * 12, excluded | have | own_ids), f"Near {own_name}", True),
+            (REACH_NEAR, lambda: _near_ids(db, query, (limit - len(batch)) * 12, excluded | have | own_ids, corrections), f"Near {own_name}", True),
             (REACH_GENRE, lambda: _ids_in_families(db, seed_families), f"Shares a genre with {own_name}", False),
             (
                 REACH_ARTIST,
@@ -944,7 +986,7 @@ def next_batch(
             pool = load()
             if not ordered:
                 # Within a family pool, nearest first when the map can say.
-                pool, ordered = _by_nearness(db, seed_ids, pool)
+                pool, ordered = _by_nearness(db, query, pool, corrections)
             picked = _widen(db, pool, excluded | have, less_artists, per_artist, limit - len(batch), ordered=ordered, cap_for=cap_for)
             for track_id, artist in picked:
                 batch.append((track_id, reason))
@@ -959,7 +1001,7 @@ def next_batch(
         # the listener said no to.
         keep_out = client_excluded | less | have
         rounds = (
-            (lambda: _near_ids(db, seed_ids, (limit - len(batch)) * 12, keep_out | own_ids), True),
+            (lambda: _near_ids(db, query, (limit - len(batch)) * 12, keep_out | own_ids, corrections), True),
             (lambda: _ids_in_families(db, _families_of(seeds)), False),
             (lambda: _library_ids(db), False),
         )
@@ -968,7 +1010,7 @@ def next_batch(
                 break
             pool = load()
             if not ordered:
-                pool, ordered = _by_nearness(db, seed_ids, pool)
+                pool, ordered = _by_nearness(db, query, pool, corrections)
             picked = _widen(db, pool, keep_out, less_artists, Counter(), limit - len(batch), ordered=ordered, cap_for=cap_for)
             for track_id, artist in picked:
                 batch.append((track_id, f"Back around to {own_name}"))

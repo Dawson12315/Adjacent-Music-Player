@@ -40,6 +40,15 @@ class RadioFeedbackResponse(BaseModel):
     less_artists: list[str] = Field(default_factory=list)
 
 
+class RadioTasteResponse(BaseModel):
+    """The listener's standing corrections to the map, in counts."""
+
+    artists: int = 0
+    votes_up: int = 0
+    votes_down: int = 0
+    cleared: Optional[int] = None
+
+
 class RadioFeedbackRequest(BaseModel):
     track_id: int
     kind: FeedbackKind

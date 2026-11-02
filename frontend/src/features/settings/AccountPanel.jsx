@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTransientMessage } from "../../hooks/useTransientMessage";
 import { generateRecoveryCodes } from "../../services/authService";
+import { getRadioTaste, resetRadioTaste } from "../../services/radioService";
 import { browserTimeZone, timeZoneChoices, zoneLabel } from "../../utils/timezone";
 
 export function AccountPanel() {
@@ -245,6 +246,69 @@ export function AccountPanel() {
           </div>
         )}
       </div>
+
+      <RadioTasteCard />
     </section>
+  );
+}
+
+/**
+ * What the thumbs on radio stations leave behind. Each vote nudges where
+ * this account keeps the artist on the server's map, so stations started
+ * later lean the same way; this says how much has built up and lets the
+ * listener wipe it. Hidden on a server that has no map.
+ */
+export function RadioTasteCard() {
+  const [taste, setTaste] = useState(null);
+  const [resetting, setResetting] = useState(false);
+  const [error, setError] = useTransientMessage();
+
+  useEffect(() => {
+    let cancelled = false;
+    getRadioTaste()
+      .then((answer) => {
+        if (!cancelled) setTaste(answer);
+      })
+      .catch(() => {
+        if (!cancelled) setTaste(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!taste) return null;
+
+  const votes = (taste.votes_up || 0) + (taste.votes_down || 0);
+  const artists = taste.artists || 0;
+  const line =
+    artists === 0
+      ? "Nothing yet. Thumbs on a station nudge where this account keeps an artist, so the stations you start next lean the same way."
+      : `${votes} ${votes === 1 ? "vote" : "votes"} have nudged ${artists} ${artists === 1 ? "artist" : "artists"}. Stations you start next lean the same way; it fades over a few months.`;
+
+  async function handleReset() {
+    setError("");
+    setResetting(true);
+    try {
+      const cleared = await resetRadioTaste();
+      setTaste({ ...cleared, cleared: undefined });
+    } catch (resetError) {
+      setError(resetError.message || "Could not reset your radio taste.");
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  return (
+    <div className="settings-card" data-testid="radio-taste">
+      <div className="settings-card__title">Radio taste</div>
+      <div className="settings-card__text">{line}</div>
+      {error && <div className="settings-error">{error}</div>}
+      <div className="settings-card__actions">
+        <button className="btn" type="button" onClick={handleReset} disabled={resetting || artists === 0}>
+          {resetting ? "Resetting…" : "Reset radio taste"}
+        </button>
+      </div>
+    </div>
   );
 }
