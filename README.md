@@ -49,6 +49,15 @@ Jump Back In. Nothing leaves your server.
 Postgres in place from the Settings screen when you want accounts for other
 people, each with their own library view, likes and history.
 
+**Radio.** Start a station from any track, album or artist and it keeps
+going: nearby music first, then wider when the seed runs thin. Thumbs steer
+it, stations persist, and the car gets them too.
+
+**Dressed for the season, if you like.** Thirteen looks in Settings →
+Appearance, from the default blue to Halloween and Festive, carried on the
+account so every device matches. "Follow the seasons" is off until you turn
+it on; when it is, the look changes at local midnight as a window begins.
+
 **Last.fm scrobbling**, if you still keep score.
 
 ---
@@ -334,21 +343,22 @@ actually finished, not what is planned.
 
 **Server** — library scanning with MusicBrainz and Last.fm enrichment,
 adaptive HLS streaming, playlists, listening history and recommendations,
-multi-user on Postgres with in-place migration, Last.fm scrobbling, device
-handoff, Dockerised deployment and CI/CD to GHCR.
+radio stations with feedback, multi-user on Postgres with in-place migration,
+Last.fm scrobbling, device handoff, account-wide themes, Dockerised
+deployment and CI/CD to GHCR.
 
-**Web** — full client: browse, search, queue, playlists, insights, admin.
+**Web** — full client: browse, search, queue, playlists, radio, themes,
+insights, admin.
 
 **iOS and Android** — native clients on React Native. Background audio, offline
-downloads, generated artwork, listening stats and lock-screen controls on both;
-CarPlay on iOS and Android Auto on Android.
+downloads, generated artwork, radio, themes, listening stats and lock-screen
+controls on both; CarPlay on iOS and Android Auto on Android.
 
 ### Next
 
 - **watchOS** — transport control and now-playing on the wrist.
 - **tvOS** — living-room browse-and-play.
 - Lyrics.
-- Song radio — an endless queue seeded from one track.
 
 ---
 
