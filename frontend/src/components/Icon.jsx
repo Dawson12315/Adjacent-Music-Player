@@ -105,11 +105,24 @@ const icons = {
       <path {...STROKE} d="m8.6 6 -2.4 2.5L8.6 11M15.4 13l2.4 2.5-2.4 2.5" />
     </>
   ),
+  // Radio is the duck: the mark's own bird, side on and facing right, beak
+  // open, three sound arcs leaving it. One colour, like the rest of the set;
+  // the eye is a hole, so it sits on any ground. The phone draws the twin.
   radio: (
     <>
-      <circle cx="12" cy="12" r="2.1" fill="currentColor" stroke="none" />
-      <path {...STROKE} d="M8.6 15.4a4.8 4.8 0 0 1 0-6.8M15.4 8.6a4.8 4.8 0 0 1 0 6.8" />
-      <path {...STROKE} d="M5.8 18.2a8.75 8.75 0 0 1 0-12.4M18.2 5.8a8.75 8.75 0 0 1 0 12.4" />
+      <g transform="translate(-0.4 5.8) scale(0.62)" fill="currentColor" stroke="none">
+        <path d="M3.4 20.6 L1 17.4 L5.2 17.9 Z" />
+        <path d="M4 20.8c0-3.5 4-6 9-6s9 2.5 9 6-4 6-9 6-9-2.5-9-6Z" />
+        <path
+          fillRule="evenodd"
+          d="M25.1 12.4a5.9 5.9 0 1 1-11.8 0 5.9 5.9 0 0 1 11.8 0Z M21.85 11a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Z"
+        />
+        <path d="M24.3 10.6 L30.8 11.8 L24.6 12.4 Z" />
+        <path d="M24.6 13.1 L29.6 14.25 L24.8 15.4 Z" />
+      </g>
+      <path {...STROKE} strokeWidth="1.45" d="M20.01 11.33A1.9 1.9 0 0 1 20.01 13.87" />
+      <path {...STROKE} strokeWidth="1.45" d="M21.05 10.39A3.3 3.3 0 0 1 21.05 14.81" />
+      <path {...STROKE} strokeWidth="1.45" d="M22.09 9.46A4.7 4.7 0 0 1 22.09 15.74" />
     </>
   ),
   queue: (
