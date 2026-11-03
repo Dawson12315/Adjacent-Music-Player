@@ -14,6 +14,22 @@
 - **Several addresses.** `FRONTEND_ORIGIN` takes a comma-separated list when
   the same install is opened by more than one name —
   `FRONTEND_ORIGIN=http://192.168.1.50:5173,http://nas.local:5173`.
+- **Watching the folder.** With *Watch folder for new files* on (Settings →
+  Automation), the server watches the music mount and imports a new file a
+  few seconds after it has finished copying, through the same scanner as the
+  nightly scan — one import per album, not per file. On a local disk,
+  Unraid's `/mnt/user` or a Synology volume it uses the kernel's file events.
+  When the library is a CIFS, NFS or SSHFS mount it checks the folder every
+  2 minutes instead, because those mounts only report their own writes;
+  `FOLDER_WATCH_POLL_SECONDS` changes the interval and
+  `WATCHFILES_FORCE_POLLING=1` forces that mode. The status line under the
+  checkboxes says which mode is running. A very large library can run past
+  Linux's per-user inotify limit; the watcher then falls back to polling and
+  says so — raise the limit on the host with
+  `sysctl fs.inotify.max_user_watches=524288` (and persist it in
+  `/etc/sysctl.d/`). The watcher ignores deleted files (the daily cleanup
+  owns removal) and catches up with a normal scan when it starts. A
+  read-only mount (`:ro`) is fine.
 - **Cache size.** The transcode caches are bounded to `STREAM_CACHE_BUDGET_GB`
   (default 20) across HLS and mobile renditions, evicting the least recently
   played entries, and transcodes and uploads are refused when the data

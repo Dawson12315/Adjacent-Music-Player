@@ -17,6 +17,7 @@ export function toAppSettings(data) {
     cleanup_time: data.cleanup_time || "",
     scan_enabled: Boolean(data.scan_enabled),
     scan_time: data.scan_time || "",
+    watch_enabled: Boolean(data.watch_enabled),
     lastfm_enrichment_enabled: Boolean(data.lastfm_enrichment_enabled),
     lastfm_enrichment_time: data.lastfm_enrichment_time || "",
     lastfm_api_key: data.lastfm_api_key || "",
@@ -38,6 +39,7 @@ export async function saveSettings(settings) {
     cleanup_time: settings.cleanup_time || null,
     scan_enabled: settings.scan_enabled,
     scan_time: settings.scan_time || null,
+    watch_enabled: Boolean(settings.watch_enabled),
     lastfm_enrichment_enabled: settings.lastfm_enrichment_enabled,
     lastfm_enrichment_time: settings.lastfm_enrichment_time || null,
     lastfm_api_key: settings.lastfm_api_key?.trim() || null,
@@ -59,7 +61,8 @@ export function scanLibrary(limit = 100000) {
   return apiClient.post("/api/scan", undefined, { params: { limit }, noStore: true });
 }
 
-/** In-memory on the server: { is_running, files_seen, added, last_result, error }. */
+/** In-memory on the server: { is_running, files_seen, added, last_result, error,
+ * source, folders } plus `watch`, the folder watcher's state (see watchStatus.js). */
 export function getScanProgress(options) {
   return apiClient.get("/api/scan/progress", { ...options, noStore: true });
 }

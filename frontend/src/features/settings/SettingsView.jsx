@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AccountPanel } from "./AccountPanel";
 import { AppearancePanel } from "./AppearancePanel";
@@ -6,6 +6,7 @@ import { LastfmPanel } from "./LastfmPanel";
 import { ServerPanel } from "./ServerPanel";
 import { ThisBrowserPanel } from "./ThisBrowserPanel";
 import { useAppSettings } from "./useAppSettings";
+import { describeWatch } from "./watchStatus";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { useNotifications } from "../../contexts/NotificationContext";
@@ -31,7 +32,22 @@ export function SettingsView() {
 
   // Scan progress and polling live in ScanProvider, so the sidebar counts keep
   // updating and the completion toast still fires after navigating away.
-  const { progress: scanProgress, isScanning, startScan } = useScan();
+  const { progress: scanProgress, isScanning, startScan, refreshProgress } = useScan();
+
+  // The folder watcher's state is read on arrival and again after a save, so
+  // the status line under the scan settings is never a stale one.
+  useEffect(() => {
+    if (isAdmin) refreshProgress();
+  }, [isAdmin, refreshProgress]);
+
+  const watchLine = describeWatch(scanProgress?.watch, { wanted: settings.watch_enabled });
+
+  async function handleSave() {
+    await save();
+    refreshProgress();
+    // The watcher takes a moment to report "watching" after it starts.
+    window.setTimeout(refreshProgress, 2000);
+  }
 
   const [confirmAction, setConfirmAction] = useState(null);
   const [isCleaning, setIsCleaning] = useState(false);
@@ -236,18 +252,30 @@ export function SettingsView() {
           <div className="settings-card">
             <div className="settings-card__title">Scan library for new files</div>
             <div className="settings-card__text">
-              Scan the music library on a schedule and add newly discovered tracks to the
-              database.
+              Scan the music library on a schedule, or watch the folder and add new files
+              as they arrive. Both on is the safe setup: the nightly walk catches anything
+              the watcher could not see.
             </div>
 
-            <label className="field field--inline">
-              <input
-                type="checkbox"
-                checked={settings.scan_enabled}
-                onChange={() => toggleField("scan_enabled")}
-              />
-              <span>Enable daily scan</span>
-            </label>
+            <div className="field-row">
+              <label className="field field--inline">
+                <input
+                  type="checkbox"
+                  checked={settings.scan_enabled}
+                  onChange={() => toggleField("scan_enabled")}
+                />
+                <span>Enable daily scan</span>
+              </label>
+
+              <label className="field field--inline">
+                <input
+                  type="checkbox"
+                  checked={settings.watch_enabled}
+                  onChange={() => toggleField("watch_enabled")}
+                />
+                <span>Watch folder for new files</span>
+              </label>
+            </div>
 
             <label className="field">
               <span className="field__label">Run time</span>
@@ -258,6 +286,13 @@ export function SettingsView() {
                 onChange={(event) => updateField("scan_time", event.target.value)}
               />
             </label>
+
+            {watchLine ? (
+              <div className={`watch-status watch-status--${watchLine.tone}`} role="status">
+                <span className="watch-status__dot" aria-hidden="true" />
+                <span>{watchLine.text}</span>
+              </div>
+            ) : null}
           </div>
 
           <div className="settings-card">
@@ -345,7 +380,7 @@ export function SettingsView() {
         <button
           className="btn btn--primary"
           type="button"
-          onClick={save}
+          onClick={handleSave}
           disabled={isSaving}
         >
           {isSaving ? "Saving..." : "Save settings"}

@@ -23,6 +23,7 @@ from app.services.musicbrainz_backfill_runner import (
     is_musicbrainz_backfill_running,
     start_musicbrainz_backfill_background,
 )
+from app.services.folder_watch import sync_folder_watch
 from app.services.scheduler import refresh_scheduler_jobs
 
 router = APIRouter()
@@ -34,6 +35,7 @@ def settings_response(settings: AppSetting) -> dict:
         "cleanup_time": settings.cleanup_time,
         "scan_enabled": settings.scan_enabled,
         "scan_time": settings.scan_time,
+        "watch_enabled": bool(settings.watch_enabled),
         "lastfm_api_key": settings.lastfm_api_key,
         "lastfm_api_secret_set": bool(settings.lastfm_api_secret),
         "lastfm_username": settings.lastfm_username,
@@ -54,6 +56,7 @@ def get_or_create_settings(db: Session) -> AppSetting:
         cleanup_time=None,
         scan_enabled=False,
         scan_time=None,
+        watch_enabled=False,
         lastfm_api_key=None,
         lastfm_api_secret=None,
         lastfm_username=None,
@@ -90,6 +93,8 @@ def update_settings(
     settings.cleanup_time = payload.cleanup_time
     settings.scan_enabled = payload.scan_enabled
     settings.scan_time = payload.scan_time
+    if payload.watch_enabled is not None:
+        settings.watch_enabled = payload.watch_enabled
     settings.lastfm_api_key = payload.lastfm_api_key
     settings.lastfm_username = payload.lastfm_username
     settings.lastfm_enrichment_enabled = payload.lastfm_enrichment_enabled
@@ -102,6 +107,8 @@ def update_settings(
     db.commit()
     db.refresh(settings)
     refresh_scheduler_jobs()
+    # Starts or stops the watcher thread to match; a no-op when unchanged.
+    sync_folder_watch(enabled=bool(settings.watch_enabled))
 
     return settings_response(settings)
 

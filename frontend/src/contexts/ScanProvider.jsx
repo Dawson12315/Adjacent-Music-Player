@@ -8,6 +8,10 @@ import * as settingsService from "../services/settingsService";
 
 const SCAN_POLL_MS = 2500;
 
+/** While the folder watcher is on, a slow poll keeps up with its imports: the
+ * status line in Settings, the toast, the library refreshing itself. */
+const WATCH_POLL_MS = 30000;
+
 /** Library refreshes are throttled: counts growing every few seconds reads as
  * live without refetching seven endpoints on every poll. */
 const LIBRARY_REFRESH_MIN_MS = 8000;
@@ -27,10 +31,37 @@ export function ScanProvider({ children }) {
 
   const [progress, setProgress] = useState(null);
   const isScanning = Boolean(progress?.is_running);
+  const watching = Boolean(progress?.watch?.enabled);
 
   const wasRunningRef = useRef(false);
+  // The finished_at last seen; undefined until the first read, so a scan that
+  // ended before login is not announced as news.
+  const seenFinishedAtRef = useRef(undefined);
   const lastRefreshedAddedRef = useRef(0);
   const lastRefreshAtRef = useRef(0);
+
+  const announce = useCallback(
+    async (next) => {
+      const added = next.added || 0;
+      const plural = added === 1 ? "" : "s";
+      // The watcher's imports are quieter: no toast for an import that found
+      // nothing (a tag edit, a folder renamed), and the library only refreshes
+      // when something landed.
+      const fromWatch = String(next.source || "").startsWith("watch");
+
+      if (next.last_result === "completed") {
+        if (added > 0 || !fromWatch) await refreshLibrary();
+        if (!fromWatch) {
+          notify(`Library scan completed. Added ${added} new track${plural}.`);
+        } else if (added > 0) {
+          notify(`${added} new track${plural} picked up from the music folder.`);
+        }
+      } else if (next.error) {
+        notify(next.error);
+      }
+    },
+    [notify, refreshLibrary],
+  );
 
   const fetchProgress = useCallback(async () => {
     try {
@@ -51,31 +82,37 @@ export function ScanProvider({ children }) {
           lastRefreshAtRef.current = now;
           await refreshLibrary();
         }
-      } else if (wasRunningRef.current) {
-        // The scan we were watching just finished; announce it exactly once.
-        wasRunningRef.current = false;
+        return;
+      }
+
+      // Announce a scan exactly once: the one we watched run, or one that
+      // started and finished between two polls — a watch import of a single
+      // album is often that quick.
+      const finishedAt = next.finished_at ?? null;
+      const unseen =
+        seenFinishedAtRef.current !== undefined &&
+        finishedAt !== null &&
+        finishedAt !== seenFinishedAtRef.current;
+      const justEnded = wasRunningRef.current;
+
+      wasRunningRef.current = false;
+      seenFinishedAtRef.current = finishedAt;
+
+      if (justEnded || unseen) {
         lastRefreshedAddedRef.current = 0;
         lastRefreshAtRef.current = 0;
-
-        if (next.last_result === "completed") {
-          await refreshLibrary();
-          notify(
-            `Library scan completed. Added ${next.added} new track${
-              next.added === 1 ? "" : "s"
-            }.`,
-          );
-        } else if (next.error) {
-          notify(next.error);
-        }
+        await announce(next);
       }
     } catch (error) {
       console.error("Failed to read scan progress", error);
     }
-  }, [notify, refreshLibrary]);
+  }, [announce, refreshLibrary]);
 
-  // Poll while a scan runs — and while progress is still unknown, which makes
-  // the first tick double as the on-login check for scans already in flight.
-  usePolling(fetchProgress, SCAN_POLL_MS, isScanning || progress === null);
+  // Poll quickly while a scan runs — and while progress is still unknown,
+  // which makes the first tick double as the on-login check for scans
+  // already in flight — and slowly while the folder watcher is on.
+  const pollQuickly = isScanning || progress === null;
+  usePolling(fetchProgress, pollQuickly ? SCAN_POLL_MS : WATCH_POLL_MS, pollQuickly || watching);
 
   const startScan = useCallback(async () => {
     const result = await settingsService.scanLibrary();
@@ -106,8 +143,10 @@ export function ScanProvider({ children }) {
       progress,
       isScanning,
       startScan,
+      // For the Settings page: read the state again right after a save.
+      refreshProgress: fetchProgress,
     }),
-    [progress, isScanning, startScan],
+    [progress, isScanning, startScan, fetchProgress],
   );
 
   return <ScanContext.Provider value={value}>{children}</ScanContext.Provider>;

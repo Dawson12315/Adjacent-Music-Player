@@ -29,7 +29,7 @@ def session_days() -> int:
 
 # Bumped whenever a client-facing route or field is added. Clients compare it
 # with the version they were built against.
-API_VERSION = 15
+API_VERSION = 16
 
 # The oldest mobile build this API still serves whole.
 MIN_CLIENT_VERSION = "1.0.31"
@@ -79,6 +79,9 @@ CAPABILITIES = [
     "themes",
     "vector-map",
     "radio-taste",
+    # `watch_enabled` on /settings; the folder watcher's state under `watch`
+    # in /scan/progress.
+    "folder-watch",
 ]
 
 _FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None

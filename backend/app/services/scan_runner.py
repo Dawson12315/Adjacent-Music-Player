@@ -35,6 +35,11 @@ _progress = {
     "error": None,
     "started_at": None,
     "finished_at": None,
+    # Who asked: "manual" (the button), "scheduled", "watch" (the folder
+    # watcher importing the folders that changed) or "watch-catch-up".
+    "source": None,
+    # How many folders a scoped scan walked; None for the whole library.
+    "folders": None,
 }
 
 
@@ -53,8 +58,13 @@ def is_scan_running() -> bool:
         return _scan_thread is not None and _scan_thread.is_alive()
 
 
-def start_scan_background(limit: int) -> dict:
-    """Returns {"started": bool, "reason": str}."""
+def start_scan_background(limit: int, within=None, source: str = "manual", on_done=None) -> dict:
+    """Returns {"started": bool, "reason": str}.
+
+    `within` scopes the walk to those folders (see scanner.walk_roots);
+    `on_done` is called once with the outcome when the scan has finished and
+    released its lock, however it ended.
+    """
     global _scan_thread
 
     with _runner_guard:
@@ -76,11 +86,13 @@ def start_scan_background(limit: int) -> dict:
             error=None,
             started_at=time.time(),
             finished_at=None,
+            source=source,
+            folders=len(within) if within is not None else None,
         )
 
         _scan_thread = threading.Thread(
             target=_run_scan,
-            args=(limit,),
+            args=(limit, within, source, on_done),
             name="library-scan",
             daemon=True,
         )
@@ -89,8 +101,9 @@ def start_scan_background(limit: int) -> dict:
     return {"started": True, "reason": "started"}
 
 
-def _run_scan(limit: int):
+def _run_scan(limit: int, within=None, source: str = "manual", on_done=None):
     heartbeat = JobHeartbeat("scan")
+    outcome = {"ok": False, "added": 0, "error": None, "source": source}
 
     def on_progress(files_seen: int, added: int):
         _update_progress(files_seen=files_seen, added=added)
@@ -103,15 +116,19 @@ def _run_scan(limit: int):
             settings.music_library_path,
             limit=limit,
             progress_callback=on_progress,
+            within=within,
         )
         _update_progress(added=result["added"], last_result="completed")
+        outcome.update(ok=True, added=result["added"])
         logger.info("Background scan finished: %s tracks added", result["added"])
     except ValueError as error:
         # Unmounted or misconfigured library path.
         _update_progress(last_result="error", error=str(error))
+        outcome["error"] = str(error)
         logger.warning("Background scan refused: %s", error)
     except Exception:
         _update_progress(last_result="error", error="Scan failed — see the server log.")
+        outcome["error"] = "Scan failed — see the server log."
         logger.exception("Background scan failed")
     finally:
         _update_progress(is_running=False, finished_at=time.time())
@@ -128,3 +145,9 @@ def _run_scan(limit: int):
             release_job_lock(db, "scan")
         finally:
             db.close()
+
+        if on_done is not None:
+            try:
+                on_done(outcome)
+            except Exception:  # noqa: BLE001
+                logger.warning("Scan on_done callback failed", exc_info=True)

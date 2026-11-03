@@ -153,13 +153,63 @@ def _backfill_track_number(db, track_id: int, file_path) -> None:
     )
 
 
-def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> dict:
+def _is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+def walk_roots(base: Path, within) -> list[Path]:
+    """The folders a scan walks: the whole library, or only the ones named.
+
+    `within` comes from the folder watcher, which knows which folders just
+    changed. Anything outside the library or no longer a folder is dropped,
+    and a folder inside another named folder is walked once, as part of its
+    parent. An empty result means there is nothing left to walk — not the
+    whole library.
+    """
+    if within is None:
+        return [base]
+
+    base_resolved = base.resolve()
+    candidates: list[Path] = []
+    for raw in within:
+        folder = Path(raw)
+        try:
+            resolved = folder.resolve()
+        except OSError:
+            continue
+        if not _is_within(resolved, base_resolved) or not folder.is_dir():
+            continue
+        candidates.append(folder)
+
+    candidates.sort(key=lambda folder: len(folder.parts))
+    kept: list[Path] = []
+    for folder in candidates:
+        if any(_is_within(folder, parent) for parent in kept):
+            continue
+        kept.append(folder)
+    return kept
+
+
+def scan_directory(base_path: str, limit: int = 20, progress_callback=None, within=None) -> dict:
+    """Import what is new under the library.
+
+    `within`, when given, is a list of folders inside the library and the walk
+    covers only those — how the folder watcher imports one album's worth of
+    files without statting every file on the mount. Everything after the
+    walk (matching, moves, refreshes, the batch writes) is the same.
+    """
     base = Path(base_path)
 
     if not base.exists():
         raise ValueError(
             f"Music library path does not exist: {base_path} — is the volume mounted?"
         )
+
+    roots = walk_roots(base, within)
 
     db = SessionLocal()
 
@@ -276,141 +326,146 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
         pending_updates = 0
         album_artists_read = 0
 
-        for file_path in base.rglob("*"):
-            try:
-                stat = file_path.stat()
-            except OSError:
-                continue
+        stop_walk = False
+        for root in roots:
+            if stop_walk:
+                break
+            for file_path in root.rglob("*"):
+                try:
+                    stat = file_path.stat()
+                except OSError:
+                    continue
 
-            if not S_ISREG(stat.st_mode):
-                continue
+                if not S_ISREG(stat.st_mode):
+                    continue
 
-            if not is_supported_audio_file(file_path):
-                continue
+                if not is_supported_audio_file(file_path):
+                    continue
 
-            try:
-                relative_parts = file_path.relative_to(base).parts
-            except ValueError:
-                relative_parts = file_path.parts[-1:]
-            if is_excluded_path(relative_parts):
-                skipped_excluded += 1
-                continue
+                try:
+                    relative_parts = file_path.relative_to(base).parts
+                except ValueError:
+                    relative_parts = file_path.parts[-1:]
+                if is_excluded_path(relative_parts):
+                    skipped_excluded += 1
+                    continue
 
-            path_text = str(file_path)
+                path_text = str(file_path)
 
-            # A filename that is not valid UTF-8 cannot be stored as text;
-            # say so once and move on rather than end the scan here nightly.
-            try:
-                path_text.encode("utf-8")
-            except UnicodeEncodeError:
-                logger.warning("Skipping file (name is not valid UTF-8): %r", file_path)
-                continue
+                # A filename that is not valid UTF-8 cannot be stored as text;
+                # say so once and move on rather than end the scan here nightly.
+                try:
+                    path_text.encode("utf-8")
+                except UnicodeEncodeError:
+                    logger.warning("Skipping file (name is not valid UTF-8): %r", file_path)
+                    continue
 
-            files_seen += 1
-            if files_seen % 100 == 0:
-                report_progress()
+                files_seen += 1
+                if files_seen % 100 == 0:
+                    report_progress()
 
-            identity = (stat.st_size, stat.st_mtime_ns)
+                identity = (stat.st_size, stat.st_mtime_ns)
 
-            if path_text in known_file_paths:
-                track_id, size, mtime_ns = known[path_text]
+                if path_text in known_file_paths:
+                    track_id, size, mtime_ns = known[path_text]
 
-                if size is None or mtime_ns is None:
-                    # First scan since these were recorded: fill them in.
-                    db.query(Track).filter(Track.id == track_id).update(
-                        {Track.file_size: stat.st_size, Track.file_mtime_ns: stat.st_mtime_ns},
+                    if size is None or mtime_ns is None:
+                        # First scan since these were recorded: fill them in.
+                        db.query(Track).filter(Track.id == track_id).update(
+                            {Track.file_size: stat.st_size, Track.file_mtime_ns: stat.st_mtime_ns},
+                            synchronize_session=False,
+                        )
+                        pending_updates += 1
+                    elif (size, mtime_ns) != identity:
+                        # The file changed under the same name: tags were edited.
+                        if _refresh_track_metadata(db, track_id, file_path, stat, base_path):
+                            refreshed += 1
+                    elif path_text in misread:
+                        if _refresh_track_metadata(db, track_id, file_path, stat, base_path):
+                            healed += 1
+                    elif path_text in unnumbered:
+                        _backfill_track_number(db, track_id, file_path)
+                        backfilled += 1
+                        pending_updates += 1
+                    elif path_text in unread_album_artist:
+                        _backfill_album_artist(db, track_id, file_path)
+                        album_artists_read += 1
+                        pending_updates += 1
+                    if pending_updates and pending_updates % 200 == 0:
+                        db.commit()
+                    continue
+
+                # A new path with a known size and mtime whose old path is gone
+                # is a move, not a new track: keep the row and its history.
+                moved_track_id = None
+                for candidate_id in by_identity.get(identity, []):
+                    old_path = path_by_id.get(candidate_id)
+                    if old_path and old_path not in known_file_paths:
+                        continue  # already matched to another new path
+                    if old_path and not Path(old_path).exists():
+                        moved_track_id = candidate_id
+                        break
+
+                if moved_track_id is not None:
+                    db.query(Track).filter(Track.id == moved_track_id).update(
+                        {Track.file_path: path_text, Track.missing_since: None},
                         synchronize_session=False,
                     )
-                    pending_updates += 1
-                elif (size, mtime_ns) != identity:
-                    # The file changed under the same name: tags were edited.
-                    if _refresh_track_metadata(db, track_id, file_path, stat, base_path):
-                        refreshed += 1
-                elif path_text in misread:
-                    if _refresh_track_metadata(db, track_id, file_path, stat, base_path):
-                        healed += 1
-                elif path_text in unnumbered:
-                    _backfill_track_number(db, track_id, file_path)
-                    backfilled += 1
-                    pending_updates += 1
-                elif path_text in unread_album_artist:
-                    _backfill_album_artist(db, track_id, file_path)
-                    album_artists_read += 1
-                    pending_updates += 1
-                if pending_updates and pending_updates % 200 == 0:
                     db.commit()
-                continue
+                    known_file_paths.discard(path_by_id.get(moved_track_id))
+                    known_file_paths.add(path_text)
+                    path_by_id[moved_track_id] = path_text
+                    moved += 1
+                    logger.info("Track %s moved to %s", moved_track_id, file_path)
+                    continue
 
-            # A new path with a known size and mtime whose old path is gone
-            # is a move, not a new track: keep the row and its history.
-            moved_track_id = None
-            for candidate_id in by_identity.get(identity, []):
-                old_path = path_by_id.get(candidate_id)
-                if old_path and old_path not in known_file_paths:
-                    continue  # already matched to another new path
-                if old_path and not Path(old_path).exists():
-                    moved_track_id = candidate_id
-                    break
+                try:
+                    metadata = extract_track_metadata(path_text)
+                except Exception as e:
+                    logger.warning("Skipping file (metadata error): %s -> %s", file_path, e)
+                    continue
 
-            if moved_track_id is not None:
-                db.query(Track).filter(Track.id == moved_track_id).update(
-                    {Track.file_path: path_text, Track.missing_since: None},
-                    synchronize_session=False,
+                fields = resolve_track_fields(metadata, path_text, base_path)
+
+                if fields["sources"]["artist"] != "tag":
+                    logger.debug(
+                        "No artist tag on %s: artist from %s, album from %s",
+                        file_path,
+                        fields["sources"]["artist"],
+                        fields["sources"]["album"],
+                    )
+
+                pending_batch.append(
+                    {
+                        "track": {
+                            "title": fields["title"],
+                            "artist": fields["artist"],
+                            "album": fields["album"],
+                            "genre": fields["genre"],
+                            "raw_title": fields["raw_title"],
+                            "raw_artist": fields["raw_artist"],
+                            "raw_album": fields["raw_album"],
+                            "raw_genre": fields["raw_genre"],
+                            "file_path": metadata.get("file_path") or path_text,
+                            "duration_seconds": metadata.get("duration_seconds"),
+                            "file_size": stat.st_size,
+                            "file_mtime_ns": stat.st_mtime_ns,
+                            "track_number": fields["track_number"],
+                            "disc_number": fields["disc_number"],
+                            "album_artist": fields["album_artist"] or "",
+                        },
+                        "artists": fields["artists"],
+                        "genres": fields["genres"],
+                    }
                 )
-                db.commit()
-                known_file_paths.discard(path_by_id.get(moved_track_id))
                 known_file_paths.add(path_text)
-                path_by_id[moved_track_id] = path_text
-                moved += 1
-                logger.info("Track %s moved to %s", moved_track_id, file_path)
-                continue
 
-            try:
-                metadata = extract_track_metadata(path_text)
-            except Exception as e:
-                logger.warning("Skipping file (metadata error): %s -> %s", file_path, e)
-                continue
+                if len(pending_batch) >= SCAN_COMMIT_BATCH_SIZE:
+                    write_batch()
 
-            fields = resolve_track_fields(metadata, path_text, base_path)
-
-            if fields["sources"]["artist"] != "tag":
-                logger.debug(
-                    "No artist tag on %s: artist from %s, album from %s",
-                    file_path,
-                    fields["sources"]["artist"],
-                    fields["sources"]["album"],
-                )
-
-            pending_batch.append(
-                {
-                    "track": {
-                        "title": fields["title"],
-                        "artist": fields["artist"],
-                        "album": fields["album"],
-                        "genre": fields["genre"],
-                        "raw_title": fields["raw_title"],
-                        "raw_artist": fields["raw_artist"],
-                        "raw_album": fields["raw_album"],
-                        "raw_genre": fields["raw_genre"],
-                        "file_path": metadata.get("file_path") or path_text,
-                        "duration_seconds": metadata.get("duration_seconds"),
-                        "file_size": stat.st_size,
-                        "file_mtime_ns": stat.st_mtime_ns,
-                        "track_number": fields["track_number"],
-                        "disc_number": fields["disc_number"],
-                        "album_artist": fields["album_artist"] or "",
-                    },
-                    "artists": fields["artists"],
-                    "genres": fields["genres"],
-                }
-            )
-            known_file_paths.add(path_text)
-
-            if len(pending_batch) >= SCAN_COMMIT_BATCH_SIZE:
-                write_batch()
-
-            if count + len(pending_batch) >= limit:
-                break
+                if count + len(pending_batch) >= limit:
+                    stop_walk = True
+                    break
 
         if pending_batch:
             write_batch()
@@ -443,7 +498,12 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None) -> d
                 "started in background" if started else "already running",
             )
 
-        return {"added": count}
+        return {
+            "added": count,
+            "moved": moved,
+            "refreshed": refreshed,
+            "files_seen": files_seen,
+        }
 
     finally:
         db.close()

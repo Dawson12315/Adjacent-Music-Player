@@ -238,6 +238,39 @@ textarea.input {
   cursor: pointer;
 }
 
+/* Two or more inline fields on one line, wrapping on a narrow screen. */
+.field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-5);
+}
+
+/* What the folder watcher is doing, under the scan settings. */
+.watch-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  line-height: var(--leading-normal);
+}
+
+.watch-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--text-muted);
+}
+
+.watch-status--ok .watch-status__dot {
+  background: var(--success);
+}
+
+.watch-status--warn .watch-status__dot {
+  background: var(--warning);
+}
+
 /* ================================================================== *
  * Cards — one recipe, three intensities
  * ================================================================== */

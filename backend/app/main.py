@@ -308,6 +308,12 @@ def on_startup():
 
     start_scheduler()
 
+    # The folder watcher, when Settings has it on. It catches up with a scan
+    # a minute after boot, so a restart is not slowed by the walk.
+    from app.services.folder_watch import sync_folder_watch
+
+    sync_folder_watch(at_boot=True)
+
     _rebuild_cooccurrence_if_empty()
     _rebuild_vector_map_if_empty()
 
@@ -316,6 +322,13 @@ def on_startup():
     from app.services.stream_cache_maintenance import start_stream_cache_sweep_background
 
     start_stream_cache_sweep_background()
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    from app.services.folder_watch import stop_folder_watch
+
+    stop_folder_watch()
 
 
 def _rebuild_vector_map_if_empty():

@@ -173,6 +173,10 @@ by name later.
 2. **Settings → Scan library now.** A large library takes a while; watch the
    counts in the sidebar and refresh.
 3. Play something to confirm the music mount and transcoding both work.
+4. Under **Settings → Automation**, tick **Enable daily scan** and **Watch
+   folder for new files**. The watcher imports a new file seconds after it
+   finishes copying; the nightly scan is the safety net for anything it
+   could not see (details in the operating notes).
 
 Running it for real — one process only, log caps, several addresses, cache
 size — is in **[Operating notes](docs/deploy/operating-notes.md)**.

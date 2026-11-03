@@ -12,6 +12,7 @@ class AppSettingsResponse(BaseModel):
     cleanup_time: Optional[str] = None
     scan_enabled: bool
     scan_time: Optional[str] = None
+    watch_enabled: bool = False
     lastfm_enrichment_enabled: bool
     lastfm_enrichment_time: Optional[str] = None
     lastfm_api_key: Optional[str] = None
@@ -30,6 +31,9 @@ class AppSettingsUpdate(BaseModel):
     cleanup_time: Optional[str] = None
     scan_enabled: bool
     scan_time: Optional[str] = None
+    # Keep-on-None as well: a client built before the folder watch existed
+    # leaves it out, and must not switch it off by doing so.
+    watch_enabled: Optional[bool] = None
     lastfm_enrichment_enabled: bool = False
     lastfm_enrichment_time: Optional[str] = None
     lastfm_api_key: Optional[str] = None

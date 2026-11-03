@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from app.dependencies.auth import get_current_user, require_admin
 from app.models.user import User
 from app.schemas.scan import ScanStartResponse
+from app.services.folder_watch import get_watch_status
 from app.services.scan_runner import get_scan_progress, start_scan_background
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,8 @@ def run_scan(
 def scan_progress(
     current_user: User = Depends(get_current_user),
 ):
-    response = JSONResponse(content=get_scan_progress())
+    # The folder watcher's state rides along under "watch"; clients from
+    # before it existed ignore the extra key.
+    response = JSONResponse(content={**get_scan_progress(), "watch": get_watch_status()})
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return response

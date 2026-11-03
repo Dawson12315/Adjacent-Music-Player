@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String
+from sqlalchemy import Boolean, Column, Integer, String, false
 
 from app.db import Base
 
@@ -20,3 +20,7 @@ class AppSetting(Base):
     # Set once the existing playlists were turned newest-first (2 Nov 2026);
     # nullable so older installs gain the column at boot and the turn runs.
     playlists_newest_first = Column(Boolean, nullable=True)
+    # Watch the music folder and import new files as they land (2 Nov 2026).
+    # NOT NULL with a server default, so installs from before it gain the
+    # column at boot without a rewrite.
+    watch_enabled = Column(Boolean, nullable=False, default=False, server_default=false())
