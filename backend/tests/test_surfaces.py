@@ -208,9 +208,10 @@ def test_playlists_carry_a_track_count_and_an_album_preview(surface_client, db_s
 
     mix = by_id[playlist_id]
     assert mix["track_count"] == 2
-    # Two tracks from one album make one preview tile, in playlist order.
+    # Two tracks from one album make one preview tile, in playlist order —
+    # newest first, so the second song added leads.
     assert mix["preview"] == [
-        {"title": "Surface Song 1", "album": "Surface Album", "artwork_path": None}
+        {"title": "Surface Song 2", "album": "Surface Album", "artwork_path": None}
     ]
 
     # Ducking Good holds whatever earlier tests liked as well; the fixture's
@@ -223,4 +224,4 @@ def test_playlists_carry_a_track_count_and_an_album_preview(surface_client, db_s
     renamed = client.patch(f"/api/playlists/{playlist_id}", json={"name": "Surface Mix 2"})
     assert renamed.status_code == 200
     assert renamed.json()["track_count"] == 2
-    assert [item["title"] for item in renamed.json()["preview"]] == ["Surface Song 1"]
+    assert [item["title"] for item in renamed.json()["preview"]] == ["Surface Song 2"]

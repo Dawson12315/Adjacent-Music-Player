@@ -161,7 +161,8 @@ def test_loved_ids_come_without_the_rows(client, indexed_library):
 
     body = client.get("/api/playlists/liked-songs/track-ids").json()
     assert body["playlist_id"] == liked_id
-    assert body["track_ids"] == ids[:3]
+    # Newest like first, as the playlist reads.
+    assert body["track_ids"] == list(reversed(ids[:3]))
 
 
 def test_top_genres_stand_alone_and_match_the_overview(client, indexed_library):

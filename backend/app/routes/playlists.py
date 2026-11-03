@@ -109,6 +109,20 @@ def list_playlists(
     return build_playlist_responses(db, playlists)
 
 
+def make_room_at_top(db: Session, playlist_id: int) -> int:
+    """The position a track added now takes: the top.
+
+    A playlist reads newest first — the song you just added is the one you
+    came back to hear — so everything already there moves down one. Order
+    is only ever insertion order (there is no reorder), which is also why
+    existing playlists could be turned over once (see db_migrations).
+    """
+    db.query(PlaylistTrack).filter(PlaylistTrack.playlist_id == playlist_id).update(
+        {PlaylistTrack.position: PlaylistTrack.position + 1}, synchronize_session=False
+    )
+    return 0
+
+
 @router.post("/playlists", response_model=PlaylistResponse, tags=["playlists"])
 def create_playlist(
     payload: PlaylistCreate,
@@ -225,19 +239,10 @@ def add_track_to_liked_songs(
     if existing_playlist_track:
         return {"liked": True}
 
-    last_item = (
-        db.query(PlaylistTrack)
-        .filter(PlaylistTrack.playlist_id == playlist.id)
-        .order_by(PlaylistTrack.position.desc())
-        .first()
-    )
-
-    next_position = 0 if last_item is None else last_item.position + 1
-
     playlist_track = PlaylistTrack(
         playlist_id=playlist.id,
         track_id=payload.track_id,
-        position=next_position,
+        position=make_room_at_top(db, playlist.id),
     )
 
     db.add(playlist_track)
@@ -387,19 +392,10 @@ def add_track_to_playlist(
     if existing_playlist_track:
         raise HTTPException(status_code=400, detail="Track already exists in playlist")
 
-    last_item = (
-        db.query(PlaylistTrack)
-        .filter(PlaylistTrack.playlist_id == playlist_id)
-        .order_by(PlaylistTrack.position.desc())
-        .first()
-    )
-
-    next_position = 0 if last_item is None else last_item.position + 1
-
     playlist_track = PlaylistTrack(
         playlist_id=playlist_id,
         track_id=payload.track_id,
-        position=next_position,
+        position=make_room_at_top(db, playlist_id),
     )
 
     db.add(playlist_track)
@@ -431,7 +427,7 @@ def add_track_to_playlist(
         "message": "Track added to playlist",
         "playlist_id": playlist_id,
         "track_id": payload.track_id,
-        "position": next_position,
+        "position": playlist_track.position,
     }
 
 

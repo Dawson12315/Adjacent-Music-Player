@@ -211,6 +211,51 @@ def dedupe_playlist_tracks():
         logger.info("Removed %s duplicate playlist rows before indexing", removed)
 
 
+def turn_playlists_newest_first():
+    """Reverse every playlist once, so what was last added is at the top.
+
+    Playlists used to append; from 2 Nov 2026 they insert at the top, and a
+    list that was oldest-first below a newest-first head would read as a
+    mess. Order was only ever insertion order (there is no reorder), so
+    reversing loses nothing. Runs once per install, remembered in
+    app_settings.playlists_newest_first (the settings row is made if the
+    install has none yet).
+    """
+    from app.db import SessionLocal
+    from app.models.app_setting import AppSetting
+
+    tables = set(inspect(engine).get_table_names())
+    if "playlist_tracks" not in tables or "app_settings" not in tables:
+        return
+    db = SessionLocal()
+    try:
+        settings = db.query(AppSetting).order_by(AppSetting.id.asc()).first()
+        if settings is None:
+            settings = AppSetting()
+            db.add(settings)
+            db.flush()
+        if settings.playlists_newest_first:
+            return
+        playlists = [r[0] for r in db.execute(text("SELECT DISTINCT playlist_id FROM playlist_tracks"))]
+        for playlist_id in playlists:
+            rows = db.execute(
+                text("SELECT id FROM playlist_tracks WHERE playlist_id = :p ORDER BY position ASC, id ASC"),
+                {"p": playlist_id},
+            ).fetchall()
+            last = len(rows) - 1
+            for index, (row_id,) in enumerate(rows):
+                db.execute(text("UPDATE playlist_tracks SET position = :pos WHERE id = :id"), {"pos": last - index, "id": row_id})
+        settings.playlists_newest_first = True
+        db.commit()
+        if playlists:
+            logger.info("Turned %s playlists newest-first", len(playlists))
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        logger.warning("Could not turn playlists newest-first; will try at the next boot", exc_info=True)
+    finally:
+        db.close()
+
+
 def sync_model_indexes():
     """Create any index the models declare that the database lacks.
 

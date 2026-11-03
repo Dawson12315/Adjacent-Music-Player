@@ -95,7 +95,8 @@ export function PlaylistView() {
     async (track) => {
       try {
         await playlistsService.addTrackToPlaylist(selectedPlaylistId, track.id);
-        setPlaylistTracks((previous) => [...previous, track]);
+        // Newest first, as the server now keeps it.
+        setPlaylistTracks((previous) => [track, ...previous]);
         notify(`Added "${track.title}".`);
       } catch (error) {
         notify(error.message || "Could not add that track.");

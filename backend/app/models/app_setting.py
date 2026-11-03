@@ -17,3 +17,6 @@ class AppSetting(Base):
     lastfm_api_secret = Column(String, nullable=True)
     lastfm_username = Column(String, nullable=True)
     lastfm_session_key = Column(String, nullable=True)
+    # Set once the existing playlists were turned newest-first (2 Nov 2026);
+    # nullable so older installs gain the column at boot and the turn runs.
+    playlists_newest_first = Column(Boolean, nullable=True)
