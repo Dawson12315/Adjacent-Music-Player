@@ -193,3 +193,57 @@ def test_no_map_is_no_map(db_session_factory, map_library):
         assert vector_map.get_vector_index(db) is not None
     finally:
         db.close()
+
+
+def test_a_playlists_suggestions_put_new_artists_before_known_ones(db_session_factory, map_library):
+    """Playlist suggestions only: a track by an artist already in the playlist
+    keeps a quarter of the map's nearness bonus, so a near new artist comes
+    first. For You and radio (the track-ids entry point) are unchanged."""
+    from app.models.playlist import Playlist
+    from app.models.playlist_track import PlaylistTrack
+    from app.services.recommendations import vector_map
+    from app.services.recommendations.playlist_recommender import (
+        get_playlist_recommendations_for_playlist,
+        get_playlist_recommendations_from_track_ids,
+    )
+    from app.services.recommendations.scoring import score_candidate
+    from app.models.track import Track
+
+    db = db_session_factory()
+    try:
+        vector_map.rebuild_vector_map(db)
+        playlist = Playlist(name="Map Thrash Only")
+        db.add(playlist)
+        db.flush()
+        for position, track_id in enumerate(map_library["thrash"][:2]):
+            db.add(PlaylistTrack(playlist_id=playlist.id, track_id=track_id, position=position))
+        db.commit()
+        known = map_library["thrash"][2]
+        plain = get_playlist_recommendations_from_track_ids(db, seed_track_ids=map_library["thrash"][:2], debug=True, limit=6, allow_genre_relaxation=True)
+        for_playlist = get_playlist_recommendations_for_playlist(db, playlist.id, debug=True, limit=6)
+        plain_ids = [item["track"]["id"] for item in plain["recommendations"]]
+        playlist_ids = [item["track"]["id"] for item in for_playlist["recommendations"]]
+        # The known artist's last track scores lower through the playlist door
+        # than through the track-ids door, and says why; the toy library is
+        # too small for the order to turn on it (the real one is not — see
+        # the probe numbers in the commit).
+        assert known in plain_ids and known in playlist_ids, (plain_ids, playlist_ids)
+        plain_known = next(item["debug"] for item in plain["recommendations"] if item["track"]["id"] == known)
+        playlist_known = next(item["debug"] for item in for_playlist["recommendations"] if item["track"]["id"] == known)
+        assert playlist_known["map_bonus"] < plain_known["map_bonus"] * 0.26
+        assert any(reason.startswith("known_artist_map_share:x0.25") for reason in playlist_known["reasons"]), playlist_known["reasons"]
+        assert not any(reason.startswith("known_artist_map_share") for reason in plain_known["reasons"])
+
+        # And the rule is exactly a share of the bonus, nothing else.
+        track = db.query(Track).filter(Track.id == known).one()
+        full, full_debug = score_candidate(track, ["rock_alt"], {"rock_alt": 2}, {}, {"map thrash": 2}, {}, {"vector": 0.9}, map_strength=0.5)
+        shared, shared_debug = score_candidate(track, ["rock_alt"], {"rock_alt": 2}, {}, {"map thrash": 2}, {}, {"vector": 0.9}, map_strength=0.5, known_artist_map_share=0.25)
+        assert abs(shared_debug["map_bonus"] - full_debug["map_bonus"] * 0.25) < 1e-6
+        assert abs((full - shared) - full_debug["map_bonus"] * 0.75) < 1e-6
+        unknown, unknown_debug = score_candidate(track, ["rock_alt"], {"rock_alt": 2}, {}, {}, {}, {"vector": 0.9}, map_strength=0.5, known_artist_map_share=0.25)
+        assert abs(unknown_debug["map_bonus"] - full_debug["map_bonus"]) < 1e-6
+    finally:
+        db.query(PlaylistTrack).filter(PlaylistTrack.playlist_id == playlist.id).delete(synchronize_session=False)
+        db.query(Playlist).filter(Playlist.id == playlist.id).delete(synchronize_session=False)
+        db.commit()
+        db.close()

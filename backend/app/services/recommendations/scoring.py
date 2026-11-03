@@ -27,6 +27,7 @@ def score_candidate(
     playlist_album_counts: dict,
     retrieved_source_scores: dict | None = None,
     map_strength: float = 0.5,
+    known_artist_map_share: float = 1.0,
 ) -> Tuple[float, dict]:
     score = 0.0
     reasons: list[str] = []
@@ -44,6 +45,11 @@ def score_candidate(
     )
     vector_fit = retrieved_source_scores.get("vector")
     vector_bridge = vector_fit is not None and float(vector_fit) >= VECTOR_BRIDGE_COSINE
+
+    artist_key = (track.artist or "").strip().casefold()
+    album_key = f"{artist_key}::{(track.album or '').strip().casefold()}"
+    artist_repeat_count = int(playlist_artist_counts.get(artist_key, 0) or 0)
+    album_repeat_count = int(playlist_album_counts.get(album_key, 0) or 0)
 
     # --- FAMILY SCORING ---
     family_score = 0.0
@@ -65,6 +71,12 @@ def score_candidate(
         family_unit = 2.5 + 0.9 * float(max(family_counts.values(), default=0))
         if fit >= VECTOR_ALIGNED_COSINE:
             map_bonus = fit * family_unit * MAP_BONUS_SCALE * map_strength
+            # A playlist's suggestions are for finding what is not in it:
+            # an artist already there keeps only a share of the map's
+            # bonus, so a near new artist comes before a near known one.
+            if artist_repeat_count > 0 and known_artist_map_share < 1.0:
+                map_bonus *= known_artist_map_share
+                reasons.append(f"known_artist_map_share:x{known_artist_map_share:.2f}")
             reasons.append(f"map_near_bonus:+{map_bonus:.2f}")
         else:
             nearness = max(0.0, (fit - VECTOR_FAR_COSINE) / (VECTOR_ALIGNED_COSINE - VECTOR_FAR_COSINE))
@@ -83,12 +95,7 @@ def score_candidate(
     co_score = float(cooccurrence_scores.get(track.id, 0.0) or 0.0)
     co_boost = 0.0
 
-    # --- ARTIST / ALBUM REPETITION ---
-    artist_key = (track.artist or "").strip().casefold()
-    album_key = f"{artist_key}::{(track.album or '').strip().casefold()}"
-
-    artist_repeat_count = int(playlist_artist_counts.get(artist_key, 0) or 0)
-    album_repeat_count = int(playlist_album_counts.get(album_key, 0) or 0)
+    # --- ARTIST / ALBUM REPETITION (penalties below; the counts are read by the map block too) ---
 
     artist_penalty = 0.0
     if artist_repeat_count > 0:

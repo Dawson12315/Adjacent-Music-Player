@@ -83,6 +83,7 @@ def rank_candidates(
     playlist_id: int | None = None,
     user_taste: dict | None = None,
     map_strength: float = 0.5,
+    known_artist_map_share: float = 1.0,
 ):
     scored_candidates = []
     debug_by_track_id = {}
@@ -124,6 +125,7 @@ def rank_candidates(
             playlist_album_counts=playlist_album_counts,
             retrieved_source_scores=retrieval_sources,
             map_strength=map_strength,
+            known_artist_map_share=known_artist_map_share,
         )
 
         normalized = {

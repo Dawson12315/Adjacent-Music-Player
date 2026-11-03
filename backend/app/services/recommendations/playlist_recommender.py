@@ -55,6 +55,10 @@ def _serialize_playlist_profile(
 
 # A playlist this long, this much of one genre, may hear a neighbour: see
 # `genre_restriction_relaxed` below.
+# What share of the map's nearness bonus a track keeps when its artist is
+# already in the playlist being suggested for. Playlist suggestions only:
+# For You and radio are not "what is missing from this list".
+KNOWN_ARTIST_MAP_SHARE = 0.25
 USER_TASTE_TTL_SECONDS = 180
 RELAX_GENRE_MIN_TRACKS = 20
 RELAX_GENRE_DOMINANT_SHARE = 0.80
@@ -211,6 +215,7 @@ def _retrieve_and_rank_candidates(
     exclude_liked_behavior: bool = False,
     map_strength: float = 0.5,
     vector_query=None,
+    known_artist_map_share: float = 1.0,
 ):
     retrieved_candidates = retrieve_candidates(
         db=db,
@@ -257,6 +262,7 @@ def _retrieve_and_rank_candidates(
         playlist_id=playlist_id,
         user_taste=user_taste,
         map_strength=map_strength,
+        known_artist_map_share=known_artist_map_share,
     )
 
     return scored_candidates, debug_by_track_id, retrieved_candidates
@@ -426,6 +432,7 @@ def get_playlist_recommendations_from_track_ids(
     map_strength: float = 0.5,
     artist_cap: int | None = None,
     vector_query=None,
+    known_artist_map_share: float = 1.0,
 ):
     """Suggestions for a list of seed tracks.
 
@@ -481,6 +488,7 @@ def get_playlist_recommendations_from_track_ids(
             excluded_track_ids=exclude_track_ids if exclude_from_retrieval else None,
             exclude_liked_behavior=exclude_liked_behavior,
             map_strength=map_strength,
+            known_artist_map_share=known_artist_map_share,
             vector_query=vector_query,
         )
     )
@@ -510,6 +518,7 @@ def get_playlist_recommendations_from_track_ids(
                     excluded_track_ids=exclude_track_ids if exclude_from_retrieval else None,
                     exclude_liked_behavior=exclude_liked_behavior,
                     map_strength=map_strength,
+            known_artist_map_share=known_artist_map_share,
                 )
             )
 
@@ -708,4 +717,7 @@ def get_playlist_recommendations_for_playlist(
         # Only a real playlist earns the relaxation: it is the one list
         # someone has curated to twenty songs of one genre on purpose.
         allow_genre_relaxation=True,
+        # And only a real playlist asks for new artists first: its
+        # suggestions are for finding what is not in it yet.
+        known_artist_map_share=KNOWN_ARTIST_MAP_SHARE,
     )
