@@ -29,6 +29,8 @@ vi.mock("../../contexts/LibraryContext", () => ({
 }));
 const player = { playTrack: vi.fn(), playStation: vi.fn() };
 vi.mock("../../contexts/PlayerContext", () => ({ usePlayer: () => player }));
+const navigateMock = vi.hoisted(() => vi.fn());
+vi.mock("react-router-dom", async (importOriginal) => ({ ...(await importOriginal()), useNavigate: () => navigateMock }));
 
 import { HomeView } from "./HomeView";
 
@@ -89,8 +91,10 @@ describe("the Recent stations rail", () => {
     expect(screen.getByText("Recent stations")).toBeInTheDocument();
     expect(screen.getByText("Artist radio")).toBeInTheDocument();
     expect(screen.getByText("Album radio")).toBeInTheDocument();
-    screen.getByRole("button", { name: "Play Fen radio" }).click();
-    expect(player.playStation).toHaveBeenCalledWith(home.stations[0]);
+    // A card opens the station's page; nothing plays until Play or a track is pressed there.
+    screen.getByRole("button", { name: "Open Fen radio" }).click();
+    expect(player.playStation).not.toHaveBeenCalled();
+    expect(navigateMock).toHaveBeenCalledWith("/radio/4");
   });
 
   it("is absent until a station has been played", () => {

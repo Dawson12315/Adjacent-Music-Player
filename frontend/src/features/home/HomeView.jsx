@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { getGreeting, useHomeData } from "./useHomeData";
@@ -28,7 +28,6 @@ export function HomeView() {
   const { playTrack, playStation, deleteStationById } = usePlayer();
   // "Happy Halloween." on the day itself, never for a whole season.
   const dayLine = dayLineFor();
-  const [busyStationId, setBusyStationId] = useState(null);
   const navigate = useNavigate();
   const home = useHomeData();
 
@@ -94,25 +93,17 @@ export function HomeView() {
             {home.stations.map((station) => (
               <div key={station.id} className="station-card__wrap">
                 <button
-                  className={`entity-card station-card ${busyStationId === station.id ? "station-card--busy" : ""}`}
+                  className="entity-card station-card"
                   type="button"
-                  disabled={busyStationId != null}
-                  aria-busy={busyStationId === station.id || undefined}
-                  onClick={() => {
-                    setBusyStationId(station.id);
-                    Promise.resolve(playStation(station))
-                      .then((played) => {
-                        if (played) navigate(buildStationPath(station.id));
-                      })
-                      .catch(() => {})
-                      .finally(() => setBusyStationId(null));
-                  }}
-                  aria-label={`Play ${station.name}`}
+                  // Opens the station; nothing plays until Play or a track
+                  // is pressed on its page.
+                  onClick={() => navigate(buildStationPath(station.id))}
+                  aria-label={`Open ${station.name}`}
                 >
                   <span className="station-card__art">
                     <Artwork artwork={resolveStationArtwork(station)} className="entity-card__art" size={168} />
                     <span className="station-card__badge" aria-hidden="true">
-                      <Icon name={busyStationId === station.id ? "refresh" : "radio"} size={14} className={busyStationId === station.id ? "icon--spin" : undefined} />
+                      <Icon name="radio" size={14} />
                     </span>
                   </span>
                   <span className="entity-card__body">
