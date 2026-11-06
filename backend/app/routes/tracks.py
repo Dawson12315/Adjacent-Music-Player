@@ -246,6 +246,26 @@ TRANSCODE_WAIT_TIMEOUT_SECONDS = 10
 FFMPEG_TIMEOUT_SECONDS = 180
 
 
+# Builds for a track a device is playing right now, in flight. A warm-up that
+# runs beside one keeps to a single thread; a warm-up alone on the box may use
+# every core, so the next track is ready sooner and nothing is being starved.
+_FOREGROUND_BUILDS = 0
+_FOREGROUND_BUILDS_GUARD = threading.Lock()
+
+
+def foreground_build_active() -> bool:
+    with _FOREGROUND_BUILDS_GUARD:
+        return _FOREGROUND_BUILDS > 0
+
+
+def ffmpeg_thread_args(foreground: bool) -> list[str]:
+    """How many threads a build may use: all of them for the playing track,
+    and for background work when no playing track's build is in flight."""
+    if foreground or not foreground_build_active():
+        return []
+    return ["-threads", "1"]
+
+
 def ffmpeg_command_prefix(foreground: bool) -> list[str]:
     """Background work yields the CPU to the track being played.
 
@@ -320,9 +340,16 @@ def transcode_slot(context: str, *, foreground: bool = False):
     if waited >= TRANSCODE_WAIT_LOG_SECONDS:
         logger.info("Transcode slot for %s took %.1fs to come free", context, waited)
 
+    global _FOREGROUND_BUILDS
+    if foreground:
+        with _FOREGROUND_BUILDS_GUARD:
+            _FOREGROUND_BUILDS += 1
     try:
         yield
     finally:
+        if foreground:
+            with _FOREGROUND_BUILDS_GUARD:
+                _FOREGROUND_BUILDS -= 1
         held.release()
 
 
@@ -352,6 +379,24 @@ HLS_END_TAG = "#EXT-X-ENDLIST"
 # twenty seconds, which a cold AVPlayer answers by abandoning the start offset
 # and sitting at the live edge. The lead is the player's to build, from zero.
 HLS_MIN_SEGMENTS_TO_START = 2
+# How long a playlist request may wait for the whole build, counted from the
+# moment the build started, once the lead exists. A fast host finishes a song in a second or two; handing that
+# player a complete playlist from its first fetch is the one shape AVPlayer
+# never gets wrong (see HLS_REVEAL_SEGMENTS_PER_SECOND). A slow host runs
+# past this and gets the growing playlist as before.
+HLS_HOLD_FOR_COMPLETE_SECONDS = 1.5
+# How fast a growing playlist is allowed to grow, in segments per second,
+# counted from the first time a client was handed a partial one.
+#
+# AVPlayer keeps a live-stream window for a playlist with no end tag, and a
+# reload that reveals a large batch of new segments at once breaks that
+# window: the seekable range collapses to the end and every later seek
+# lands there or ends the item. Measured on this machine: twelve new
+# segments per reload were fine, twenty broke it, with or without the end
+# tag. A fast host writes a whole song between two reloads, so what it has
+# built is revealed at this pace instead — eight segments (32 s of audio)
+# per four-second reload, twice what the player can consume.
+HLS_REVEAL_SEGMENTS_PER_SECOND = 2.0
 # How long the first request waits for those segments before giving up.
 HLS_START_WAIT_SECONDS = 30
 
@@ -669,7 +714,7 @@ def ensure_mobile_stream_cache(
         with transcode_slot(f"mobile transcode of track {track.id} ({quality})", foreground=foreground):
             try:
                 result = subprocess.run(
-                    ffmpeg_command_prefix(foreground) + ffmpeg_command + ([] if foreground else ["-threads", "1"]),
+                    ffmpeg_command_prefix(foreground) + ffmpeg_command + ffmpeg_thread_args(foreground),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -757,7 +802,7 @@ def _run_hls_build(
                 _HLS_BUILD_STARTED[cache_key] = time.monotonic()
             try:
                 result = subprocess.run(
-                    ffmpeg_command_prefix(foreground) + ffmpeg_command + ([] if foreground else ["-threads", "1"]),
+                    ffmpeg_command_prefix(foreground) + ffmpeg_command + ffmpeg_thread_args(foreground),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -893,26 +938,105 @@ def ensure_hls_stream_cache(
         return playlist_path
 
     # Enough to start: segments on disk, the playlist listing them, and a lead
-    # the player can live on at the speed this host is building.
-    deadline = time.monotonic() + HLS_START_WAIT_SECONDS
+    # the player can live on at the speed this host is building. Once the
+    # lead exists the request still waits a moment for the whole build, so a
+    # fast host answers with a complete playlist.
+    started = time.monotonic()
+    deadline = started + HLS_START_WAIT_SECONDS
+    # From the build's start, not this request's: the master and the index
+    # playlist are asked for in turn, and each waiting its own hold put two
+    # holds between the press and the first note.
+    with _HLS_BUILDS_GUARD:
+        build_started = _HLS_BUILD_STARTED.get(cache_key, started)
+    hold_until = build_started + HLS_HOLD_FOR_COMPLETE_SECONDS
 
     while time.monotonic() < deadline:
         if _hls_playlist_complete(playlist_path):
             return playlist_path
 
-        if playlist_path.exists() and _hls_segment_count(track_dir) >= HLS_MIN_SEGMENTS_TO_START:
+        if (
+            playlist_path.exists()
+            and _hls_segment_count(track_dir) >= HLS_MIN_SEGMENTS_TO_START
+            and time.monotonic() >= hold_until
+        ):
             return playlist_path
 
         if done.is_set():
             # Finished without a playlist: the build failed and cleaned up.
             raise HTTPException(status_code=500, detail="Failed to create HLS stream")
 
-        done.wait(timeout=0.2)
+        done.wait(timeout=0.1)
 
     raise HTTPException(
         status_code=status.HTTP_504_GATEWAY_TIMEOUT,
         detail="Audio conversion is taking too long to start.",
     )
+
+
+# When each (track, quality) build was first handed to a client as a partial
+# playlist; the pace of what later requests may see counts from then.
+_HLS_FIRST_PARTIAL_SERVE: dict[str, float] = {}
+_HLS_FIRST_PARTIAL_GUARD = threading.Lock()
+
+
+def hls_cache_key(track_id: int, fingerprint: str, quality: str, profile: dict) -> str:
+    return f"hls:{track_id}:{fingerprint}:{quality}:{profile.get('cache_version', 'v1')}"
+
+
+def trim_hls_playlist(playlist_text: str, allowed_segments: int) -> tuple[str, bool]:
+    """The playlist cut to its first `allowed_segments` segments.
+
+    Returns the text and whether it is still the complete playlist. A cut
+    playlist loses its end tag, so the player keeps reloading until the rest
+    has been revealed.
+    """
+    lines = playlist_text.splitlines()
+    total = sum(1 for line in lines if line.strip() and not line.startswith("#"))
+    if allowed_segments >= total:
+        return playlist_text, HLS_END_TAG in playlist_text
+
+    kept: list[str] = []
+    segments = 0
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            if segments >= allowed_segments:
+                break
+            segments += 1
+            kept.append(line)
+            continue
+        if stripped.startswith("#EXTINF") and segments >= allowed_segments:
+            break
+        if stripped == HLS_END_TAG:
+            continue
+        kept.append(line)
+    return "\n".join(kept) + "\n", False
+
+
+def pace_hls_playlist(cache_key: str, playlist_text: str, now: float | None = None) -> tuple[str, bool]:
+    """What a client may see of a build right now.
+
+    A complete playlist that no client has ever seen partial goes out whole.
+    Once a partial has been served, later requests reveal segments at
+    HLS_REVEAL_SEGMENTS_PER_SECOND from that moment, so the player's view
+    grows the way a build at a sane speed would have grown it.
+    """
+    now = time.monotonic() if now is None else now
+    complete = HLS_END_TAG in playlist_text
+    with _HLS_FIRST_PARTIAL_GUARD:
+        first = _HLS_FIRST_PARTIAL_SERVE.get(cache_key)
+        if complete and first is None:
+            return playlist_text, True
+        if first is None:
+            first = now
+            _HLS_FIRST_PARTIAL_SERVE[cache_key] = first
+
+    allowed = HLS_MIN_SEGMENTS_TO_START + int((now - first) * HLS_REVEAL_SEGMENTS_PER_SECOND)
+    text, still_complete = trim_hls_playlist(playlist_text, allowed)
+    if still_complete:
+        with _HLS_FIRST_PARTIAL_GUARD:
+            _HLS_FIRST_PARTIAL_SERVE.pop(cache_key, None)
+    return text, still_complete
 
 
 def hls_variant_listable(track_id: int, quality: str, fingerprint: str, requested_quality: str) -> bool:
@@ -1652,7 +1776,10 @@ def get_hls_quality_playlist(
         ).start()
 
     playlist_text = playlist_path.read_text()
-    complete = HLS_END_TAG in playlist_text
+    playlist_text, complete = pace_hls_playlist(
+        hls_cache_key(track_id_value, source_fingerprint(file_path), quality, profile),
+        playlist_text,
+    )
     segment_suffix = ("&fast_start=1" if fast_start_only else "") + ("&prefetch=1" if prefetch else "")
     rewritten_lines = render_variant_playlist(
         playlist_text,
