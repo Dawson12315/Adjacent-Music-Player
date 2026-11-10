@@ -24,6 +24,9 @@ class LyricsResponse(BaseModel):
     model: Optional[str] = None
     confidence: Optional[float] = None
     updated_at: Optional[str] = None
+    # The track's vocal / language / explicit flags (services/track_flags.py).
+    flags: Optional[dict] = None
+
 
 
 class LyricsUpdate(BaseModel):

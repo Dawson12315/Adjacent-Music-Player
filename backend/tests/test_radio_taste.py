@@ -131,7 +131,7 @@ def test_less_of_an_artist_steers_the_next_batches_not_just_the_exclusion(client
 
         row = db.query(RadioStation).filter(RadioStation.id == station["id"]).one()
         feedback = radio.station_feedback(db, row)
-        query, _ = radio.station_position(db, radio_library["user_id"], [seed], feedback)
+        query, _corrections, _blend = radio.station_position(db, radio_library["user_id"], [seed], feedback)
         plain = index.query_from([seed])
         assert index.fit(elsewhere, query)[elsewhere[1]] < index.fit(elsewhere, plain)[elsewhere[1]]
         assert "elsewhere act" in feedback["less_artists"]

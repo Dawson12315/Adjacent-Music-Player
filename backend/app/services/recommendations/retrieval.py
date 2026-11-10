@@ -1,5 +1,8 @@
 import random
 
+from app.services.recommendations.retrievers.block_retriever import (
+    retrieve_block_candidates,
+)
 from app.services.recommendations.retrievers.behavior_retriever import (
     retrieve_behavior_candidates,
 )
@@ -151,6 +154,12 @@ def retrieve_candidates(
             excluded_track_ids=excluded_track_ids,
         )
 
+    # What the seeds sound like, and what their words are about: the map's
+    # extra blocks, each a channel of its own (vector_map.BLOCK_KINDS).
+    block_limit = min(max(limit // 2, 100), 200)
+    sound_candidates = retrieve_block_candidates(vector_index, "sound", playlist_track_ids, block_limit, excluded_track_ids)
+    words_candidates = retrieve_block_candidates(vector_index, "words", playlist_track_ids, block_limit, excluded_track_ids)
+
     merged = merge_retrieved_candidates(
         vector_candidates,
         genre_candidates,
@@ -159,6 +168,8 @@ def retrieve_candidates(
         lastfm_artist_candidates,
         lastfm_track_candidates,
         recent_candidates,
+        sound_candidates,
+        words_candidates,
         excluded_track_ids=excluded_track_ids,
     )
     annotate_vector_fit(merged, vector_index, vector_query, corrections)

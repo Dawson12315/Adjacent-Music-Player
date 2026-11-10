@@ -13,6 +13,7 @@ from app.services.musicbrainz_backfill_runner import start_musicbrainz_backfill_
 from app.services.track_resolution import resolve_track_fields
 from app.models.track_lyrics import TrackLyrics
 from app.services.lyrics_files import is_sidecar_name, lyrics_from_file
+from app.services.track_flags import note_lyrics_text
 from app.utils.files import is_supported_audio_file
 import json
 from datetime import datetime, timezone
@@ -128,6 +129,7 @@ def _store_lyrics(db, track_id: int, found: dict | None) -> None:
         # file goes with it; one the server produced from the audio stays.
         if existing is not None and existing.source in ("embedded", "sidecar"):
             db.delete(existing)
+            note_lyrics_text(db, track_id, None, commit=False)
         return
     synced = json.dumps(found["synced"], ensure_ascii=False) if found.get("synced") else None
     if existing is None:
@@ -140,12 +142,14 @@ def _store_lyrics(db, track_id: int, found: dict | None) -> None:
                 synced=synced,
             )
         )
+        note_lyrics_text(db, track_id, found["plain"], commit=False)
         return
     changed = existing.plain != found["plain"] or (existing.synced or None) != synced or existing.source != found["source"]
     if not changed:
         return
     existing.source = found["source"]
     existing.plain = found["plain"]
+    note_lyrics_text(db, track_id, found["plain"], commit=False)
     # The file's own timing replaces timing the server made; the file's
     # words without timing keep a timing the server made for those same words.
     if synced:
@@ -341,6 +345,7 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None, with
                                 synced=json.dumps(found["synced"], ensure_ascii=False) if found.get("synced") else None,
                             )
                         )
+                        note_lyrics_text(db, track.id, found["plain"], commit=False)
                 written += 1
             except Exception as error:  # noqa: BLE001
                 logger.warning(

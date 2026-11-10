@@ -28,6 +28,11 @@ class TrackResponse(BaseModel):
     duration_seconds: Optional[float] = None
     track_number: Optional[int] = None
     disc_number: Optional[int] = None
+    # What the audio says (services/track_flags.py): vocal | instrumental,
+    # the vocals' language, explicit | clean. Null is "not known".
+    vocal_state: Optional[str] = None
+    language: Optional[str] = None
+    explicit_state: Optional[str] = None
 
     class Config:
         from_attributes = True

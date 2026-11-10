@@ -1366,10 +1366,18 @@ def list_tracks(
     sort_by: str = Query("artist", pattern="^(title|album|artist)$"),
     section: str | None = Query(None, pattern="^(\\$#|[A-Za-z])$"),
     fields: str | None = Query(None, pattern="^(list|full)$"),
+    # The audio's flags (services/track_flags.py): "instrumental" is the
+    # library's instrumental filter; "clean" leaves explicit tracks out.
+    vocal_state: str | None = Query(None, pattern="^(vocal|instrumental)$"),
+    explicit_state: str | None = Query(None, pattern="^(explicit|clean)$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     query = db.query(Track).options(*track_load_options(fields))
+    if vocal_state:
+        query = query.filter(Track.vocal_state == vocal_state)
+    if explicit_state:
+        query = query.filter(Track.explicit_state == explicit_state)
 
     cleaned_search = search.strip() if search else ""
 

@@ -94,6 +94,28 @@ def _sync_scheduler_jobs():
         scan_job_id = "scheduled_scan"
         lastfm_enrichment_job_id = "scheduled_lastfm_enrichment"
         lyrics_job_id = "scheduled_lyrics"
+        audio_job_id = "scheduled_audio_analysis"
+
+        # Listening to the library for radio: on unless switched off, at the
+        # set time or the default one (services/audio_analysis.py).
+        from app.services.audio_analysis import DEFAULT_TIME as AUDIO_DEFAULT_TIME
+
+        existing_audio = _scheduler.get_job(audio_job_id)
+        audio_enabled = settings is None or getattr(settings, "audio_analysis_enabled", True) is not False
+        if audio_enabled:
+            audio_hour, audio_minute = ((settings and getattr(settings, "audio_analysis_time", None)) or AUDIO_DEFAULT_TIME).split(":")
+            _scheduler.add_job(
+                _run_audio_analysis_job,
+                trigger="cron",
+                hour=int(audio_hour),
+                minute=int(audio_minute),
+                id=audio_job_id,
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+        elif existing_audio:
+            _scheduler.remove_job(audio_job_id)
 
         existing_lyrics = _scheduler.get_job(lyrics_job_id)
         if (
@@ -181,6 +203,15 @@ def _sync_scheduler_jobs():
         logger.warning(f"Scheduler sync error: {error}")
     finally:
         db.close()
+
+
+def _run_audio_analysis_job():
+    from app.services.audio_analysis import enqueue_backlog
+
+    try:
+        enqueue_backlog()
+    except Exception as error:  # noqa: BLE001
+        logger.warning(f"Scheduled audio analysis error: {error}")
 
 
 def _run_vector_map_rebuild_job():

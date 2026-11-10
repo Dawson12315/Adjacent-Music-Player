@@ -307,6 +307,7 @@ def generate(file_path: str, *, model_name: str, known_text: str | None = None) 
             "plain": known_text,
             "confidence": aligned["coverage"],
             "language": run["language"],
+            "language_probability": run["language_probability"],
             "model": model_name,
         }
 
@@ -315,6 +316,7 @@ def generate(file_path: str, *, model_name: str, known_text: str | None = None) 
     if not lines["synced"] or looks_instrumental(lines["words"], run["duration"] or len(audio) / 16000):
         return {
             "ok": False,
+            "instrumental": True,
             "reason": "No vocals were found in this track.",
             "language": run["language"],
             "dropped": run["dropped"],
@@ -326,5 +328,6 @@ def generate(file_path: str, *, model_name: str, known_text: str | None = None) 
         "plain": lines["plain"],
         "confidence": lines["confidence"],
         "language": run["language"],
+        "language_probability": run["language_probability"],
         "model": model_name,
     }

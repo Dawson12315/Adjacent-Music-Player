@@ -276,6 +276,8 @@ def _generate_one(track_id: int) -> str:
         return _fail(track_id, message[:200] or "Lyrics generation failed.")
 
     if not result.get("ok"):
+        if result.get("instrumental"):
+            _note_flags(track_id, result)
         return _fail(track_id, result.get("reason") or "Lyrics generation failed.")
 
     db = SessionLocal()
@@ -302,10 +304,29 @@ def _generate_one(track_id: int) -> str:
             row.language = result.get("language")
             row.updated_at = now
         db.commit()
+        # The words say what the audio says: vocal, in which language, and
+        # whether they are explicit. Free, since the pass has just run.
+        _note_flags(track_id, {**result, "plain": row.plain}, db=db)
     finally:
         db.close()
     logger.info("Lyrics %s for track %s (%s)", result["kind"], track_id, model_name)
     return "ok"
+
+
+def _note_flags(track_id: int, result: dict, db=None) -> None:
+    from app.services import track_flags
+
+    own = db is None
+    db = db or SessionLocal()
+    try:
+        track = db.query(Track).filter(Track.id == track_id).first()
+        if track is not None and track_flags.apply_detected(db, track, **track_flags.flags_from_lyrics_result(result)):
+            db.commit()
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not record the flags for track %s", track_id, exc_info=True)
+    finally:
+        if own:
+            db.close()
 
 
 def _fail(track_id: int, reason: str) -> str:

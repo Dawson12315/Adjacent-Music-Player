@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, false
+from sqlalchemy import Boolean, Column, Integer, String, false, true
 
 from app.db import Base
 
@@ -29,3 +29,8 @@ class AppSetting(Base):
     lyrics_generation_enabled = Column(Boolean, nullable=False, default=False, server_default=false())
     lyrics_model = Column(String, nullable=True)
     lyrics_time = Column(String, nullable=True)
+    # Listen to the library for radio: sound profiles and vocal/language
+    # flags (services/audio_analysis.py). On by default; cheap, local, and
+    # the one thing the map cannot get from tags.
+    audio_analysis_enabled = Column(Boolean, nullable=False, default=True, server_default=true())
+    audio_analysis_time = Column(String, nullable=True)

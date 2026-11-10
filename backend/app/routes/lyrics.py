@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.dependencies.auth import get_current_user, require_admin
+from app.services import track_flags
 from app.models.track import Track
 from app.models.track_lyrics import TrackLyrics
 from app.models.user import User
@@ -66,11 +67,11 @@ def get_lyrics(
 ):
     """The track's lyrics. 404 with a `generation` status when it has none,
     so a client knows whether asking the server to produce them is an option."""
-    _track_or_404(db, track_id)
+    track = _track_or_404(db, track_id)
     row = db.query(TrackLyrics).filter(TrackLyrics.track_id == track_id).first()
     if row is None:
         return _no_lyrics(track_id)
-    return lyrics_response(row)
+    return {**lyrics_response(row), "flags": track_flags.flags_payload(track)}
 
 
 @router.post("/tracks/{track_id}/lyrics/generate", tags=["lyrics"], status_code=202)
@@ -151,8 +152,9 @@ def put_lyrics(
     row.confidence = None
     db.commit()
     db.refresh(row)
+    track_flags.note_lyrics_text(db, track_id, plain)
     logger.info("Lyrics for track %s edited by %s", track_id, current_user.username)
-    return lyrics_response(row)
+    return {**lyrics_response(row), "flags": track_flags.flags_payload(_track_or_404(db, track_id))}
 
 
 @router.delete("/tracks/{track_id}/lyrics", tags=["lyrics"])
@@ -179,7 +181,9 @@ def delete_lyrics(
         db.add(row)
         db.commit()
         db.refresh(row)
-        return lyrics_response(row)
+        track_flags.note_lyrics_text(db, track_id, row.plain)
+        return {**lyrics_response(row), "flags": track_flags.flags_payload(_track_or_404(db, track_id))}
+    track_flags.note_lyrics_text(db, track_id, None)
     return _no_lyrics(track_id)
 
 

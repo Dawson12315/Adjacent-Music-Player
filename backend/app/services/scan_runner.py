@@ -139,6 +139,14 @@ def _run_scan(limit: int, within=None, source: str = "manual", on_done=None):
             start_vector_rebuild_background()
         except Exception:  # noqa: BLE001
             logger.warning("Could not start the vector map rebuild after the scan", exc_info=True)
+        # New files, newest first, measured in the background slot for at
+        # most an hour; the nightly run takes the rest.
+        try:
+            from app.services.audio_analysis import AFTER_SCAN_BATCH, AFTER_SCAN_BUDGET_SECONDS, enqueue_backlog
+
+            enqueue_backlog(limit=AFTER_SCAN_BATCH, budget_seconds=AFTER_SCAN_BUDGET_SECONDS, newest_first=True)
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not start audio analysis after the scan", exc_info=True)
 
         db = SessionLocal()
         try:

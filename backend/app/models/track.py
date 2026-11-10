@@ -58,6 +58,17 @@ class Track(Base):
     # When the file was last read for lyrics (its tags and any sidecar).
     # Null until the first read, which the scanner does as its walk passes.
     lyrics_checked_at = Column(DateTime, nullable=True)
+    # What the audio itself says (services/track_flags.py): whether there are
+    # sung words, in which language, and whether those words are explicit.
+    # "detected" by the server, or set by an admin — which the server then
+    # leaves alone. Null is "not known", a third state the radio respects.
+    vocal_state = Column(String, nullable=True)  # vocal | instrumental
+    language = Column(String, nullable=True)  # ISO 639-1 of the vocals
+    language_confidence = Column(Float, nullable=True)
+    explicit_state = Column(String, nullable=True)  # explicit | clean
+    flags_set_by = Column(String, nullable=True)  # detected | admin
+    # When the server last listened for the flags, so the backlog is finite.
+    flags_checked_at = Column(DateTime, nullable=True)
 
     # The track list sorts on lower(column) and the section jump counts on
     # it; declared here, not only in the SQLite migration runner, so Postgres

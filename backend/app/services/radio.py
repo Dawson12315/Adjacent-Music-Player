@@ -55,6 +55,7 @@ from app.services.recommendations.playlist_recommender import (
 from app.services.recommendations.retrievers.genre_retriever import get_genre_family_map
 from app.services.track_order import album_track_order
 from app.services.track_responses import record_artist_expr
+from app.services import track_flags
 from app.utils.artist_normalization import normalize_artist_name
 
 BATCH = 20
@@ -83,6 +84,16 @@ RECENT_ARTIST_WINDOW = 40
 # and to be worth reaching for before the genre families are.
 NEAR_COSINE = 0.45
 NEAR_REACH_COSINE = 0.35
+# The flags (services/track_flags.py) as station rules. A station keeps its
+# seed's vocal state (instrumental stays instrumental, vocal stays vocal)
+# and, unless this listener plays in several languages, its seed's
+# language. Unknown is a third state, never a wrong one: a track nobody has
+# listened to yet is allowed through on the map's word.
+# A listener whose most-played language is under this share of their
+# flagged plays mixes languages, and the station does not filter by it.
+LANGUAGE_FILTER_MIN_SHARE = 0.8
+# A seed language needs this much of Whisper's confidence to be a rule.
+LANGUAGE_FILTER_MIN_CONFIDENCE = 0.6
 # How many of the artist's tracks seed the recommender: enough to carry the
 # vibe, few enough that a huge catalogue does not swamp the channels.
 ARTIST_SEED_SAMPLE = 40
@@ -189,6 +200,10 @@ def get_or_create_station(db: Session, user_id: int, payload) -> RadioStation | 
         key = seed_key_for("artist", artist=payload.seed_artist)
         name = station_name("artist", artist=payload.seed_artist)
 
+    # A seed nobody has listened to yet goes to the front of the analysis
+    # queue, so the station's second batch already knows how it sounds.
+    _ask_to_listen(db, [seed_track] if seed_track else [])
+
     station = _find_station(db, user_id, key)
     now = datetime.utcnow()
     if station is None:
@@ -225,6 +240,98 @@ def get_or_create_station(db: Session, user_id: int, payload) -> RadioStation | 
         db.commit()
     db.refresh(station)
     return station
+
+
+def _ask_to_listen(db: Session, tracks: list[Track]) -> None:
+    """Queue the seeds that have no current sound profile or no flags yet."""
+    try:
+        from app.models.track_audio_profile import TrackAudioProfile
+        from app.services import audio_analysis
+        from app.services.audio_features import PROFILE_VERSION
+
+        ids = [track.id for track in tracks if track is not None]
+        if not ids:
+            return
+        profiled = {
+            row[0]
+            for row in db.query(TrackAudioProfile.track_id)
+            .filter(TrackAudioProfile.track_id.in_(ids), TrackAudioProfile.version == PROFILE_VERSION)
+            .all()
+        }
+        for track in tracks:
+            if track.id not in profiled or track.flags_checked_at is None:
+                audio_analysis.request_analysis(track.id, front=True)
+    except Exception:  # noqa: BLE001
+        pass  # the station plays either way
+
+
+class StationFilter:
+    """The seed's vocal state and language as rules for what joins it.
+
+    Built once per batch from the seeds and this listener's habits; asked
+    about candidate ids in bulk (`keep`). A candidate with no flags passes:
+    the filter only ever rejects a known mismatch.
+    """
+
+    def __init__(self, db: Session, seeds: list[Track], user_id: int | None):
+        self.db = db
+        states = {seed.vocal_state for seed in seeds if seed.vocal_state}
+        # Mixed seeds (an artist with instrumentals and songs) set no rule.
+        self.vocal_state = next(iter(states)) if len(states) == 1 else None
+        self.languages: set[str] = set()
+        if self.vocal_state != track_flags.INSTRUMENTAL:
+            self.languages = {
+                seed.language
+                for seed in seeds
+                if seed.language and (seed.language_confidence or 0.0) >= LANGUAGE_FILTER_MIN_CONFIDENCE
+            }
+        if self.languages and user_id is not None and _listener_mixes_languages(db, user_id):
+            self.languages = set()
+        self._flags: dict[int, tuple[str | None, str | None]] = {}
+
+    @property
+    def active(self) -> bool:
+        return bool(self.vocal_state or self.languages)
+
+    def _load(self, track_ids: list[int]) -> None:
+        missing = [track_id for track_id in track_ids if track_id not in self._flags]
+        for chunk in _chunks(missing):
+            for track_id, vocal, language in self.db.query(Track.id, Track.vocal_state, Track.language).filter(Track.id.in_(chunk)):
+                self._flags[track_id] = (vocal, language)
+        for track_id in missing:
+            self._flags.setdefault(track_id, (None, None))
+
+    def allows(self, track_id: int) -> bool:
+        vocal, language = self._flags.get(track_id, (None, None))
+        if self.vocal_state and vocal and vocal != self.vocal_state:
+            return False
+        if self.languages and language and language not in self.languages:
+            return False
+        return True
+
+    def keep(self, track_ids: list[int]) -> list[int]:
+        if not self.active or not track_ids:
+            return list(track_ids)
+        self._load(list(track_ids))
+        return [track_id for track_id in track_ids if self.allows(track_id)]
+
+
+def _listener_mixes_languages(db: Session, user_id: int) -> bool:
+    """Whether this listener's plays spread over languages: when their top
+    language is under LANGUAGE_FILTER_MIN_SHARE of their flagged plays, a
+    station does not hold them to the seed's."""
+    rows = (
+        db.query(Track.language, func.coalesce(func.sum(TrackUserStats.play_count), 0))
+        .join(TrackUserStats, TrackUserStats.track_id == Track.id)
+        .filter(TrackUserStats.user_id == user_id, Track.language.isnot(None))
+        .group_by(Track.language)
+        .all()
+    )
+    total = sum(int(count or 0) for _language, count in rows)
+    if total < 20 or len(rows) < 2:
+        return False
+    top = max(int(count or 0) for _language, count in rows)
+    return top / total < LANGUAGE_FILTER_MIN_SHARE
 
 
 def recent_stations(db: Session, user_id: int, limit: int = RECENT_STATIONS) -> list[RadioStation]:
@@ -717,9 +824,10 @@ def _spread_artists(rows: list[tuple[int, str | None]], artist_of: dict[int, str
     return rows
 
 
-def _near_ids(db: Session, query, want: int, keep_out: set[int], corrections=None) -> list[int]:
+def _near_ids(db: Session, query, want: int, keep_out: set[int], corrections=None, blend=None) -> list[int]:
     """The nearest tracks to the station's position in the map, nearest
-    first, that the station has not already got; empty when there is no map."""
+    first, that the station has not already got; empty when there is no map.
+    With a `blend`, "near" means near in sound and words too."""
     from app.services.recommendations.vector_map import get_vector_index
 
     index = get_vector_index(db)
@@ -727,12 +835,14 @@ def _near_ids(db: Session, query, want: int, keep_out: set[int], corrections=Non
         return []
     return [
         track_id
-        for track_id, cosine in index.nearest(query, want, exclude=keep_out, per_artist=NEIGHBOUR_ARTIST_CAP, corrections=corrections)
+        for track_id, cosine in index.nearest(
+            query, want, exclude=keep_out, per_artist=NEIGHBOUR_ARTIST_CAP, corrections=corrections, blend=blend
+        )
         if cosine >= NEAR_REACH_COSINE
     ]
 
 
-def _by_nearness(db: Session, query, pool_ids: list[int], corrections=None) -> tuple[list[int], bool]:
+def _by_nearness(db: Session, query, pool_ids: list[int], corrections=None, blend=None) -> tuple[list[int], bool]:
     """A pool sorted nearest-to-the-station first by the map (unplaced
     tracks last, shuffled), and whether the map had a say. With no map the
     pool is returned as it came, to be sampled at random."""
@@ -741,7 +851,7 @@ def _by_nearness(db: Session, query, pool_ids: list[int], corrections=None) -> t
     index = get_vector_index(db)
     if index is None or not pool_ids or query is None:
         return pool_ids, False
-    fit = index.fit(pool_ids, query, corrections)
+    fit = index.fit(pool_ids, query, corrections, blend=blend)
     placed = sorted((track_id for track_id in pool_ids if track_id in fit), key=lambda track_id: -fit[track_id])
     unplaced = [track_id for track_id in pool_ids if track_id not in fit]
     random.shuffle(unplaced)
@@ -757,6 +867,7 @@ def _widen(
     need: int,
     ordered: bool = False,
     cap_for=None,
+    station_filter: "StationFilter | None" = None,
 ) -> list[tuple[int, str]]:
     """Up to `need` tracks drawn from a pool, keeping the artist caps —
     at random, or in the pool's own order when it is already ranked (the
@@ -769,6 +880,8 @@ def _widen(
     # An ordered pool is read from the front — far enough that the artist
     # caps can skip past a run of one artist's nearest tracks.
     sample = pool[: need * 12] if ordered else random.sample(pool, min(len(pool), need * 4))
+    if station_filter is not None:
+        sample = station_filter.keep(sample)
     artists = dict(db.query(Track.id, Track.artist).filter(Track.id.in_(sample)).all())
     chosen: list[tuple[int, str]] = []
     for track_id in sample:
@@ -787,14 +900,15 @@ def _widen(
 
 
 def station_position(db: Session, user_id: int, seed_ids: list[int], feedback: dict):
-    """(query, corrections): the station's steered position on the map and
-    this listener's standing corrections; (None, {}) without a map."""
+    """(query, corrections, blend): the station's steered position on the
+    map, this listener's standing corrections, and where the seeds sit in
+    the sound and words blocks; (None, {}, {}) without a map."""
     from app.services.radio_taste import corrections_for, station_query
     from app.services.recommendations.vector_map import get_vector_index
 
     index = get_vector_index(db)
     if index is None:
-        return None, {}
+        return None, {}, {}
     query = station_query(
         index,
         seed_ids,
@@ -802,7 +916,7 @@ def station_position(db: Session, user_id: int, seed_ids: list[int], feedback: d
         less_ids=feedback.get("less", set()),
         less_artist_keys=list(feedback.get("less_artists", {}).keys()),
     )
-    return query, corrections_for(db, user_id, index)
+    return query, corrections_for(db, user_id, index), index.blend_for(seed_ids)
 
 
 def note_vote(db: Session, station: RadioStation, user_id: int, kind: str, track: Track) -> None:
@@ -883,7 +997,8 @@ def next_batch(
     # (see radio_taste.station_query), read by the recommender's map channel
     # and by every rung of the ladder. This listener's standing corrections
     # ride along so a corrected artist is judged from where they put it.
-    query, corrections = station_position(db, user_id, seed_ids, feedback)
+    query, corrections, blend = station_position(db, user_id, seed_ids, feedback)
+    station_filter = StationFilter(db, material.seeds, user_id)
     artist_of: dict[int, str] = {track.id: normalize_artist_name(track.artist or "") for track in material.own}
     for seed in seeds:
         artist_of[seed.id] = normalize_artist_name(seed.artist or "")
@@ -905,6 +1020,8 @@ def next_batch(
         # share below, and with the map in place the seed's own catalogue
         # would otherwise be the nearest thing and fill the pool.
         candidates = _recommend(db, seed_ids, user_id, excluded | own_ids, CANDIDATE_POOL, refresh=len(lineup_rows), vector_query=query)
+        allowed = set(station_filter.keep([candidate["id"] for candidate in candidates]))
+        candidates = [candidate for candidate in candidates if candidate["id"] in allowed]
 
         chosen_own: list[tuple[int, str | None]] = []
         neighbours: list[tuple[int, str | None]] = []
@@ -969,7 +1086,7 @@ def next_batch(
         # the genre families, which are the same idea at far lower
         # resolution.
         steps = [
-            (REACH_NEAR, lambda: _near_ids(db, query, (limit - len(batch)) * 12, excluded | have | own_ids, corrections), f"Near {own_name}", True),
+            (REACH_NEAR, lambda: _near_ids(db, query, (limit - len(batch)) * 12, excluded | have | own_ids, corrections, blend), f"Near {own_name}", True),
             (REACH_GENRE, lambda: _ids_in_families(db, seed_families), f"Shares a genre with {own_name}", False),
             (
                 REACH_ARTIST,
@@ -986,8 +1103,10 @@ def next_batch(
             pool = load()
             if not ordered:
                 # Within a family pool, nearest first when the map can say.
-                pool, ordered = _by_nearness(db, query, pool, corrections)
-            picked = _widen(db, pool, excluded | have, less_artists, per_artist, limit - len(batch), ordered=ordered, cap_for=cap_for)
+                pool, ordered = _by_nearness(db, query, pool, corrections, blend)
+            picked = _widen(
+                db, pool, excluded | have, less_artists, per_artist, limit - len(batch), ordered=ordered, cap_for=cap_for, station_filter=station_filter
+            )
             for track_id, artist in picked:
                 batch.append((track_id, reason))
                 have.add(track_id)
@@ -1001,7 +1120,7 @@ def next_batch(
         # the listener said no to.
         keep_out = client_excluded | less | have
         rounds = (
-            (lambda: _near_ids(db, query, (limit - len(batch)) * 12, keep_out | own_ids, corrections), True),
+            (lambda: _near_ids(db, query, (limit - len(batch)) * 12, keep_out | own_ids, corrections, blend), True),
             (lambda: _ids_in_families(db, _families_of(seeds)), False),
             (lambda: _library_ids(db), False),
         )
@@ -1010,8 +1129,8 @@ def next_batch(
                 break
             pool = load()
             if not ordered:
-                pool, ordered = _by_nearness(db, query, pool, corrections)
-            picked = _widen(db, pool, keep_out, less_artists, Counter(), limit - len(batch), ordered=ordered, cap_for=cap_for)
+                pool, ordered = _by_nearness(db, query, pool, corrections, blend)
+            picked = _widen(db, pool, keep_out, less_artists, Counter(), limit - len(batch), ordered=ordered, cap_for=cap_for, station_filter=station_filter)
             for track_id, artist in picked:
                 batch.append((track_id, f"Back around to {own_name}"))
                 have.add(track_id)

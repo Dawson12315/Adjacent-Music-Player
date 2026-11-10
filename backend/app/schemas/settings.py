@@ -16,6 +16,8 @@ class AppSettingsResponse(BaseModel):
     lyrics_generation_enabled: bool = False
     lyrics_model: Optional[str] = None
     lyrics_time: Optional[str] = None
+    audio_analysis_enabled: bool = True
+    audio_analysis_time: Optional[str] = None
     lastfm_enrichment_enabled: bool
     lastfm_enrichment_time: Optional[str] = None
     lastfm_api_key: Optional[str] = None
@@ -41,6 +43,9 @@ class AppSettingsUpdate(BaseModel):
     lyrics_generation_enabled: Optional[bool] = None
     lyrics_model: Optional[str] = None
     lyrics_time: Optional[str] = None
+    # Keep-on-None too.
+    audio_analysis_enabled: Optional[bool] = None
+    audio_analysis_time: Optional[str] = None
     lastfm_enrichment_enabled: bool = False
     lastfm_enrichment_time: Optional[str] = None
     lastfm_api_key: Optional[str] = None

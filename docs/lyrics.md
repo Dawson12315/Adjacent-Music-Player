@@ -77,3 +77,6 @@ Adjacent ships no lyrics, fetches none, and produces text only from audio
 the listener already holds, for display to that listener. The licences above
 govern the software; they say nothing about the lyrics themselves, which
 remain their authors' work. Say "generated" where the players say it.
+
+The same words also tell the radio something: see [Audio analysis](audio-analysis.md)
+for the vocal, language and explicit flags and the words block of the map.

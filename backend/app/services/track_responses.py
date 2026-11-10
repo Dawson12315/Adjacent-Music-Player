@@ -160,6 +160,9 @@ def build_track_response_from_maps(
         duration_seconds=track.duration_seconds,
         track_number=track.track_number or None,
         disc_number=track.disc_number,
+        vocal_state=track.vocal_state,
+        language=track.language,
+        explicit_state=track.explicit_state,
     )
 
 

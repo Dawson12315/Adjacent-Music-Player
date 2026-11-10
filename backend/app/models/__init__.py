@@ -14,6 +14,7 @@ from app.models.listening_event import ListeningEvent
 from app.models.track_user_stats import TrackUserStats
 from app.models.artist_lastfm_similarity import ArtistLastfmSimilarity
 from app.models.artist_lastfm_check import ArtistLastfmCheck
+from app.models.track_audio_profile import TrackAudioProfile, TrackFeatureVector
 from app.models.track_vector import ArtistVector, TrackVector
 from app.models.listener_artist_correction import ListenerArtistCorrection
 from app.models.track_lastfm_similarity import TrackLastfmSimilarity
@@ -43,6 +44,8 @@ __all__ = [
     "ArtistLastfmCheck",
     "ArtistVector",
     "TrackVector",
+    "TrackAudioProfile",
+    "TrackFeatureVector",
     "ListenerArtistCorrection",
     "TrackLastfmSimilarity",
     "ArtistArtwork",

@@ -54,3 +54,21 @@ wheel==0.46.3
 # ffmpeg as a subprocess, never linked. Optional at import time.
 faster-whisper==1.2.1
 ctranslate2==4.8.5
+# Audio analysis for radio (services/audio_features.py): librosa, ISC. Its
+# tree is BSD/MIT/Apache except soxr (LGPL-2.1+) and the libsndfile inside
+# soundfile (LGPL-2.1+), neither of which is called: ffmpeg decodes and
+# resamples as a subprocess. See docs/audio-analysis.md for the table.
+librosa==1.0.0
+scipy==1.18.1
+numba==0.68.1
+llvmlite==0.50.0
+scikit-learn==1.9.1
+joblib==1.6.0
+threadpoolctl==3.8.0
+soxr==1.1.0
+soundfile==0.14.0
+pooch==1.9.0
+platformdirs==4.14.5
+lazy-loader==0.6
+decorator==5.3.1
+msgpack==1.2.4

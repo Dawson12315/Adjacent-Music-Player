@@ -20,6 +20,11 @@ CHANNEL_WEIGHTS = {
     "lastfm_track": 2.5,
     "recent": 0.5,
     "vector": 2.0,
+    # The map's extra blocks (vector_map.BLOCK_KINDS): what a track sounds
+    # like, and what its words are about. Tie-breakers beside the map, not
+    # reasons on their own, so they start low.
+    "sound": 1.0,
+    "lyrics": 0.75,
 }
 
 # On the normalized 0–1 scale: a candidate in the top 40% of Last.fm artist

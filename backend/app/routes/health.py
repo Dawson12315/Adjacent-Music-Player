@@ -29,7 +29,7 @@ def session_days() -> int:
 
 # Bumped whenever a client-facing route or field is added. Clients compare it
 # with the version they were built against.
-API_VERSION = 17
+API_VERSION = 18
 
 # The oldest mobile build this API still serves whole.
 MIN_CLIENT_VERSION = "1.0.31"
@@ -86,6 +86,10 @@ CAPABILITIES = [
     # lyrics read from the files, corrected in Adjacent, or produced on the
     # server when the admin turns that on.
     "lyrics",
+    # 18: sound profiles + vocal/language/explicit flags, read by radio;
+    # GET /audio/status, PUT /tracks/{id}/flags, ?vocal_state= on /tracks.
+    "audio-analysis",
+    "track-flags",
 ]
 
 _FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None

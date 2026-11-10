@@ -25,6 +25,7 @@ from app.services.musicbrainz_backfill_runner import (
 )
 from app.services.folder_watch import sync_folder_watch
 from app.services.scheduler import refresh_scheduler_jobs
+from app.services.audio_analysis import DEFAULT_TIME as AUDIO_DEFAULT_TIME
 
 router = APIRouter()
 
@@ -39,6 +40,8 @@ def settings_response(settings: AppSetting) -> dict:
         "lyrics_generation_enabled": bool(settings.lyrics_generation_enabled),
         "lyrics_model": settings.lyrics_model or "base",
         "lyrics_time": settings.lyrics_time,
+        "audio_analysis_enabled": settings.audio_analysis_enabled is not False,
+        "audio_analysis_time": settings.audio_analysis_time or AUDIO_DEFAULT_TIME,
         "lastfm_api_key": settings.lastfm_api_key,
         "lastfm_api_secret_set": bool(settings.lastfm_api_secret),
         "lastfm_username": settings.lastfm_username,
@@ -63,6 +66,8 @@ def get_or_create_settings(db: Session) -> AppSetting:
         lyrics_generation_enabled=False,
         lyrics_model=None,
         lyrics_time=None,
+        audio_analysis_enabled=True,
+        audio_analysis_time=None,
         lastfm_api_key=None,
         lastfm_api_secret=None,
         lastfm_username=None,
@@ -109,6 +114,10 @@ def update_settings(
         settings.lyrics_model = payload.lyrics_model if payload.lyrics_model in LYRICS_MODELS else DEFAULT_LYRICS_MODEL
     if payload.lyrics_time is not None:
         settings.lyrics_time = payload.lyrics_time or None
+    if payload.audio_analysis_enabled is not None:
+        settings.audio_analysis_enabled = payload.audio_analysis_enabled
+    if payload.audio_analysis_time is not None:
+        settings.audio_analysis_time = payload.audio_analysis_time or None
     settings.lastfm_api_key = payload.lastfm_api_key
     settings.lastfm_username = payload.lastfm_username
     settings.lastfm_enrichment_enabled = payload.lastfm_enrichment_enabled

@@ -28,7 +28,7 @@ import logging
 import math
 import threading
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable, Iterable
 
@@ -43,6 +43,8 @@ from app.models.track_artist import TrackArtist
 from app.models.track_cooccurrence import TrackCooccurrence
 from app.models.track_genre import TrackGenre
 from app.models.track_lastfm_similarity import TrackLastfmSimilarity
+from app.models.track_audio_profile import TrackAudioProfile, TrackFeatureVector
+from app.models.track_lyrics import TrackLyrics
 from app.models.track_vector import ArtistVector, TrackVector
 from app.services.recommendations.genre_utils import is_non_genre_tag, normalize_genre_name
 from app.services.recommendations.rec_cache import get_or_build, invalidate
@@ -63,6 +65,15 @@ POWER_ITERATIONS = 2
 # distinct strings does not make a dense matrix of them.
 TAG_MIN_ARTISTS = 1
 TAG_MAX = 1500
+# The extra blocks a track may be placed in beside the map: what it sounds
+# like (services/audio_features.py) and what its words are about
+# (recommendations/word_map.py). A station scores a track by all three at
+# these shares, renormalised over the blocks the track actually has, so a
+# track nobody has listened to yet is judged by the map alone rather than
+# pushed away for being unmeasured. The recommender reads the blocks as
+# channels of their own and keeps its `vector` channel on the map.
+BLOCK_KINDS = ("sound", "words")
+STATION_SHARES = {"map": 0.60, "sound": 0.25, "words": 0.15}
 # A tag row with no weight (the scanner's, or a legacy row) counts as full.
 DEFAULT_TAG_WEIGHT = 100.0
 # Block weights: tags, the Last.fm artist graph, co-listening.
@@ -374,6 +385,7 @@ def rebuild_vector_map(db: Session) -> dict:
         db.execute(insert(ArtistVector), artist_rows[start : start + INSERT_CHUNK])
     for start in range(0, len(track_rows), INSERT_CHUNK):
         db.execute(insert(TrackVector), track_rows[start : start + INSERT_CHUNK])
+    block_counts = _rebuild_blocks(db, started)
     db.commit()
     invalidate(CACHE_KEY)
     summary = {
@@ -381,10 +393,68 @@ def rebuild_vector_map(db: Session) -> dict:
         "dimensions": dim,
         "tracks": len(track_ids),
         "tracks_placed": len(track_rows),
+        **block_counts,
         "seconds": round((datetime.utcnow() - started).total_seconds(), 2),
     }
     logger.info("Vector map rebuilt: %s", summary)
     return summary
+
+
+def build_sound_block(db: Session) -> tuple[list[int], np.ndarray]:
+    """Unit rows from the stored audio profiles of the current version."""
+    from app.services import audio_features
+
+    rows = (
+        db.query(TrackAudioProfile.track_id, TrackAudioProfile.features)
+        .filter(
+            TrackAudioProfile.version == audio_features.PROFILE_VERSION,
+            TrackAudioProfile.feature_count == audio_features.FEATURE_COUNT,
+        )
+        .all()
+    )
+    if len(rows) < 2:
+        return [], np.zeros((0, 0), dtype=np.float32)
+    ids = [int(row[0]) for row in rows]
+    raw = np.frombuffer(b"".join(row[1] for row in rows), dtype=np.float32).reshape(len(rows), audio_features.FEATURE_COUNT)
+    return ids, audio_features.standardise_profiles(raw)
+
+
+def build_words_block(db: Session) -> tuple[list[int], np.ndarray]:
+    """Unit rows from the lyrics the library holds, whatever their source."""
+    from app.services.recommendations.word_map import build_word_vectors
+
+    documents = {
+        int(track_id): plain
+        for track_id, plain in db.query(TrackLyrics.track_id, TrackLyrics.plain)
+        .join(Track, Track.id == TrackLyrics.track_id)
+        .filter(Track.missing_since.is_(None), TrackLyrics.plain.isnot(None))
+    }
+    return build_word_vectors(documents)
+
+
+def _rebuild_blocks(db: Session, built_at: datetime) -> dict:
+    """Replace the sound and words blocks. Each is optional: a library with
+    no profiles yet has no sound block and the map carries on alone."""
+    db.query(TrackFeatureVector).delete(synchronize_session=False)
+    counts: dict[str, int] = {}
+    builders = {"sound": build_sound_block, "words": build_words_block}
+    for kind in BLOCK_KINDS:
+        try:
+            ids, matrix = builders[kind](db)
+        except Exception:  # noqa: BLE001
+            logger.exception("The %s block could not be built; the map carries on without it", kind)
+            ids, matrix = [], np.zeros((0, 0), dtype=np.float32)
+        counts[f"{kind}_placed"] = len(ids)
+        if not ids:
+            continue
+        dim = int(matrix.shape[1])
+        rows = [
+            {"track_id": track_id, "kind": kind, "vector": matrix[i].astype(np.float32).tobytes(), "dim": dim, "built_at": built_at}
+            for i, track_id in enumerate(ids)
+        ]
+        for start in range(0, len(rows), INSERT_CHUNK):
+            db.execute(insert(TrackFeatureVector), rows[start : start + INSERT_CHUNK])
+    return counts
 
 
 def rebuild_vector_map_standalone() -> dict:
@@ -445,6 +515,10 @@ class VectorIndex:
     dim: int
     track_artist: list[str]  # normalised artist key per placed track, aligned with ids
     rows_by_artist: dict[str, np.ndarray] | None = None
+    # The extra blocks, aligned with `ids`: unit rows where a track is
+    # placed in the block, zero rows where it is not.
+    blocks: dict[str, np.ndarray] = field(default_factory=dict)
+    _block_has: dict[str, np.ndarray] = field(default_factory=dict)
 
     def _rows_of(self, artist_key: str) -> np.ndarray:
         if self.rows_by_artist is None:
@@ -469,6 +543,66 @@ class VectorIndex:
                 norms[norms == 0] = 1.0
                 scores[rows] = (moved @ query) / norms
         return scores
+
+    def _has(self, name: str) -> np.ndarray:
+        mask = self._block_has.get(name)
+        if mask is None:
+            mask = self.blocks[name].any(axis=1)
+            self._block_has[name] = mask
+        return mask
+
+    def block_query(self, name: str, track_ids: Iterable[int]) -> np.ndarray | None:
+        """The unit mean of these tracks' positions in one block; None when
+        the block is absent or none of them is placed in it."""
+        block = self.blocks.get(name)
+        if block is None:
+            return None
+        rows = [self.position[int(t)] for t in track_ids if int(t) in self.position]
+        if not rows:
+            return None
+        has = self._has(name)[rows]
+        if not has.any():
+            return None
+        q = block[np.asarray(rows)[has]].mean(axis=0)
+        norm = float(np.linalg.norm(q))
+        return (q / norm).astype(np.float32) if norm > 0 else None
+
+    def blend_for(self, track_ids: Iterable[int]) -> dict[str, np.ndarray]:
+        """A station's position in every extra block, from its seeds."""
+        ids = list(track_ids)
+        out = {}
+        for name in self.blocks:
+            q = self.block_query(name, ids)
+            if q is not None:
+                out[name] = q
+        return out
+
+    def _blended(self, query: np.ndarray, corrections: dict | None, blend: dict | None) -> np.ndarray:
+        """Map cosine, or the share-weighted mix of map, sound and words
+        where a block query is given and the track is placed in that block.
+        Shares are renormalised per track over the blocks it has."""
+        base = self._scores(query, corrections)
+        present = {name: q for name, q in (blend or {}).items() if q is not None and name in self.blocks}
+        if not present:
+            return base
+        total = np.full(len(base), STATION_SHARES["map"], dtype=np.float32)
+        mixed = base * STATION_SHARES["map"]
+        for name, q in present.items():
+            share = STATION_SHARES.get(name, 0.0)
+            if share <= 0:
+                continue
+            has = self._has(name)
+            mixed += share * (self.blocks[name] @ q)
+            total += share * has
+        return mixed / total
+
+    def block_nearest(self, name: str, query: np.ndarray, limit: int, exclude: set[int] | None = None, per_artist: int | None = None) -> list[tuple[int, float]]:
+        """Nearest placed tracks in one block alone, for the recommender's
+        sound and words channels."""
+        block = self.blocks.get(name)
+        if block is None or query is None or limit <= 0:
+            return []
+        return self._top(block @ query, limit, exclude, per_artist, only=self._has(name))
 
     def vector_of(self, track_id: int) -> np.ndarray | None:
         row = self.position.get(int(track_id))
@@ -518,16 +652,23 @@ class VectorIndex:
         exclude: set[int] | None = None,
         per_artist: int | None = None,
         corrections: dict | None = None,
+        blend: dict | None = None,
     ) -> list[tuple[int, float]]:
         """(track_id, cosine) for the `limit` nearest placed tracks, best first.
 
         `per_artist` caps one artist's share of the answer, so a prolific
         neighbour's hundred tracks do not crowd out the rest of the
         neighbourhood: the answer then spans artists, nearest first.
+        `blend` (block name → unit query) mixes in the sound and words
+        blocks at STATION_SHARES; without it this is the map alone.
         """
         if limit <= 0 or not len(self.ids) or query is None:
             return []
-        scores = self._scores(query, corrections)
+        return self._top(self._blended(query, corrections, blend), limit, exclude, per_artist)
+
+    def _top(self, scores: np.ndarray, limit: int, exclude: set[int] | None, per_artist: int | None, only: np.ndarray | None = None) -> list[tuple[int, float]]:
+        if only is not None:
+            scores = np.where(only, scores, -np.inf)
         exclude = exclude or set()
         want = min(len(scores), (limit * 8 if per_artist else limit) + len(exclude))
         if want >= len(scores):
@@ -538,6 +679,8 @@ class VectorIndex:
         out: list[tuple[int, float]] = []
         taken: dict[str, int] = {}
         for row in order:
+            if not np.isfinite(scores[row]):
+                break
             track_id = int(self.ids[row])
             if track_id in exclude:
                 continue
@@ -552,14 +695,14 @@ class VectorIndex:
                 break
         return out
 
-    def fit(self, track_ids: Iterable[int], query: np.ndarray, corrections: dict | None = None) -> dict[int, float]:
+    def fit(self, track_ids: Iterable[int], query: np.ndarray, corrections: dict | None = None, blend: dict | None = None) -> dict[int, float]:
         """Cosine to the query for whichever of these tracks are placed."""
         wanted = [int(t) for t in track_ids if int(t) in self.position]
         if not wanted or query is None:
             return {}
         rows = np.asarray([self.position[t] for t in wanted])
-        if corrections:
-            scores = self._scores(query, corrections)[rows]
+        if corrections or blend:
+            scores = self._blended(query, corrections, blend)[rows]
         else:
             scores = self.matrix[rows] @ query
         return {t: float(s) for t, s in zip(wanted, scores)}
@@ -584,15 +727,30 @@ def _load_index(db: Session) -> VectorIndex | None:
         if arows
         else np.zeros((0, dim), dtype=np.float32)
     )
+    position = {int(track_id): i for i, track_id in enumerate(ids)}
+    blocks: dict[str, np.ndarray] = {}
+    for kind in BLOCK_KINDS:
+        brows = db.query(TrackFeatureVector.track_id, TrackFeatureVector.vector, TrackFeatureVector.dim).filter(TrackFeatureVector.kind == kind).all()
+        if not brows:
+            continue
+        bdim = int(brows[0][2])
+        block = np.zeros((len(ids), bdim), dtype=np.float32)
+        for track_id, blob, row_dim in brows:
+            row = position.get(int(track_id))
+            if row is None or int(row_dim) != bdim:
+                continue
+            block[row] = np.frombuffer(blob, dtype=np.float32, count=bdim)
+        blocks[kind] = block
     return VectorIndex(
         ids=ids,
         matrix=matrix,
-        position={int(track_id): i for i, track_id in enumerate(ids)},
+        position=position,
         artist_keys=artist_keys,
         artist_matrix=artist_matrix,
         artist_position={key: i for i, key in enumerate(artist_keys)},
         dim=dim,
         track_artist=track_artist,
+        blocks=blocks,
     )
 
 
