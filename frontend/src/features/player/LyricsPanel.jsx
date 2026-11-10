@@ -45,6 +45,11 @@ export function LyricsPanel() {
   const [draft, setDraft] = useState("");
   const [stamps, setStamps] = useState([]);
   const [saving, setSaving] = useState(false);
+  // True from a Regenerate press until the server's new words (or a refusal) arrive.
+  const [regenerating, setRegenerating] = useState(false);
+  // The lyrics on screen when Regenerate was pressed: the job is done once a
+  // later load brings back something else, not while these are still shown.
+  const regenerateBaselineRef = useRef(null);
   const listRef = useRef(null);
   const lineRefs = useRef([]);
 
@@ -68,18 +73,30 @@ export function LyricsPanel() {
     const controller = new AbortController();
     setState({ status: "loading", lyrics: null, generation: null });
     setEditing(false);
+    setRegenerating(false);
     lineRefs.current = [];
     load(controller.signal);
     return () => controller.abort();
   }, [load]);
 
-  // Poll while the server is working on this track.
-  const working = state.status === "none" && (state.generation?.state === "queued" || state.generation?.state === "running");
+  // Poll while the server is working on this track — asked for by the
+  // generate button, or by a regenerate that is still being redone.
+  const working =
+    regenerating || (state.status === "none" && (state.generation?.state === "queued" || state.generation?.state === "running"));
   useEffect(() => {
     if (!working) return undefined;
     const timer = setTimeout(() => load(), GENERATING_POLL_MS);
     return () => clearTimeout(timer);
   }, [working, load, state]);
+
+  // A regenerate is over when the server's new timing or words are here,
+  // or when it said it could not.
+  useEffect(() => {
+    if (!regenerating) return;
+    const fresh = state.lyrics && state.lyrics !== regenerateBaselineRef.current;
+    if (state.status === "ready" && fresh && state.lyrics.generated && state.lyrics.synced) setRegenerating(false);
+    if (state.status === "none" && ["failed", "off", "unsupported"].includes(state.generation?.state)) setRegenerating(false);
+  }, [regenerating, state]);
 
   const synced = state.lyrics?.synced || null;
   const activeIndex = synced ? currentLineIndex(synced, currentTime) : -1;
@@ -101,6 +118,23 @@ export function LyricsPanel() {
       setState({ status: "none", lyrics: null, generation: status });
     } catch (error) {
       notify(error?.detail?.message || error.message || "Could not ask the server for lyrics.");
+    }
+  }
+
+  async function regenerate() {
+    try {
+      const status = await requestLyrics(trackId, { force: true });
+      regenerateBaselineRef.current = state.lyrics;
+      setRegenerating(true);
+      // Words the file carries stay on screen while they are re-timed; a
+      // transcription is gone until the new one arrives.
+      setState((current) =>
+        current.status === "ready" && current.lyrics?.source !== "transcribed"
+          ? current
+          : { status: "none", lyrics: null, generation: status },
+      );
+    } catch (error) {
+      notify(error?.detail?.message || error.message || "Could not ask the server to regenerate.");
     }
   }
 
@@ -273,12 +307,19 @@ export function LyricsPanel() {
           <div className="lyrics-panel__footer">
             <span className="lyrics-panel__source">
               {state.lyrics.generated ? <Icon name="sparkle" size={12} /> : null}
-              {describeLyricsSource(state.lyrics)}
+              {regenerating ? "Your server is redoing these…" : describeLyricsSource(state.lyrics)}
             </span>
             {isAdmin ? (
-              <button className="btn btn--small" type="button" onClick={startEditing}>
-                Edit
-              </button>
+              <span className="lyrics-panel__footer-actions">
+                {state.lyrics.generated && !regenerating ? (
+                  <button className="btn btn--small" type="button" onClick={regenerate} title="Throw these away and let the server try again">
+                    Regenerate
+                  </button>
+                ) : null}
+                <button className="btn btn--small" type="button" onClick={startEditing}>
+                  Edit
+                </button>
+              </span>
             ) : null}
           </div>
         </>

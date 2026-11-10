@@ -251,6 +251,28 @@ def test_an_unheard_line_sits_between_its_neighbours_and_time_never_goes_backwar
     assert out["coverage"] == pytest.approx(6 / 10)
 
 
+def test_singing_is_speech_unless_the_model_was_also_unsure():
+    from app.services.lyrics_engine import collapse_repeats, looks_instrumental, segment_is_speech
+
+    # A sung window: "no speech" 0.64 but the words read with confidence. Kept.
+    assert segment_is_speech(0.64, -0.5)
+    # Silence or a solo: likely no speech AND nothing confident heard. Dropped.
+    assert not segment_is_speech(0.9, -1.4)
+    # Unsure words in a window that is clearly speech: kept (the model may be wrong about the words, not about speech).
+    assert segment_is_speech(0.2, -1.3)
+
+    # Real song: hundreds of words. Sine tone: one stray word in ninety seconds.
+    assert not looks_instrumental(419, 640)
+    assert looks_instrumental(1, 90)
+    assert looks_instrumental(5, 20)
+    assert not looks_instrumental(44, 27)
+
+    loop = [{"text": "la la la", "start": float(i), "end": i + 1.0, "words": [], "avg_logprob": -0.4} for i in range(8)]
+    assert len(collapse_repeats(loop)) == 2, "a phrase stuck on repeat is cut to a chorus's worth"
+    chorus = [{"text": t, "start": float(i), "end": i + 1.0, "words": [], "avg_logprob": -0.4} for i, t in enumerate(["one", "two", "two", "three", "two"])]
+    assert [s["text"] for s in collapse_repeats(chorus)] == ["one", "two", "two", "three", "two"]
+
+
 def test_transcription_lines_come_from_the_kept_segments():
     from app.services.lyrics_engine import transcription_lines
 
@@ -392,6 +414,51 @@ def test_the_worker_times_known_words_and_transcribes_the_rest(admin, one_track,
     assert calls[-1] == ("Route.mp3", "base", "Known line one\nKnown line two")
     # Already timed: a second request is a no-op.
     assert admin.post(f"/api/tracks/{track_id}/lyrics/generate").json()["state"] == "done"
+
+
+def test_regenerate_throws_away_the_server_s_work_but_never_a_person_s(admin, one_track, db_session_factory, monkeypatch):
+    from app.models.track_lyrics import TrackLyrics
+    from app.services import lyrics_engine, lyrics_runner
+
+    track_id = one_track["id"]
+    monkeypatch.setattr(lyrics_engine, "transcriber_available", lambda: True)
+    monkeypatch.setattr(lyrics_runner, "generation_settings", lambda: (True, "base"))
+    queued = []
+    monkeypatch.setattr(lyrics_runner, "request_generation", lambda tid, front=True: (queued.append(tid) or {"state": "queued", "reason": None}))
+
+    def put_row(**fields):
+        db = db_session_factory()
+        try:
+            db.query(TrackLyrics).filter(TrackLyrics.track_id == track_id).delete(synchronize_session=False)
+            db.add(TrackLyrics(track_id=track_id, **fields))
+            db.commit()
+        finally:
+            db.close()
+
+    def row():
+        db = db_session_factory()
+        try:
+            r = db.query(TrackLyrics).filter(TrackLyrics.track_id == track_id).first()
+            return None if r is None else (r.source, r.synced_source, r.plain, r.synced)
+        finally:
+            db.close()
+
+    # A transcription that stopped short: regenerate drops the row and queues the track.
+    put_row(source="transcribed", synced_source="transcribed", plain="half the song", synced="[[1.0, \"half the song\"]]", model="base")
+    assert admin.post(f"/api/tracks/{track_id}/lyrics/generate").json()["state"] == "done", "without force, timed lyrics are left alone"
+    assert admin.post(f"/api/tracks/{track_id}/lyrics/generate?force=1").status_code == 202
+    assert row() is None and queued == [track_id]
+
+    # The file's words with server timing: regenerate keeps the words, drops the timing.
+    put_row(source="embedded", synced_source="aligned", plain="the file's words", synced="[[2.0, \"the file's words\"]]", model="base")
+    assert admin.post(f"/api/tracks/{track_id}/lyrics/generate?force=1").status_code == 202
+    assert row() == ("embedded", None, "the file's words", None)
+
+    # A person's edit is never regenerated over.
+    put_row(source="user", synced_source="user", plain="my words", synced="[[1.0, \"my words\"]]")
+    refused = admin.post(f"/api/tracks/{track_id}/lyrics/generate?force=1")
+    assert refused.status_code == 409 and refused.json()["detail"]["code"] == "lyrics_user_edited"
+    assert row() == ("user", "user", "my words", "[[1.0, \"my words\"]]")
 
 
 def test_a_failed_generation_is_remembered_with_its_reason(admin, one_track, monkeypatch):

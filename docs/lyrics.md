@@ -27,6 +27,11 @@ In order of precedence, highest first:
    server can produce words and timing from the audio. These are labelled
    *generated* in the players and may contain errors; the editor fixes them.
 
+Generated lyrics can be thrown away and redone: **Regenerate**, in the web
+player's lyrics panel and the phone's lyrics view, for admins. The file's
+own words are kept and only re-timed; a person's edits are never
+regenerated over (reset them to the file first).
+
 4 and 5 are off until an admin turns on **Settings → Automation → Generate
 lyrics**. They run on demand (someone opens the lyrics panel on a track that
 has none) and, if a run time is set, overnight for the most-played tracks

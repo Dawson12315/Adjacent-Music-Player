@@ -3,7 +3,7 @@
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -76,15 +76,39 @@ def get_lyrics(
 @router.post("/tracks/{track_id}/lyrics/generate", tags=["lyrics"], status_code=202)
 def generate_lyrics(
     track_id: int,
+    force: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Ask the server to produce lyrics for this track — timing for words it
     already has, or words and timing from the audio. Queued at the front;
-    the client polls the lyrics route until they appear."""
+    the client polls the lyrics route until they appear.
+
+    `force` (admin): throw away what the server produced before and do it
+    again — a transcription that stopped short, or timing that drifted. The
+    file's own words are kept and re-timed; a person's edits are refused,
+    since regenerating would destroy them (reset to the file first)."""
     _track_or_404(db, track_id)
     row = db.query(TrackLyrics).filter(TrackLyrics.track_id == track_id).first()
-    if row is not None and row.synced:
+    if force:
+        if getattr(current_user, "role", None) != "admin":
+            raise HTTPException(status_code=403, detail="Only an admin can regenerate lyrics.")
+        if row is not None:
+            if row.source == "user":
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": "lyrics_user_edited", "message": "These lyrics were edited by a person. Reset them to the file first."},
+                )
+            if row.source == "transcribed":
+                db.delete(row)
+            else:
+                row.synced = None
+                row.synced_source = None
+                row.model = None
+                row.confidence = None
+            db.commit()
+            logger.info("Lyrics for track %s regenerated on request by %s", track_id, current_user.username)
+    elif row is not None and row.synced:
         return {"state": "done", "reason": None}
     status = lyrics_runner.request_generation(track_id, front=True)
     if status["state"] in ("off", "unsupported"):

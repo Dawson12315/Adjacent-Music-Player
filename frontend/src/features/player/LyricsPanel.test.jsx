@@ -81,6 +81,41 @@ describe("the lyrics panel", () => {
     expect(await screen.findByText("Edited in Adjacent")).toBeInTheDocument();
   });
 
+  it("lets an admin regenerate what the server produced, and says so while it works", async () => {
+    service.getLyrics.mockResolvedValueOnce({ ...TIMED, source: "transcribed", syncedSource: "transcribed", generated: true, model: "base" });
+    service.requestLyrics.mockResolvedValueOnce({ state: "queued" });
+    render(<LyricsPanel />);
+
+    await screen.findByText("first line");
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+    await waitFor(() => expect(service.requestLyrics).toHaveBeenCalledWith(7, { force: true }));
+    // A transcription is gone until the new one arrives; the panel shows the work in progress.
+    expect(await screen.findByText(/Your server is writing them down/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Regenerate" })).toBeNull();
+  });
+
+  it("re-times the file's words in place, keeping them on screen while the server works", async () => {
+    const aligned = { ...TIMED, syncedSource: "aligned", generated: true, model: "base" };
+    service.getLyrics.mockResolvedValueOnce(aligned);
+    service.requestLyrics.mockResolvedValueOnce({ state: "queued" });
+    render(<LyricsPanel />);
+
+    await screen.findByText("first line");
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+    await waitFor(() => expect(service.requestLyrics).toHaveBeenCalledWith(7, { force: true }));
+    expect(screen.getByText("first line")).toBeInTheDocument();
+    expect(await screen.findByText("Your server is redoing these…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Regenerate" })).toBeNull();
+  });
+
+  it("does not offer Regenerate for words that came from the file", async () => {
+    service.getLyrics.mockResolvedValueOnce(TIMED);
+    render(<LyricsPanel />);
+    await screen.findByText("first line");
+    expect(screen.queryByRole("button", { name: "Regenerate" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+  });
+
   it("hides the edit controls from a listener", async () => {
     auth.currentUser = { role: "user" };
     service.getLyrics.mockResolvedValueOnce(TIMED);

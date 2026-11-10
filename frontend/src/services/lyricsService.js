@@ -35,9 +35,14 @@ export function normalizeLyrics(data) {
   };
 }
 
-/** Ask the server to produce lyrics for the track. Resolves to the generation status. */
-export function requestLyrics(trackId) {
-  return apiClient.post(`/api/tracks/${trackId}/lyrics/generate`, undefined, { noStore: true });
+/**
+ * Ask the server to produce lyrics for the track. Resolves to the generation
+ * status. `force` (admin) throws away what the server produced before — a
+ * transcription that stopped short — and does it again; the file's own words
+ * are kept and re-timed.
+ */
+export function requestLyrics(trackId, { force = false } = {}) {
+  return apiClient.post(`/api/tracks/${trackId}/lyrics/generate${force ? "?force=1" : ""}`, undefined, { noStore: true });
 }
 
 /** Save typed or corrected lyrics (admin). Either plain text or timed lines. */

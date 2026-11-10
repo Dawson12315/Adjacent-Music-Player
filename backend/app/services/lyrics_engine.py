@@ -44,10 +44,23 @@ MODELS_DIR = Path("data/models")
 LYRICS_MODELS = ("base", "small")
 DEFAULT_LYRICS_MODEL = "base"
 
-# A segment the model marks this likely to be silence or music is dropped.
+# A 30-second window is treated as silence only when the model BOTH rates it
+# this likely to be no speech AND was this unsure of the words it heard in
+# it — faster-whisper's own rule. Singing alone routinely rates 0.6–0.65 "no
+# speech" while the words are read with good confidence; dropping on the
+# no-speech score by itself threw away half the words of a real song and
+# made lyrics stop partway through. Measured on this machine: 419 words
+# kept under this rule, 222 under the one-sided one.
 NO_SPEECH_DROP = 0.6
-# And one it was this unsure of.
 LOGPROB_DROP = -1.0
+# Fewer words than this per minute of audio and the track is an
+# instrumental: a sine tone yields one stray "You" in ninety seconds, a
+# sung song thirty to a hundred words a minute.
+MIN_WORDS_PER_MINUTE = 2.0
+# Whisper's failure mode on music is a loop: the same line over and over.
+# A chorus repeats a line a few times; a loop repeats it for the whole
+# rest of the track. Consecutive copies beyond this many are dropped.
+MAX_CONSECUTIVE_REPEATS = 2
 # Fewer matched words than this and a timing pass is reported as failed
 # rather than stored: the audio does not carry the words it was given.
 MIN_ALIGN_COVERAGE = 0.35
@@ -109,20 +122,49 @@ def load_model(name: str):
     return model
 
 
+def segment_is_speech(no_speech_prob: float, avg_logprob: float) -> bool:
+    """Whether a window carries words: see NO_SPEECH_DROP."""
+    return not (no_speech_prob > NO_SPEECH_DROP and avg_logprob < LOGPROB_DROP)
+
+
+def collapse_repeats(segments: list[dict]) -> list[dict]:
+    """Drop the copies of a line repeated more than MAX_CONSECUTIVE_REPEATS
+    times in a row — Whisper stuck on a phrase, not a chorus."""
+    kept: list[dict] = []
+    run = 0
+    for segment in segments:
+        text = " ".join(segment["text"].lower().split())
+        if kept and " ".join(kept[-1]["text"].lower().split()) == text:
+            run += 1
+            if run >= MAX_CONSECUTIVE_REPEATS:
+                continue
+        else:
+            run = 0
+        kept.append(segment)
+    return kept
+
+
+def looks_instrumental(words: int, duration_seconds: float) -> bool:
+    minutes = max(float(duration_seconds or 0) / 60.0, 1 / 60)
+    return words < MIN_TRANSCRIBED_WORDS or words / minutes < MIN_WORDS_PER_MINUTE
+
+
 def run_model(model, audio, prompt: str | None = None) -> dict:
-    """Segments and words from the model, with the no-speech ones dropped."""
+    """Segments and words from the model, silence windows dropped."""
     segments, info = model.transcribe(
         audio,
         beam_size=1,
         word_timestamps=True,
         vad_filter=False,
         condition_on_previous_text=False,
+        no_speech_threshold=NO_SPEECH_DROP,
+        log_prob_threshold=LOGPROB_DROP,
         initial_prompt=prompt or None,
     )
     kept = []
     dropped = 0
     for segment in segments:
-        if segment.no_speech_prob > NO_SPEECH_DROP or segment.avg_logprob < LOGPROB_DROP:
+        if not segment_is_speech(segment.no_speech_prob, segment.avg_logprob):
             dropped += 1
             continue
         words = [
@@ -139,9 +181,13 @@ def run_model(model, audio, prompt: str | None = None) -> dict:
                 "avg_logprob": float(segment.avg_logprob),
             }
         )
+    before = len(kept)
+    kept = collapse_repeats(kept)
     return {
         "segments": kept,
         "dropped": dropped,
+        "repeats_dropped": before - len(kept),
+        "duration": float(getattr(info, "duration", 0.0) or 0.0),
         "language": getattr(info, "language", None),
         "language_probability": float(getattr(info, "language_probability", 0.0) or 0.0),
     }
@@ -266,7 +312,7 @@ def generate(file_path: str, *, model_name: str, known_text: str | None = None) 
 
     run = run_model(model, audio)
     lines = transcription_lines(run["segments"])
-    if lines["words"] < MIN_TRANSCRIBED_WORDS or not lines["synced"]:
+    if not lines["synced"] or looks_instrumental(lines["words"], run["duration"] or len(audio) / 16000):
         return {
             "ok": False,
             "reason": "No vocals were found in this track.",
