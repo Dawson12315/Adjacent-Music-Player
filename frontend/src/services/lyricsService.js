@@ -32,6 +32,8 @@ export function normalizeLyrics(data) {
     model: data.model || null,
     confidence: data.confidence ?? null,
     updatedAt: data.updated_at || null,
+    // The track's vocal / language / explicit flags, when the server sends them.
+    flags: data.flags || null,
   };
 }
 

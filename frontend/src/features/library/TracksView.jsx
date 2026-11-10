@@ -11,6 +11,14 @@ import { useNavigation } from "../../hooks/useNavigation";
 import { useTrackFeed } from "./useTrackFeed";
 import { useTrackActions } from "./useTrackActions";
 
+// The library's vocal filter, from the audio's flags (docs/audio-analysis.md):
+// tracks the server has not listened to yet show under "All" only.
+const VOCAL_FILTERS = [
+  { value: "", label: "All" },
+  { value: "vocal", label: "With vocals" },
+  { value: "instrumental", label: "Instrumental" },
+];
+
 export function TracksView() {
   const { currentTrack, isPlaying, playTrack, extendQueue } = usePlayer();
   const { selectedArtist, selectedAlbum, selectedGenre, searchQuery } = useNavigation();
@@ -109,6 +117,21 @@ export function TracksView() {
 
   return (
     <>
+      {feed.canFilterVocals ? (
+        <div className="track-filters" role="group" aria-label="Filter tracks">
+          {VOCAL_FILTERS.map((option) => (
+            <button
+              key={option.value || "all"}
+              type="button"
+              className={`pill pill--button${feed.vocalFilter === option.value ? " pill--accent" : ""}`}
+              aria-pressed={feed.vocalFilter === option.value}
+              onClick={() => feed.setVocalFilter(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="track-list">
         {feed.tracks.map((track, index) => (
           <TrackRow

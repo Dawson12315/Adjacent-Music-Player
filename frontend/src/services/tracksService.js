@@ -17,10 +17,12 @@ export async function listTracksPage({
   search,
   sortBy = "artist",
   section,
+  // "vocal" | "instrumental": the audio's flag (docs/audio-analysis.md).
+  vocalState,
   signal,
 } = {}) {
   const data = await apiClient.get("/api/tracks", {
-    params: { limit, offset, search: search || undefined, sort_by: sortBy, section },
+    params: { limit, offset, search: search || undefined, sort_by: sortBy, section, vocal_state: vocalState || undefined },
     signal,
   });
 

@@ -29,6 +29,9 @@ export function useTrackFeed() {
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState(searchQuery);
+  // The library's vocal filter: "", "vocal" or "instrumental". Only the
+  // whole-library list takes it; an artist's or album's page shows everything.
+  const [vocalFilter, setVocalFilter] = useState("");
 
   const offsetRef = useRef(0);
   const loadingRef = useRef(false);
@@ -49,7 +52,7 @@ export function useTrackFeed() {
     ? `album:${selectedAlbum}\u001f${selectedAlbumArtist || ""}`
     : selectedGenre
     ? `genre:${selectedGenre}`
-    : `library:${debouncedSearch}`;
+    : `library:${debouncedSearch}:${vocalFilter}`;
 
   const fetchPage = useCallback(
     async (offset, signal) => {
@@ -78,10 +81,11 @@ export function useTrackFeed() {
         limit: PAGE_SIZE,
         offset,
         search: debouncedSearch,
+        vocalState: vocalFilter || undefined,
         signal,
       });
     },
-    [selectedArtist, selectedAlbum, selectedAlbumArtist, selectedGenre, debouncedSearch],
+    [selectedArtist, selectedAlbum, selectedAlbumArtist, selectedGenre, debouncedSearch, vocalFilter],
   );
 
   // First page, and a full reset whenever the source changes.
@@ -236,5 +240,8 @@ export function useTrackFeed() {
     loadMore,
     loadAll,
     replaceTrack,
+    vocalFilter,
+    setVocalFilter,
+    canFilterVocals: !selectedArtist && !selectedAlbum && !selectedGenre,
   };
 }

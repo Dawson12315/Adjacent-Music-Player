@@ -16,6 +16,11 @@ const { player, progress, auth, service } = vi.hoisted(() => ({
 vi.mock("../../contexts/PlayerContext", () => ({ usePlayer: () => player, usePlayerProgress: () => progress }));
 vi.mock("../../contexts/AuthContext", () => ({ useAuth: () => auth }));
 vi.mock("../../contexts/NotificationContext", () => ({ useNotifications: () => ({ notify: vi.fn() }) }));
+const audio = vi.hoisted(() => ({ setTrackFlags: vi.fn() }));
+vi.mock("../../services/audioService", async () => {
+  const actual = await vi.importActual("../../services/audioService");
+  return { ...actual, setTrackFlags: audio.setTrackFlags };
+});
 vi.mock("../../services/lyricsService", async () => {
   const actual = await vi.importActual("../../services/lyricsService");
   return { ...actual, ...service };
@@ -114,6 +119,21 @@ describe("the lyrics panel", () => {
     await screen.findByText("first line");
     expect(screen.queryByRole("button", { name: "Regenerate" })).toBeNull();
     expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+  });
+
+  it("names the track's flags and lets an admin overrule the explicit one", async () => {
+    service.getLyrics.mockResolvedValueOnce({
+      ...TIMED,
+      flags: { vocal_state: "vocal", language: "en", explicit_state: "explicit", set_by: "detected" },
+    });
+    audio.setTrackFlags.mockResolvedValueOnce({ vocal_state: "vocal", language: "en", explicit_state: "clean", set_by: "admin" });
+    render(<LyricsPanel />);
+
+    expect(await screen.findByText("Vocal · EN · explicit · detected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Mark clean" }));
+    await waitFor(() => expect(audio.setTrackFlags).toHaveBeenCalledWith(7, { explicit_state: "clean" }));
+    expect(await screen.findByText("Vocal · EN · clean · set by an admin")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mark explicit" })).toBeInTheDocument();
   });
 
   it("hides the edit controls from a listener", async () => {

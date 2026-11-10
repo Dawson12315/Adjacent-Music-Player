@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Icon } from "../../components/Icon";
 import { useAuth } from "../../contexts/AuthContext";
+import { describeFlags, setTrackFlags } from "../../services/audioService";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { usePlayer, usePlayerProgress } from "../../contexts/PlayerContext";
 import {
@@ -38,6 +39,18 @@ export function LyricsPanel() {
   const { currentUser } = useAuth();
   const { notify } = useNotifications();
   const isAdmin = currentUser?.role === "admin";
+
+  // An admin's word on the explicit flag: the server keeps it over its own guess.
+  async function markExplicit(explicitState) {
+    const trackId = state.lyrics?.trackId ?? currentTrack?.id;
+    if (trackId == null) return;
+    try {
+      const flags = await setTrackFlags(trackId, { explicit_state: explicitState });
+      setState((current) => (current.lyrics ? { ...current, lyrics: { ...current.lyrics, flags } } : current));
+    } catch (problem) {
+      notify?.(problem?.message || "Could not change the flag.", "error");
+    }
+  }
   const trackId = currentTrack?.id ?? null;
 
   const [state, setState] = useState({ status: "loading", lyrics: null, generation: null });
@@ -322,6 +335,23 @@ export function LyricsPanel() {
               </span>
             ) : null}
           </div>
+          {state.lyrics.flags ? (
+            <div className="lyrics-panel__footer lyrics-panel__footer--flags">
+              <span className="lyrics-panel__source">{describeFlags(state.lyrics.flags)}</span>
+              {isAdmin ? (
+                <span className="lyrics-panel__footer-actions">
+                  <button
+                    className="btn btn--small"
+                    type="button"
+                    onClick={() => markExplicit(state.lyrics.flags.explicit_state === "explicit" ? "clean" : "explicit")}
+                    title="Your word stands; the server will not change it"
+                  >
+                    {state.lyrics.flags.explicit_state === "explicit" ? "Mark clean" : "Mark explicit"}
+                  </button>
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </>
       )}
     </aside>

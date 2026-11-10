@@ -21,6 +21,10 @@ export function toAppSettings(data) {
     lyrics_generation_enabled: Boolean(data.lyrics_generation_enabled),
     lyrics_model: data.lyrics_model || "base",
     lyrics_time: data.lyrics_time || "",
+    // Audio analysis defaults to on; an older server without it reads as on
+    // too, which only matters for the card it never shows.
+    audio_analysis_enabled: data.audio_analysis_enabled !== false,
+    audio_analysis_time: data.audio_analysis_time || "03:30",
     lastfm_enrichment_enabled: Boolean(data.lastfm_enrichment_enabled),
     lastfm_enrichment_time: data.lastfm_enrichment_time || "",
     lastfm_api_key: data.lastfm_api_key || "",
@@ -46,6 +50,8 @@ export async function saveSettings(settings) {
     lyrics_generation_enabled: Boolean(settings.lyrics_generation_enabled),
     lyrics_model: settings.lyrics_model || "base",
     lyrics_time: settings.lyrics_time || null,
+    audio_analysis_enabled: settings.audio_analysis_enabled !== false,
+    audio_analysis_time: settings.audio_analysis_time || null,
     lastfm_enrichment_enabled: settings.lastfm_enrichment_enabled,
     lastfm_enrichment_time: settings.lastfm_enrichment_time || null,
     lastfm_api_key: settings.lastfm_api_key?.trim() || null,

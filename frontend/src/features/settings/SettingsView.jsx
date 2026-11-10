@@ -8,6 +8,7 @@ import { ThisBrowserPanel } from "./ThisBrowserPanel";
 import { useAppSettings } from "./useAppSettings";
 import { describeWatch } from "./watchStatus";
 import { LyricsGenerationCard } from "./LyricsGenerationCard";
+import { AudioAnalysisCard } from "./AudioAnalysisCard";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { useNotifications } from "../../contexts/NotificationContext";
@@ -324,6 +325,7 @@ export function SettingsView() {
           </div>
 
           <LyricsGenerationCard settings={settings} updateField={updateField} toggleField={toggleField} />
+          <AudioAnalysisCard settings={settings} updateField={updateField} toggleField={toggleField} />
         </div>
       </section>
 
