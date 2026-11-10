@@ -7,6 +7,7 @@ import { ServerPanel } from "./ServerPanel";
 import { ThisBrowserPanel } from "./ThisBrowserPanel";
 import { useAppSettings } from "./useAppSettings";
 import { describeWatch } from "./watchStatus";
+import { LyricsGenerationCard } from "./LyricsGenerationCard";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLibrary } from "../../contexts/LibraryContext";
 import { useNotifications } from "../../contexts/NotificationContext";
@@ -321,6 +322,8 @@ export function SettingsView() {
               />
             </label>
           </div>
+
+          <LyricsGenerationCard settings={settings} updateField={updateField} toggleField={toggleField} />
         </div>
       </section>
 

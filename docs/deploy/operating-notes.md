@@ -30,6 +30,13 @@
   `/etc/sysctl.d/`). The watcher ignores deleted files (the daily cleanup
   owns removal) and catches up with a normal scan when it starts. A
   read-only mount (`:ro`) is fine.
+- **Lyrics.** Lyrics come from the files (tags and `.lrc`/`.txt` sidecars),
+  from an admin's edits, or — with *Generate lyrics* on under Automation —
+  from the server's own speech model working on the listener's audio. The
+  model is downloaded once into `data/models` (about 300 MB for `base`);
+  generation runs in a background transcode slot and never ahead of a
+  stream. Nothing is fetched from any lyrics service. Details and the
+  licence table are in [Lyrics](../lyrics.md).
 - **Cache size.** The transcode caches are bounded to `STREAM_CACHE_BUDGET_GB`
   (default 20) across HLS and mobile renditions, evicting the least recently
   played entries, and transcodes and uploads are refused when the data

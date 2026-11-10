@@ -30,6 +30,7 @@ from app.models.track import Track
 from app.models.track_artist import TrackArtist
 from app.models.track_cooccurrence import TrackCooccurrence
 from app.models.track_genre import TrackGenre
+from app.models.track_lyrics import TrackLyrics
 from app.models.track_lastfm_similarity import TrackLastfmSimilarity
 from app.models.track_user_stats import TrackUserStats
 from app.services.artist_identity import retire_orphan_artists
@@ -295,6 +296,9 @@ def _delete_tracks(db: Session, track_ids: list[int]) -> None:
             TrackArtist.track_id.in_(chunk)
         ).delete(synchronize_session=False)
 
+        db.query(TrackLyrics).filter(
+            TrackLyrics.track_id.in_(chunk)
+        ).delete(synchronize_session=False)
         db.query(TrackGenre).filter(
             TrackGenre.track_id.in_(chunk)
         ).delete(synchronize_session=False)

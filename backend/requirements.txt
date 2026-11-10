@@ -49,3 +49,8 @@ uvloop==0.22.1
 watchfiles==1.1.1
 websockets==15.0.1
 wheel==0.46.3
+# Lyrics produced on the server (services/lyrics_engine.py): Whisper through
+# CTranslate2, CPU, 8-bit. MIT/BSD/Apache throughout; audio is decoded by
+# ffmpeg as a subprocess, never linked. Optional at import time.
+faster-whisper==1.2.1
+ctranslate2==4.8.5

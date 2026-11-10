@@ -24,3 +24,8 @@ class AppSetting(Base):
     # NOT NULL with a server default, so installs from before it gain the
     # column at boot without a rewrite.
     watch_enabled = Column(Boolean, nullable=False, default=False, server_default=false())
+    # Produce lyrics on this server (timing for known words, words from the
+    # audio) — an admin switch, off by default; the model and a nightly time.
+    lyrics_generation_enabled = Column(Boolean, nullable=False, default=False, server_default=false())
+    lyrics_model = Column(String, nullable=True)
+    lyrics_time = Column(String, nullable=True)

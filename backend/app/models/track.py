@@ -55,6 +55,9 @@ class Track(Base):
     # tag has not been read yet (rows from before the column existed; the
     # scanner reads them once); "" means read, and the file carries none.
     album_artist = Column(String, nullable=True)
+    # When the file was last read for lyrics (its tags and any sidecar).
+    # Null until the first read, which the scanner does as its walk passes.
+    lyrics_checked_at = Column(DateTime, nullable=True)
 
     # The track list sorts on lower(column) and the section jump counts on
     # it; declared here, not only in the SQLite migration runner, so Postgres

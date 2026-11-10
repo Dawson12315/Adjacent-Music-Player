@@ -26,6 +26,7 @@ describe("the app settings round trip", () => {
     expect(Object.keys(payload).sort()).toEqual([
       "cleanup_enabled", "cleanup_time", "lastfm_api_key", "lastfm_api_secret",
       "lastfm_enrichment_enabled", "lastfm_enrichment_time", "lastfm_username",
+      "lyrics_generation_enabled", "lyrics_model", "lyrics_time",
       "scan_enabled", "scan_time", "watch_enabled",
     ]);
     expect(saved.watch_enabled).toBe(true);

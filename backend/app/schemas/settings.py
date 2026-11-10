@@ -13,6 +13,9 @@ class AppSettingsResponse(BaseModel):
     scan_enabled: bool
     scan_time: Optional[str] = None
     watch_enabled: bool = False
+    lyrics_generation_enabled: bool = False
+    lyrics_model: Optional[str] = None
+    lyrics_time: Optional[str] = None
     lastfm_enrichment_enabled: bool
     lastfm_enrichment_time: Optional[str] = None
     lastfm_api_key: Optional[str] = None
@@ -34,6 +37,10 @@ class AppSettingsUpdate(BaseModel):
     # Keep-on-None as well: a client built before the folder watch existed
     # leaves it out, and must not switch it off by doing so.
     watch_enabled: Optional[bool] = None
+    # Also keep-on-None, for the same reason.
+    lyrics_generation_enabled: Optional[bool] = None
+    lyrics_model: Optional[str] = None
+    lyrics_time: Optional[str] = None
     lastfm_enrichment_enabled: bool = False
     lastfm_enrichment_time: Optional[str] = None
     lastfm_api_key: Optional[str] = None

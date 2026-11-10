@@ -36,6 +36,9 @@ def settings_response(settings: AppSetting) -> dict:
         "scan_enabled": settings.scan_enabled,
         "scan_time": settings.scan_time,
         "watch_enabled": bool(settings.watch_enabled),
+        "lyrics_generation_enabled": bool(settings.lyrics_generation_enabled),
+        "lyrics_model": settings.lyrics_model or "base",
+        "lyrics_time": settings.lyrics_time,
         "lastfm_api_key": settings.lastfm_api_key,
         "lastfm_api_secret_set": bool(settings.lastfm_api_secret),
         "lastfm_username": settings.lastfm_username,
@@ -57,6 +60,9 @@ def get_or_create_settings(db: Session) -> AppSetting:
         scan_enabled=False,
         scan_time=None,
         watch_enabled=False,
+        lyrics_generation_enabled=False,
+        lyrics_model=None,
+        lyrics_time=None,
         lastfm_api_key=None,
         lastfm_api_secret=None,
         lastfm_username=None,
@@ -95,6 +101,14 @@ def update_settings(
     settings.scan_time = payload.scan_time
     if payload.watch_enabled is not None:
         settings.watch_enabled = payload.watch_enabled
+    if payload.lyrics_generation_enabled is not None:
+        settings.lyrics_generation_enabled = payload.lyrics_generation_enabled
+    if payload.lyrics_model is not None:
+        from app.services.lyrics_engine import DEFAULT_LYRICS_MODEL, LYRICS_MODELS
+
+        settings.lyrics_model = payload.lyrics_model if payload.lyrics_model in LYRICS_MODELS else DEFAULT_LYRICS_MODEL
+    if payload.lyrics_time is not None:
+        settings.lyrics_time = payload.lyrics_time or None
     settings.lastfm_api_key = payload.lastfm_api_key
     settings.lastfm_username = payload.lastfm_username
     settings.lastfm_enrichment_enabled = payload.lastfm_enrichment_enabled

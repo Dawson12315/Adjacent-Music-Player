@@ -10,6 +10,7 @@ import { Sidebar } from "./Sidebar";
 import { EditTrackModal } from "../features/metadata/EditTrackModal";
 import { PlayerBar } from "../features/player/PlayerBar";
 import { QueuePanel } from "../features/player/QueuePanel";
+import { LyricsPanel } from "../features/player/LyricsPanel";
 import { useLibrary } from "../contexts/LibraryContext";
 import { useNotifications } from "../contexts/NotificationContext";
 import { usePlayer } from "../contexts/PlayerContext";
@@ -22,7 +23,7 @@ const SEARCHABLE_VIEWS = new Set(["tracks", "artists", "albums", "genres", "play
 export function AppLayout() {
   const location = useLocation();
   const { editingTrack } = useLibrary();
-  const { isQueueOpen } = usePlayer();
+  const { isQueueOpen, isLyricsOpen } = usePlayer();
   const { notice, clearNotice } = useNotifications();
   const { activeView, searchQuery, setSearchQuery } = useNavigation();
 
@@ -54,7 +55,7 @@ export function AppLayout() {
       <Sidebar onNavigate={closeDrawer} />
 
       <main className="main-content">
-        <div className={`content-layout ${isQueueOpen ? "content-layout--queue-open" : ""}`}>
+        <div className={`content-layout ${isQueueOpen || isLyricsOpen ? "content-layout--queue-open" : ""}`}>
           <div className="content-layout__main">
             <PageHeader />
 
@@ -76,6 +77,7 @@ export function AppLayout() {
           </div>
 
           {isQueueOpen && <QueuePanel />}
+          {isLyricsOpen && <LyricsPanel />}
         </div>
       </main>
 

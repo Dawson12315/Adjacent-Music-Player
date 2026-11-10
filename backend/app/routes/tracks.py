@@ -33,6 +33,7 @@ from app.models.track import Track
 from app.models.track_artist import TrackArtist
 from app.models.track_cooccurrence import TrackCooccurrence
 from app.models.track_genre import TrackGenre
+from app.models.track_lyrics import TrackLyrics
 from app.models.track_lastfm_similarity import TrackLastfmSimilarity
 from app.models.track_user_stats import TrackUserStats
 from app.models.user import User
@@ -2082,6 +2083,7 @@ def purge_tracks(
     db.query(TrackCooccurrence).delete()
     db.query(TrackUserStats).delete()
     db.query(ListeningEvent).delete()
+    db.query(TrackLyrics).delete()
     db.query(TrackArtist).delete()
     db.query(TrackGenre).delete()
     db.query(Track).delete()

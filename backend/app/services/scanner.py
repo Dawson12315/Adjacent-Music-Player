@@ -11,7 +11,11 @@ from app.services.metadata import extract_track_metadata
 from app.services.metadata_normalizer import normalize_primary_artist
 from app.services.musicbrainz_backfill_runner import start_musicbrainz_backfill_background
 from app.services.track_resolution import resolve_track_fields
+from app.models.track_lyrics import TrackLyrics
+from app.services.lyrics_files import is_sidecar_name, lyrics_from_file
 from app.utils.files import is_supported_audio_file
+import json
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +105,8 @@ def _refresh_track_metadata(db, track_id: int, file_path: Path, stat, base_path=
     track.file_mtime_ns = stat.st_mtime_ns
     track.track_number = fields["track_number"]
     track.disc_number = fields["disc_number"]
+    # Edited tags may include edited lyrics.
+    _read_lyrics_for(db, track_id, file_path)
     track.album_artist = fields["album_artist"] or ""
 
     db.query(TrackArtist).filter(TrackArtist.track_id == track.id).delete(synchronize_session=False)
@@ -109,6 +115,67 @@ def _refresh_track_metadata(db, track_id: int, file_path: Path, stat, base_path=
 
     db.commit()
     return True
+
+
+def _store_lyrics(db, track_id: int, found: dict | None) -> None:
+    """Keep what the file says about its lyrics, without touching a person's
+    corrections: a `user` row outranks the file and stays as it is."""
+    existing = db.query(TrackLyrics).filter(TrackLyrics.track_id == track_id).first()
+    if existing is not None and existing.source == "user":
+        return
+    if found is None:
+        # The file carries no lyrics (any more). A row that came from the
+        # file goes with it; one the server produced from the audio stays.
+        if existing is not None and existing.source in ("embedded", "sidecar"):
+            db.delete(existing)
+        return
+    synced = json.dumps(found["synced"], ensure_ascii=False) if found.get("synced") else None
+    if existing is None:
+        db.add(
+            TrackLyrics(
+                track_id=track_id,
+                source=found["source"],
+                synced_source=found["source"] if synced else None,
+                plain=found["plain"],
+                synced=synced,
+            )
+        )
+        return
+    changed = existing.plain != found["plain"] or (existing.synced or None) != synced or existing.source != found["source"]
+    if not changed:
+        return
+    existing.source = found["source"]
+    existing.plain = found["plain"]
+    # The file's own timing replaces timing the server made; the file's
+    # words without timing keep a timing the server made for those same words.
+    if synced:
+        existing.synced = synced
+        existing.synced_source = found["source"]
+        existing.model = None
+        existing.confidence = None
+    elif existing.synced_source != "aligned":
+        existing.synced = None
+        existing.synced_source = None
+    existing.updated_at = datetime.utcnow()
+
+
+def _read_lyrics_for(db, track_id: int, file_path) -> None:
+    """Read the file's tags and sidecar for lyrics and remember when."""
+    try:
+        found = lyrics_from_file(str(file_path))
+    except Exception as error:  # noqa: BLE001
+        logger.warning("Could not read lyrics for %s -> %s", file_path, error)
+        found = None
+    _store_lyrics(db, track_id, found)
+    db.query(Track).filter(Track.id == track_id).update(
+        {Track.lyrics_checked_at: datetime.utcnow()}, synchronize_session=False
+    )
+
+
+def _checked_ns(checked_at) -> int:
+    if checked_at is None:
+        return -1
+    return int(checked_at.replace(tzinfo=timezone.utc).timestamp() * 1_000_000_000)
 
 
 def resolve_track_number(metadata: dict, file_path: str) -> int:
@@ -262,6 +329,18 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None, with
                                 source="file",
                             )
                         )
+
+                    found = prepared.get("lyrics")
+                    if found:
+                        db.add(
+                            TrackLyrics(
+                                track_id=track.id,
+                                source=found["source"],
+                                synced_source=found["source"] if found.get("synced") else None,
+                                plain=found["plain"],
+                                synced=json.dumps(found["synced"], ensure_ascii=False) if found.get("synced") else None,
+                            )
+                        )
                 written += 1
             except Exception as error:  # noqa: BLE001
                 logger.warning(
@@ -291,7 +370,11 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None, with
         misread: set[str] = set()
         # Rows from before the album-artist tag was stored; read once.
         unread_album_artist: set[str] = set()
-        for track_id, path, size, mtime_ns, number, artist, raw_artist, album_artist in db.query(
+        # Rows never read for lyrics; read as the walk passes them.
+        unread_lyrics: set[str] = set()
+        # Track by the path without its suffix, for matching sidecar files.
+        lyrics_checked_by_stem: dict[str, tuple[int, int]] = {}
+        for track_id, path, size, mtime_ns, number, artist, raw_artist, album_artist, lyrics_checked in db.query(
             Track.id,
             Track.file_path,
             Track.file_size,
@@ -300,6 +383,7 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None, with
             Track.artist,
             Track.raw_artist,
             Track.album_artist,
+            Track.lyrics_checked_at,
         ).all():
             known[path] = (track_id, size, mtime_ns)
             if number is None:
@@ -308,6 +392,9 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None, with
                 misread.add(path)
             elif album_artist is None:
                 unread_album_artist.add(path)
+            if lyrics_checked is None:
+                unread_lyrics.add(path)
+            lyrics_checked_by_stem[str(Path(path).with_suffix(""))] = (track_id, _checked_ns(lyrics_checked))
 
         backfilled = 0
         healed = 0
@@ -325,6 +412,10 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None, with
         skipped_excluded = 0
         pending_updates = 0
         album_artists_read = 0
+        lyrics_read = 0
+        # Sidecar lyrics files met on the walk: stem → mtime, matched to
+        # their tracks afterwards (the walk may meet the .lrc before the .mp3).
+        sidecars_seen: dict[str, int] = {}
 
         stop_walk = False
         for root in roots:
@@ -337,6 +428,10 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None, with
                     continue
 
                 if not S_ISREG(stat.st_mode):
+                    continue
+
+                if is_sidecar_name(file_path):
+                    sidecars_seen[str(file_path.with_suffix(''))] = stat.st_mtime_ns
                     continue
 
                 if not is_supported_audio_file(file_path):
@@ -390,6 +485,11 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None, with
                     elif path_text in unread_album_artist:
                         _backfill_album_artist(db, track_id, file_path)
                         album_artists_read += 1
+                        pending_updates += 1
+                    elif path_text in unread_lyrics:
+                        _read_lyrics_for(db, track_id, file_path)
+                        unread_lyrics.discard(path_text)
+                        lyrics_read += 1
                         pending_updates += 1
                     if pending_updates and pending_updates % 200 == 0:
                         db.commit()
@@ -453,9 +553,11 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None, with
                             "track_number": fields["track_number"],
                             "disc_number": fields["disc_number"],
                             "album_artist": fields["album_artist"] or "",
+                            "lyrics_checked_at": datetime.utcnow(),
                         },
                         "artists": fields["artists"],
                         "genres": fields["genres"],
+                        "lyrics": lyrics_from_file(path_text),
                     }
                 )
                 known_file_paths.add(path_text)
@@ -470,8 +572,25 @@ def scan_directory(base_path: str, limit: int = 20, progress_callback=None, with
         if pending_batch:
             write_batch()
 
+        # A lyrics file beside a known track, new or newer than the last
+        # read: the track's lyrics are read again. Tracks added on this walk
+        # read their sidecar at import, and the walk never stats the sidecar
+        # twice — the mtime came with the walk.
+        sidecars_read = 0
+        for stem, sidecar_mtime_ns in sidecars_seen.items():
+            hit = lyrics_checked_by_stem.get(stem)
+            if hit is None:
+                continue
+            track_id, checked_ns = hit
+            if path_by_id.get(track_id) in unread_lyrics or sidecar_mtime_ns <= checked_ns:
+                continue
+            _read_lyrics_for(db, track_id, Path(path_by_id.get(track_id) or stem))
+            sidecars_read += 1
+            pending_updates += 1
         if pending_updates:
             db.commit()
+        if lyrics_read or sidecars_read:
+            logger.info("Read lyrics for %s tracks, %s from new or changed sidecar files.", lyrics_read, sidecars_read)
         if backfilled:
             logger.info("Numbered %s tracks imported before track numbers were read.", backfilled)
         if healed:

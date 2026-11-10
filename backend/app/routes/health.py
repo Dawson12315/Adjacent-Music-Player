@@ -29,7 +29,7 @@ def session_days() -> int:
 
 # Bumped whenever a client-facing route or field is added. Clients compare it
 # with the version they were built against.
-API_VERSION = 16
+API_VERSION = 17
 
 # The oldest mobile build this API still serves whole.
 MIN_CLIENT_VERSION = "1.0.31"
@@ -82,6 +82,10 @@ CAPABILITIES = [
     # `watch_enabled` on /settings; the folder watcher's state under `watch`
     # in /scan/progress.
     "folder-watch",
+    # GET/PUT/DELETE /tracks/{id}/lyrics, POST /tracks/{id}/lyrics/generate;
+    # lyrics read from the files, corrected in Adjacent, or produced on the
+    # server when the admin turns that on.
+    "lyrics",
 ]
 
 _FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None

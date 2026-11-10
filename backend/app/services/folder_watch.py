@@ -36,6 +36,7 @@ from pathlib import Path
 
 from app.config import settings as config
 from app.services.scan_runner import start_scan_background
+from app.services.lyrics_files import is_sidecar_name
 from app.services.scanner import is_excluded_path
 from app.utils.files import is_supported_audio_file
 
@@ -204,6 +205,9 @@ def relevant_change(path: str, library: str) -> bool:
     if is_excluded_path(parts):
         return False
     if is_supported_audio_file(candidate):
+        return True
+    # A lyrics file arriving beside a track is a change to that track.
+    if is_sidecar_name(candidate):
         return True
     if candidate.is_dir():
         # The folder's own name has to pass the folder rules too; the

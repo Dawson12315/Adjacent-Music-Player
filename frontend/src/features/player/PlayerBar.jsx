@@ -22,6 +22,7 @@ export function PlayerBar() {
     isLoop,
     isMuted,
     isQueueOpen,
+    isLyricsOpen,
     isLiked,
     volume,
     audioProps,
@@ -33,6 +34,7 @@ export function PlayerBar() {
     toggleMute,
     changeVolume,
     toggleQueue,
+    toggleLyrics,
     toggleLike,
     handoff,
     handoffPlayingElsewhere,
@@ -284,6 +286,18 @@ export function PlayerBar() {
             ) : null}
           </div>
         ) : null}
+
+        <button
+          className={`player-bar__icon-button ${
+            isLyricsOpen ? "player-bar__icon-button--active" : ""
+          }`}
+          type="button"
+          aria-label="Lyrics"
+          aria-pressed={isLyricsOpen}
+          onClick={toggleLyrics}
+        >
+          <Icon name="lyrics" size={18} />
+        </button>
 
         <button
           className={`player-bar__icon-button ${

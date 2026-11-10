@@ -72,6 +72,13 @@ def _run_lastfm_enrichment_job():
     run_lastfm_enrichment_with_lock()
 
 
+def _run_lyrics_job():
+    from app.services.lyrics_runner import enqueue_nightly
+
+    added = enqueue_nightly()
+    logger.info("Nightly lyrics: %s tracks queued", added)
+
+
 def _sync_scheduler_jobs():
     global _scheduler
 
@@ -86,6 +93,27 @@ def _sync_scheduler_jobs():
         cleanup_job_id = "scheduled_cleanup"
         scan_job_id = "scheduled_scan"
         lastfm_enrichment_job_id = "scheduled_lastfm_enrichment"
+        lyrics_job_id = "scheduled_lyrics"
+
+        existing_lyrics = _scheduler.get_job(lyrics_job_id)
+        if (
+            settings
+            and getattr(settings, "lyrics_generation_enabled", False)
+            and getattr(settings, "lyrics_time", None)
+        ):
+            lyrics_hour, lyrics_minute = settings.lyrics_time.split(":")
+            _scheduler.add_job(
+                _run_lyrics_job,
+                trigger="cron",
+                hour=int(lyrics_hour),
+                minute=int(lyrics_minute),
+                id=lyrics_job_id,
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+        elif existing_lyrics:
+            _scheduler.remove_job(lyrics_job_id)
 
         existing_cleanup = _scheduler.get_job(cleanup_job_id)
         existing_scan = _scheduler.get_job(scan_job_id)

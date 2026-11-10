@@ -132,6 +132,11 @@ const icons = {
       <circle {...STROKE} cx="16.5" cy="18" r="1.5" />
     </>
   ),
+  lyrics: (
+    <>
+      <path {...STROKE} d="M5 6h14M5 10h10M5 14h14M5 18h8" />
+    </>
+  ),
   volume: (
     <>
       <path {...STROKE} d="M4.5 9.5h3L11.5 6v12L7.5 14.5h-3z" />

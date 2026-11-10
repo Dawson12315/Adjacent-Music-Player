@@ -69,6 +69,7 @@ export function PlayerProvider({ children }) {
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
+  const [isLyricsOpen, setIsLyricsOpen] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
   const [hasRestored, setHasRestored] = useState(false);
   // True after the browser refused to start the audio without a gesture —
@@ -770,7 +771,15 @@ export function PlayerProvider({ children }) {
     setIsMuted(value === 0);
   }, []);
 
-  const toggleQueue = useCallback(() => setIsQueueOpen((previous) => !previous), []);
+  // The queue and the lyrics share the panel beside the player: one at a time.
+  const toggleQueue = useCallback(() => {
+    setIsLyricsOpen(false);
+    setIsQueueOpen((previous) => !previous);
+  }, []);
+  const toggleLyrics = useCallback(() => {
+    setIsQueueOpen(false);
+    setIsLyricsOpen((previous) => !previous);
+  }, []);
 
   const toggleLike = useCallback(async () => {
     if (!currentTrack) return;
@@ -1163,6 +1172,7 @@ export function PlayerProvider({ children }) {
       volume,
       isMuted,
       isQueueOpen,
+      isLyricsOpen,
       isLiked,
       audioProps,
       playTrack,
@@ -1181,6 +1191,7 @@ export function PlayerProvider({ children }) {
       toggleMute,
       changeVolume,
       toggleQueue,
+      toggleLyrics,
       toggleLike,
       clearPlayback,
       replaceTrack,
@@ -1211,6 +1222,7 @@ export function PlayerProvider({ children }) {
       volume,
       isMuted,
       isQueueOpen,
+      isLyricsOpen,
       isLiked,
       audioProps,
       playTrack,
@@ -1229,6 +1241,7 @@ export function PlayerProvider({ children }) {
       toggleMute,
       changeVolume,
       toggleQueue,
+      toggleLyrics,
       toggleLike,
       clearPlayback,
       replaceTrack,
