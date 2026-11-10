@@ -424,6 +424,10 @@ def test_the_nightly_queue_takes_the_most_played_tracks_without_lyrics(client, d
     monkeypatch.setattr(lyrics_runner, "generation_settings", lambda: (True, "base"))
     started = []
     monkeypatch.setattr(lyrics_runner, "_ensure_worker", lambda budget_seconds=None: started.append(budget_seconds))
+    # The shared test database holds every other test's tracks, most without
+    # lyrics and some with play counts; the batch cap must not decide this.
+    monkeypatch.setattr(lyrics_runner, "NIGHTLY_BATCH", 100_000)
+    lyrics_runner._failures.clear()
 
     lib = tmp_path / "nightlib"
     lib.mkdir()
